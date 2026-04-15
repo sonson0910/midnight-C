@@ -80,9 +80,9 @@ namespace midnight::wallet
 
             // Use public key hex as seed for address generation
             std::mt19937 gen(std::hash<std::string>{}(public_key));
-            std::uniform_int_distribution<> dis(0, 61);
-
             const char charset[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+            constexpr size_t charset_size = sizeof(charset) - 1;
+            std::uniform_int_distribution<size_t> dis(0, charset_size - 1);
 
             for (int i = 0; i < 46; ++i)
             {
@@ -101,9 +101,9 @@ namespace midnight::wallet
             std::string address = "z";
 
             std::mt19937 gen(std::hash<std::string>{}(private_key));
-            std::uniform_int_distribution<> dis(0, 61);
-
             const char charset[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+            constexpr size_t charset_size = sizeof(charset) - 1;
+            std::uniform_int_distribution<size_t> dis(0, charset_size - 1);
 
             for (int i = 0; i < 46; ++i)
             {

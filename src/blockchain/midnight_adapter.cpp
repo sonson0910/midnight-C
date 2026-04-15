@@ -76,6 +76,22 @@ namespace midnight::blockchain
         }
     }
 
+    std::string MidnightBlockchain::create_address(const std::string &public_key, uint8_t network_id)
+    {
+        if (public_key.empty())
+        {
+            return "";
+        }
+
+        const std::string prefix = (network_id == 0) ? "mn_addr_preprod1" : "mn_addr_mainnet1";
+        return prefix + public_key.substr(0, std::min<size_t>(public_key.size(), 48));
+    }
+
+    bool MidnightBlockchain::validate_address(const std::string &address)
+    {
+        return address.rfind("mn_addr_", 0) == 0 || address.rfind("addr", 0) == 0;
+    }
+
     Result MidnightBlockchain::build_transaction(
         const std::vector<UTXO> &utxos,
         const std::vector<std::pair<std::string, uint64_t>> &outputs,

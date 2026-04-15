@@ -2,6 +2,7 @@
 #include "midnight/core/logger.hpp"
 #include <sstream>
 #include <numeric>
+#include <iomanip>
 
 namespace midnight::blockchain
 {

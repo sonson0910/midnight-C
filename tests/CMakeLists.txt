@@ -1,5 +1,13 @@
 enable_testing()
 
+include(FetchContent)
+FetchContent_Declare(
+    googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.zip
+    QUIET
+)
+FetchContent_MakeAvailable(googletest)
+
 # Get all test source files
 file(GLOB_RECURSE TEST_SOURCES "*.cpp")
 
@@ -11,6 +19,8 @@ add_executable(midnight-tests
 target_link_libraries(midnight-tests
     PRIVATE
         midnight-core
+        GTest::gtest
+        GTest::gtest_main
 )
 
 target_include_directories(midnight-tests

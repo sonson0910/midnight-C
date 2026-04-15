@@ -130,5 +130,3 @@
 #include "midnight/zk/private_state.hpp"
 #include "midnight/zk/proof_server_resilient_client.hpp"
 #include "midnight/zk/ledger_state_sync.hpp"
-
-#endif // MIDNIGHT_ZK_HPP

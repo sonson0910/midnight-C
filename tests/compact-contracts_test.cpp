@@ -336,11 +336,9 @@ TEST_F(Phase2CompactContractsTest, RequiresWitness_PrivateFunction_ReturnsTrue)
 
     WitnessFunctionProcessor processor(*abi);
 
-    bool
-        requires
-    = processor.requires_witness("vote");
+    bool witness_required = processor.requires_witness("vote");
 
-    EXPECT_TRUE(requires);
+    EXPECT_TRUE(witness_required);
 }
 
 TEST_F(Phase2CompactContractsTest, RequiresWitness_PublicFunction_ReturnsFalse)
@@ -350,11 +348,9 @@ TEST_F(Phase2CompactContractsTest, RequiresWitness_PublicFunction_ReturnsFalse)
 
     WitnessFunctionProcessor processor(*abi);
 
-    bool
-        requires
-    = processor.requires_witness("getVoteCount");
+    bool witness_required = processor.requires_witness("getVoteCount");
 
-    EXPECT_FALSE(requires);
+    EXPECT_FALSE(witness_required);
 }
 
 // ============================================================================

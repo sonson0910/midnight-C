@@ -130,6 +130,7 @@ namespace midnight::blockchain
         size_t get_size() const;
 
     private:
+        uint64_t calculate_min_fee() const;
         std::string tx_id_;
         std::vector<Input> inputs_;
         std::vector<Output> outputs_;

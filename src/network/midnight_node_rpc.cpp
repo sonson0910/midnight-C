@@ -289,9 +289,11 @@ namespace midnight::network
         params.utxo_cost_per_byte = js.value("utxoCostPerByte", 4310UL);
         params.max_tx_size = js.value("maxTxSize", 16384UL);
         params.max_block_size = js.value("maxBlockSize", 65536UL);
-        params.max_value_size = js.value("maxValueSize", 5000UL);
-        params.price_memory = js.value("priceMemory", 0.0577);
-        params.price_steps = js.value("priceSteps", 0.0000721);
+        params.min_pool_cost = js.value("minPoolCost", 0UL);
+        params.coins_per_utxo_word = js.value("coinsPerUtxoWord", 0U);
+        constexpr double kFixedPointScale = 1'000'000.0;
+        params.price_memory = static_cast<uint64_t>(js.value("priceMemory", 0.0577) * kFixedPointScale);
+        params.price_steps = static_cast<uint64_t>(js.value("priceSteps", 0.0000721) * kFixedPointScale);
 
         return params;
     }

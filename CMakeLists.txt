@@ -31,6 +31,37 @@ find_package(fmt 7.1.0 QUIET)
 # Include FetchContent for header-only libraries
 include(FetchContent)
 
+if(NOT nlohmann_json_FOUND)
+    message(STATUS "Fetching nlohmann_json...")
+    FetchContent_Declare(
+        nlohmann_json
+        URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+        QUIET
+    )
+    FetchContent_MakeAvailable(nlohmann_json)
+endif()
+
+if(NOT fmt_FOUND)
+    message(STATUS "Fetching fmt...")
+    FetchContent_Declare(
+        fmt
+        URL https://github.com/fmtlib/fmt/archive/refs/tags/11.1.4.zip
+        QUIET
+    )
+    FetchContent_MakeAvailable(fmt)
+endif()
+
+find_package(jsoncpp QUIET)
+if(NOT jsoncpp_FOUND)
+    message(STATUS "Fetching jsoncpp...")
+    FetchContent_Declare(
+        jsoncpp
+        URL https://github.com/open-source-parsers/jsoncpp/archive/refs/tags/1.9.6.zip
+        QUIET
+    )
+    FetchContent_MakeAvailable(jsoncpp)
+endif()
+
 # Fetch cpp-httplib (header-only HTTP client library)
 if(NOT DEFINED HTTPLIB_SOURCE_DIR)
     message(STATUS "Fetching cpp-httplib...")
@@ -65,7 +96,5 @@ install(
     DESTINATION include
 )
 
-# Export targets
-export(TARGETS midnight-core
-    FILE ${CMAKE_BINARY_DIR}/MidnightTargets.cmake
-)
+# Export targets when dependencies are available in an installable export set.
+# Disabled for local/dev builds that fetch third-party dependencies.

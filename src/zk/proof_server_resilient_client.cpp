@@ -31,7 +31,7 @@ namespace midnight::zk
 
     ProofResult ProofServerResilientClient::generate_proof_resilient(
         const std::string &circuit_name,
-        const std::string &circuit_data,
+        const std::vector<uint8_t> &circuit_data,
         const PublicInputs &inputs,
         const WitnessOutput &witnesses)
     {
@@ -62,7 +62,11 @@ namespace midnight::zk
                 total_operations_++;
 
                 // Perform operation
-                result = client_->generate_proof(circuit_name, circuit_data, inputs, witnesses);
+                result = client_->generate_proof(
+                    circuit_name,
+                    circuit_data,
+                    inputs,
+                    {{"default", witnesses}});
 
                 // Success
                 successful_operations_++;
@@ -539,7 +543,7 @@ namespace midnight::zk
             }
         }
 
-        total_retries_++;
+        const_cast<ProofServerResilientClient *>(this)->total_retries_++;
         return std::chrono::milliseconds(static_cast<int64_t>(backoff_ms));
     }
 
@@ -589,7 +593,7 @@ namespace midnight::zk
                     req.circuit_name,
                     req.circuit_data,
                     req.inputs,
-                    req.witnesses);
+                    {{"default", req.witnesses}});
                 request_queue_.pop();
                 successful_operations_++;
             }

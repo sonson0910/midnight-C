@@ -141,8 +141,7 @@ namespace midnight::network
             {
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
                 httplib::SSLClient cli(host, port);
-                cli.connection_timeout(std::chrono::milliseconds(timeout_ms_), 0);
-                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_), 0);
+                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
                 return cli.is_valid();
 #else
                 midnight::g_logger->warn("HTTPS not supported - OpenSSL required");
@@ -152,8 +151,7 @@ namespace midnight::network
             else
             {
                 httplib::Client cli(host, port);
-                cli.connection_timeout(std::chrono::milliseconds(timeout_ms_), 0);
-                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_), 0);
+                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
                 return cli.is_valid();
             }
         }
@@ -212,8 +210,7 @@ namespace midnight::network
             {
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
                 httplib::SSLClient cli(host, port);
-                cli.set_connection_timeout(
-                    std::chrono::milliseconds(timeout_ms_), 0);
+                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
 
                 auto res = cli.Post(
                     request_path.c_str(),
@@ -235,8 +232,7 @@ namespace midnight::network
             else
             {
                 httplib::Client cli(host, port);
-                cli.set_connection_timeout(
-                    std::chrono::milliseconds(timeout_ms_), 0);
+                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
 
                 auto res = cli.Post(
                     request_path.c_str(),
@@ -306,8 +302,7 @@ namespace midnight::network
             {
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
                 httplib::SSLClient cli(host, port);
-                cli.set_connection_timeout(
-                    std::chrono::milliseconds(timeout_ms_), 0);
+                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
 
                 auto res = cli.Get(request_path.c_str());
 
@@ -326,8 +321,7 @@ namespace midnight::network
             else
             {
                 httplib::Client cli(host, port);
-                cli.set_connection_timeout(
-                    std::chrono::milliseconds(timeout_ms_), 0);
+                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
 
                 auto res = cli.Get(request_path.c_str());
 

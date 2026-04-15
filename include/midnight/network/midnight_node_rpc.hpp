@@ -124,7 +124,7 @@ namespace midnight::network
     private:
         std::unique_ptr<NetworkClient> client_;
         uint32_t request_id_counter_ = 1;
-        std::vector<std::string> rpc_paths_ = {"/", "/rpc", "/api"};
+        std::vector<std::string> rpc_paths_ = {"/", "/rpc"};
 
         /**
          * @brief Make JSON-RPC 2.0 call

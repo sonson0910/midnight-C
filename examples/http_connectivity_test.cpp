@@ -69,7 +69,7 @@ int main()
                     {"params", nlohmann::json::array()},
                     {"id", 1}};
 
-                auto response = testnet_client.post_json("/api", health_request);
+                auto response = testnet_client.post_json("/", health_request);
 
                 if (response.contains("result"))
                 {

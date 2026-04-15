@@ -104,8 +104,10 @@ find_package(Sodium QUIET)
 
 target_link_libraries(midnight-core
     PUBLIC
-        $<$<BOOL:${nlohmann_json_FOUND}>:nlohmann_json::nlohmann_json>
-        $<$<BOOL:${fmt_FOUND}>:fmt::fmt>
+        nlohmann_json::nlohmann_json
+        fmt::fmt
+        $<$<TARGET_EXISTS:jsoncpp_lib>:jsoncpp_lib>
+        $<$<TARGET_EXISTS:JsonCpp::JsonCpp>:JsonCpp::JsonCpp>
     PRIVATE
         $<$<BOOL:${OPENSSL_FOUND}>:OpenSSL::SSL>
         $<$<BOOL:${OPENSSL_FOUND}>:OpenSSL::Crypto>

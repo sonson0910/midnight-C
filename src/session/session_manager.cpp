@@ -1,17 +1,36 @@
 #include "midnight/session/session_manager.hpp"
-#include <uuid/uuid.h>
-#include <cstring>
+#include <array>
+#include <iomanip>
+#include <random>
+#include <sstream>
 
 namespace midnight
 {
 
     std::string generate_uuid()
     {
-        char uuid_str[37];
-        uuid_t uuid;
-        uuid_generate(uuid);
-        uuid_unparse(uuid, uuid_str);
-        return std::string(uuid_str);
+        std::array<uint8_t, 16> bytes{};
+        std::random_device rd;
+        for (auto &byte : bytes)
+        {
+            byte = static_cast<uint8_t>(rd());
+        }
+
+        // RFC 4122 version 4 UUID bits
+        bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0F) | 0x40);
+        bytes[8] = static_cast<uint8_t>((bytes[8] & 0x3F) | 0x80);
+
+        std::ostringstream ss;
+        ss << std::hex << std::setfill('0');
+        for (size_t i = 0; i < bytes.size(); ++i)
+        {
+            ss << std::setw(2) << static_cast<unsigned int>(bytes[i]);
+            if (i == 3 || i == 5 || i == 7 || i == 9)
+            {
+                ss << '-';
+            }
+        }
+        return ss.str();
     }
 
     SessionManager::SessionId SessionManager::create_session(const std::string &device_id)
