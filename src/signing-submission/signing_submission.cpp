@@ -16,6 +16,8 @@ namespace midnight::phase5
 {
     namespace
     {
+        constexpr uint32_t kSubmitRpcTimeoutMs = 10000;
+
         std::string to_hex(const std::vector<uint8_t> &data)
         {
             static const char *hex = "0123456789abcdef";
@@ -313,7 +315,9 @@ namespace midnight::phase5
             auto response = rpc_submit_extrinsic(signed_tx);
             if (response.isMember("error"))
             {
-                throw std::runtime_error("RPC error: " + response["error"].toStyledString());
+                Json::StreamWriterBuilder writer;
+                writer["indentation"] = "";
+                throw std::runtime_error("RPC error: " + Json::writeString(writer, response["error"]));
             }
             if (!response.isMember("result"))
             {
@@ -400,7 +404,7 @@ namespace midnight::phase5
             return response;
         }
 
-        midnight::network::NetworkClient client(rpc_url_, 10000);
+        midnight::network::NetworkClient client(rpc_url_, kSubmitRpcTimeoutMs);
         nlohmann::json request = {
             {"jsonrpc", "2.0"},
             {"id", 1},

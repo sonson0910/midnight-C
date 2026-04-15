@@ -12,6 +12,12 @@
 
 namespace midnight::phase3
 {
+    namespace
+    {
+        constexpr uint32_t kIndexerRpcTimeoutMs = 8000;
+        constexpr size_t kMaxTxInputs = 256;
+        constexpr size_t kMaxTxOutputs = 256;
+    } // namespace
 
     // ============================================================================
     // UtxoSetManager Implementation
@@ -172,7 +178,7 @@ namespace midnight::phase3
             return response;
         }
 
-        midnight::network::NetworkClient client(indexer_url_, 8000);
+        midnight::network::NetworkClient client(indexer_url_, kIndexerRpcTimeoutMs);
         nlohmann::json payload = {
             {"query", query}
         };
@@ -231,16 +237,14 @@ namespace midnight::phase3
 
     bool TransactionBuilder::validate()
     {
-        constexpr size_t MAX_INPUTS = 256;
-        constexpr size_t MAX_OUTPUTS = 256;
         if (tx_.inputs.empty() || tx_.outputs.empty())
         {
             std::cerr << "Transaction must have inputs and outputs" << std::endl;
             return false;
         }
 
-        if (tx_.inputs.size() > MAX_INPUTS ||
-            tx_.outputs.size() > MAX_OUTPUTS)
+        if (tx_.inputs.size() > kMaxTxInputs ||
+            tx_.outputs.size() > kMaxTxOutputs)
         {
             std::cerr << "Too many inputs or outputs" << std::endl;
             return false;
