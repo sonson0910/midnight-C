@@ -3,6 +3,10 @@
 #include "midnight/blockchain/midnight_adapter.hpp"
 
 using namespace midnight::blockchain;
+namespace
+{
+    constexpr size_t kBech32ChecksumLength = 6;
+}
 
 namespace midnight::blockchain
 {
@@ -20,7 +24,7 @@ TEST(WalletGenerationTest, CreateFromMnemonic_GeneratesMidnightBech32mAddress)
     const std::string address = wallet.get_address();
     EXPECT_FALSE(address.empty());
     EXPECT_EQ(address.rfind("mn_addr_preprod1", 0), 0u);
-    EXPECT_GT(address.size(), std::string("mn_addr_preprod1").size() + 6);
+    EXPECT_GT(address.size(), std::string("mn_addr_preprod1").size() + kBech32ChecksumLength);
 }
 
 TEST(WalletGenerationTest, GenerateAddress_SamePath_IsDeterministic)

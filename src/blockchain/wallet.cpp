@@ -46,7 +46,7 @@ namespace midnight::blockchain
             return ret;
         }
 
-        std::vector<uint8_t> convert_bits(const uint8_t *data, size_t data_len, int from_bits, int to_bits)
+        std::vector<uint8_t> convert_bits(const uint8_t *data, size_t data_len, int from_bits, int to_bits, bool pad)
         {
             int acc = 0;
             int bits = 0;
@@ -67,9 +67,17 @@ namespace midnight::blockchain
                 }
             }
 
-            if (bits != 0)
+            if (pad)
             {
-                ret.push_back((acc << (to_bits - bits)) & maxv);
+                if (bits != 0)
+                {
+                    ret.push_back(static_cast<uint8_t>((acc << (to_bits - bits)) & maxv));
+                }
+            }
+            else if (bits >= from_bits || ((acc << (to_bits - bits)) & maxv) != 0)
+            {
+                // Bech32m requires trailing pad bits to be zero when padding is disabled.
+                return {};
             }
 
             return ret;
@@ -79,7 +87,7 @@ namespace midnight::blockchain
         {
             std::vector<uint8_t> data;
             data.push_back(0); // witness version 0
-            auto converted = convert_bits(payload.data(), payload.size(), 8, 5);
+            auto converted = convert_bits(payload.data(), payload.size(), 8, 5, true);
             data.insert(data.end(), converted.begin(), converted.end());
 
             auto values = bech32_hrp_expand(hrp);
@@ -109,7 +117,7 @@ namespace midnight::blockchain
         std::array<uint8_t, 32> derive_mock_key_material(const std::string &seed_material)
         {
             std::array<uint8_t, 32> out{};
-            uint64_t state = 1469598103934665603ULL; // FNV-1a offset
+            uint64_t state = 1469598103934665603ULL; // FNV-1a offset basis
             for (unsigned char c : seed_material)
             {
                 state ^= c;
