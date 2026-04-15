@@ -12,8 +12,16 @@
 #include <random>
 #include <cstring>
 #include <ctime>
+#include <chrono>
 #include <string>
 #include <vector>
+#include <memory>
+
+#include "midnight/network/network_config.hpp"
+#include "midnight/network/network_client.hpp"
+#include "midnight/network/midnight_node_rpc.hpp"
+#include "midnight/zk/proof_server_client.hpp"
+#include "midnight/zk/proof_server_resilient_client.hpp"
 
 namespace midnight::wallet
 {
@@ -248,6 +256,133 @@ int main(int argc, char *argv[])
     std::string output_file = "";
     bool save_private_key = false;
     bool show_private_key = false;
+    bool run_preprod_doctor = false;
+
+    struct DoctorCheck
+    {
+        std::string name;
+        std::string endpoint;
+        bool passed = false;
+        std::string detail;
+    };
+
+    auto print_doctor_result = [](const DoctorCheck &check)
+    {
+        std::cout << (check.passed ? "✅ PASS " : "❌ FAIL ") << check.name << "\n";
+        std::cout << "   Endpoint: " << check.endpoint << "\n";
+        std::cout << "   Detail: " << check.detail << "\n";
+    };
+
+    auto run_doctor = [&]() -> int
+    {
+        using midnight::network::NetworkConfig;
+        using midnight::network::MidnightNodeRPC;
+        using midnight::network::NetworkClient;
+        using midnight::zk::ProofServerClient;
+        using midnight::zk::ProofServerResilientClient;
+        using midnight::zk::ResilienceConfig;
+
+        const auto testnet = NetworkConfig::Network::TESTNET;
+        const std::string node_endpoint = NetworkConfig::get_rpc_endpoint(testnet);
+        const std::string indexer_endpoint = "https://indexer.preprod.midnight.network/api/v3/graphql";
+        const std::string faucet_endpoint = NetworkConfig::get_faucet_url(testnet);
+        const std::string proof_endpoint = "http://127.0.0.1:6300";
+
+        std::cout << "=== Midnight Preprod Doctor ===\n";
+        std::cout << "Checklist: node / indexer / proof server / faucet\n\n";
+
+        std::vector<DoctorCheck> checks;
+        checks.reserve(4);
+
+        DoctorCheck node_check{"Node RPC", node_endpoint, false, "Not checked"};
+        try
+        {
+            MidnightNodeRPC node(node_endpoint, 5000);
+            auto node_info = node.get_node_info();
+            node_check.passed = !node_info.is_null();
+            node_check.detail = node_check.passed ? "JSON-RPC reachable" : "Empty response";
+        }
+        catch (const std::exception &e)
+        {
+            node_check.detail = e.what();
+        }
+        checks.push_back(node_check);
+
+        DoctorCheck indexer_check{"Indexer GraphQL", indexer_endpoint, false, "Not checked"};
+        try
+        {
+            NetworkClient indexer(indexer_endpoint, 5000);
+            nlohmann::json payload = {{"query", "query { __typename }"}};
+            auto response = indexer.post_json("/", payload);
+            indexer_check.passed = response.contains("data") || response.contains("errors");
+            indexer_check.detail = indexer_check.passed ? "GraphQL endpoint reachable" : "Unexpected response";
+        }
+        catch (const std::exception &e)
+        {
+            indexer_check.detail = e.what();
+        }
+        checks.push_back(indexer_check);
+
+        DoctorCheck proof_check{"Proof server", proof_endpoint, false, "Not checked"};
+        try
+        {
+            ProofServerClient::Config cfg;
+            cfg.host = "127.0.0.1";
+            cfg.port = 6300;
+            cfg.timeout_ms = std::chrono::milliseconds(3000);
+            auto proof_client = std::make_shared<ProofServerClient>(cfg);
+            ResilienceConfig resilience;
+            resilience.max_retries = 1;
+            resilience.initial_backoff_ms = std::chrono::milliseconds(100);
+            ProofServerResilientClient resilient(proof_client, resilience);
+            proof_check.passed = resilient.connect_resilient() || resilient.perform_health_check();
+            proof_check.detail = proof_check.passed ? "Proof server reachable" : proof_client->get_last_error();
+        }
+        catch (const std::exception &e)
+        {
+            proof_check.detail = e.what();
+        }
+        checks.push_back(proof_check);
+
+        DoctorCheck faucet_check{"Faucet", faucet_endpoint, false, "Not checked"};
+        try
+        {
+            NetworkClient faucet(faucet_endpoint, 5000);
+            faucet_check.passed = faucet.is_connected();
+            faucet_check.detail = faucet_check.passed
+                                      ? "Endpoint parsed and reachable by client"
+                                      : "Connectivity check failed";
+        }
+        catch (const std::exception &e)
+        {
+            faucet_check.detail = e.what();
+        }
+        checks.push_back(faucet_check);
+
+        int passed_count = 0;
+        for (const auto &check : checks)
+        {
+            print_doctor_result(check);
+            std::cout << "\n";
+            if (check.passed)
+            {
+                ++passed_count;
+            }
+        }
+
+        const bool all_passed = passed_count == static_cast<int>(checks.size());
+        std::cout << "Summary: " << passed_count << "/" << checks.size() << " checks passed\n";
+        std::cout << "TX flow mode support: mock + real RPC\n";
+        if (all_passed)
+        {
+            std::cout << "Result: ✅ Ready for end-to-end preprod validation.\n";
+            return 0;
+        }
+
+        std::cout << "Result: ⚠️  Environment not fully ready for end-to-end preprod validation.\n";
+        std::cout << "Hint: bring up proof server and retry `wallet-generator --preprod-doctor`.\n";
+        return 2;
+    };
 
     // Parse arguments
     for (int i = 1; i < argc; ++i)
@@ -279,13 +414,24 @@ int main(int argc, char *argv[])
             std::cout << "  --output-file FILE       Save wallet JSON to file\n";
             std::cout << "  --save-private-key       Save private key to PEM file\n";
             std::cout << "  --show-private-key       Display private key in output\n";
+            std::cout << "  --preprod-doctor         Run preprod connectivity checklist\n";
             std::cout << "  --help                   Show this help message\n\n";
             std::cout << "Examples:\n";
             std::cout << "  wallet-generator\n";
             std::cout << "  wallet-generator --name my-wallet --output-file wallet.json\n";
             std::cout << "  wallet-generator --save-private-key --show-private-key\n";
+            std::cout << "  wallet-generator --preprod-doctor\n";
             return 0;
         }
+        else if (arg == "--preprod-doctor")
+        {
+            run_preprod_doctor = true;
+        }
+    }
+
+    if (run_preprod_doctor)
+    {
+        return run_doctor();
     }
 
     // Generate wallet

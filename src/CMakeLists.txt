@@ -77,6 +77,11 @@ if(ENABLE_BLOCKCHAIN)
         blockchain/block.cpp
         blockchain/wallet.cpp
         blockchain/midnight_adapter.cpp
+        utxo-transactions/utxo_transactions.cpp
+        compact-contracts/compact_contracts.cpp
+        zk-proofs/zk_proofs.cpp
+        monitoring-finality/monitoring_finality.cpp
+        signing-submission/signing_submission.cpp
     )
 endif()
 
