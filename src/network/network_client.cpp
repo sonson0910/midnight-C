@@ -121,9 +121,11 @@ namespace midnight::network
 
             // Extract host and port
             std::string host = url;
+            std::string request_path = "/";
             if (url.find('/') != std::string::npos)
             {
                 host = url.substr(0, url.find('/'));
+                request_path = url.substr(url.find('/'));
             }
 
             // Check if host has port
@@ -134,15 +136,23 @@ namespace midnight::network
                 host = host.substr(0, host.find(':'));
             }
 
+            request_path = normalize_joined_path(request_path, "/");
+
             midnight::g_logger->debug("Checking connectivity to: " + host + ":" + std::to_string(port));
 
-            // Create client and test connection with short timeout
+            // Probe endpoint with a lightweight GET request to verify real connectivity
             if (is_https)
             {
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
                 httplib::SSLClient cli(host, port);
                 cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
-                return cli.is_valid();
+                auto res = cli.Get(request_path.c_str());
+                if (res)
+                {
+                    return true;
+                }
+                midnight::g_logger->debug("Connectivity probe failed for HTTPS endpoint");
+                return false;
 #else
                 midnight::g_logger->warn("HTTPS not supported - OpenSSL required");
                 return false;
@@ -152,7 +162,13 @@ namespace midnight::network
             {
                 httplib::Client cli(host, port);
                 cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
-                return cli.is_valid();
+                auto res = cli.Get(request_path.c_str());
+                if (res)
+                {
+                    return true;
+                }
+                midnight::g_logger->debug("Connectivity probe failed for HTTP endpoint");
+                return false;
             }
         }
         catch (const std::exception &e)
