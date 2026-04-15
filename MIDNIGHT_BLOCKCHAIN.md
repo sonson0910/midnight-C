@@ -16,7 +16,7 @@ The SDK follows best practices from mature blockchain libraries:
 
 ## Core Components
 
-### BlockchainManager
+### MidnightBlockchain
 
 Main interface for blockchain operations:
 
@@ -25,9 +25,9 @@ midnight::blockchain::ProtocolParams params;
 params.min_fee_a = 44;
 params.min_fee_b = 155381;
 
-midnight::blockchain::BlockchainManager blockchain;
-blockchain.initialize("testnet", params);
-blockchain.connect("http://midnight-node:5678");
+midnight::blockchain::MidnightBlockchain blockchain;
+blockchain.initialize("preprod", params);
+blockchain.connect("https://rpc.preprod.midnight.network");
 
 // Query UTXOs
 auto utxos = blockchain.query_utxos("midnight_address");
@@ -143,7 +143,7 @@ if (result.success) {
 ### Example 1: Simple Transfer
 
 ```cpp
-#include "midnight/blockchain/cardano_adapter.hpp"
+#include "midnight/blockchain/midnight_adapter.hpp"
 #include "midnight/blockchain/wallet.hpp"
 
 // Create wallet
@@ -152,9 +152,9 @@ wallet.create_from_mnemonic(mnemonic, "");
 
 // Initialize blockchain
 midnight::blockchain::ProtocolParams params = {...};
-midnight::blockchain::BlockchainManager blockchain;
-blockchain.initialize("testnet", params);
-blockchain.connect("http://midnight-testnet:5678");
+midnight::blockchain::MidnightBlockchain blockchain;
+blockchain.initialize("preprod", params);
+blockchain.connect("https://rpc.preprod.midnight.network");
 
 // Query UTXOs
 std::string address = wallet.get_address();

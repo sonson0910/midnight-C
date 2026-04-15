@@ -16,6 +16,8 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <array>
+#include <cctype>
 
 #include "midnight/network/network_config.hpp"
 #include "midnight/network/network_client.hpp"
@@ -71,54 +73,180 @@ namespace midnight::wallet
     };
 
     /**
-     * Generate sr25519 address (unshield format)
-     * Midnight unshield addresses start with "5" (ss58 prefix for sr25519)
+     * Generate Midnight Bech32m addresses for preprod.
      */
     class AddressGenerator
     {
     public:
-        /**
-         * Generate unshield address from public key
-         * Format: 5[A-Za-z0-9]{46} (ss58 encoded)
-         */
         static std::string generate_unshield_address(const std::string &public_key)
         {
-            // Mock: Generate valid-looking ss58 address
-            std::string address = "5";
-
-            // Use public key hex as seed for address generation
-            std::mt19937 gen(std::hash<std::string>{}(public_key));
-            const char charset[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-            constexpr size_t charset_size = sizeof(charset) - 1;
-            std::uniform_int_distribution<size_t> dis(0, charset_size - 1);
-
-            for (int i = 0; i < 46; ++i)
+            std::array<uint8_t, 32> payload{};
+            if (!hex_to_bytes32(public_key, payload))
             {
-                address += charset[dis(gen)];
+                return "";
             }
-
-            return address;
+            return bech32m_encode("mn_addr_preprod", payload);
         }
 
-        /**
-         * Generate shielded address (private, for receiving private transactions)
-         * Format: Different from unshield, encrypted
-         */
         static std::string generate_shielded_address(const std::string &private_key)
         {
-            std::string address = "z";
-
-            std::mt19937 gen(std::hash<std::string>{}(private_key));
-            const char charset[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-            constexpr size_t charset_size = sizeof(charset) - 1;
-            std::uniform_int_distribution<size_t> dis(0, charset_size - 1);
-
-            for (int i = 0; i < 46; ++i)
+            std::array<uint8_t, 32> payload{};
+            if (!hex_to_bytes32(private_key, payload))
             {
-                address += charset[dis(gen)];
+                return "";
             }
 
-            return address;
+            // Mock transformation to derive a distinct shielded payload.
+            for (size_t i = 0; i < payload.size(); ++i)
+            {
+                payload[i] = static_cast<uint8_t>(payload[i] ^ static_cast<uint8_t>((i * 17U + 0xA5U) & 0xFFU));
+            }
+
+            return bech32m_encode("mn_shield-addr_preprod", payload);
+        }
+
+    private:
+        static constexpr uint32_t kBech32mConst = 0x2BC830A3;
+        static constexpr const char *kBech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+        static uint32_t bech32_polymod(const std::vector<uint8_t> &values)
+        {
+            static constexpr uint32_t gen[5] = {0x3B6A57B2, 0x26508E6D, 0x1EA119FA, 0x3D4233DD, 0x2A1462B3};
+            uint32_t chk = 1;
+            for (auto value : values)
+            {
+                const uint32_t top = chk >> 25;
+                chk = ((chk & 0x1FFFFFF) << 5) ^ value;
+                for (int i = 0; i < 5; ++i)
+                {
+                    chk ^= ((top >> i) & 1) ? gen[i] : 0;
+                }
+            }
+            return chk;
+        }
+
+        static std::vector<uint8_t> bech32_hrp_expand(const std::string &hrp)
+        {
+            std::vector<uint8_t> ret;
+            ret.reserve(hrp.size() * 2 + 1);
+            for (unsigned char c : hrp)
+            {
+                ret.push_back(c >> 5);
+            }
+            ret.push_back(0);
+            for (unsigned char c : hrp)
+            {
+                ret.push_back(c & 31);
+            }
+            return ret;
+        }
+
+        static std::vector<uint8_t> convert_bits(const uint8_t *data, size_t data_len, int from_bits, int to_bits, bool pad)
+        {
+            int acc = 0;
+            int bits = 0;
+            const int maxv = (1 << to_bits) - 1;
+            const int max_acc = (1 << (from_bits + to_bits - 1)) - 1;
+            std::vector<uint8_t> ret;
+            ret.reserve((data_len * from_bits + to_bits - 1) / to_bits);
+
+            for (size_t i = 0; i < data_len; ++i)
+            {
+                const int value = data[i];
+                acc = ((acc << from_bits) | value) & max_acc;
+                bits += from_bits;
+                while (bits >= to_bits)
+                {
+                    bits -= to_bits;
+                    ret.push_back((acc >> bits) & maxv);
+                }
+            }
+
+            if (pad)
+            {
+                if (bits != 0)
+                {
+                    ret.push_back(static_cast<uint8_t>((acc << (to_bits - bits)) & maxv));
+                }
+            }
+            else if (bits >= from_bits || ((acc << (to_bits - bits)) & maxv) != 0)
+            {
+                return {};
+            }
+
+            return ret;
+        }
+
+        static std::string bech32m_encode(const std::string &hrp, const std::array<uint8_t, 32> &payload)
+        {
+            std::vector<uint8_t> data;
+            data.push_back(0);
+            auto converted = convert_bits(payload.data(), payload.size(), 8, 5, true);
+            data.insert(data.end(), converted.begin(), converted.end());
+
+            auto values = bech32_hrp_expand(hrp);
+            values.insert(values.end(), data.begin(), data.end());
+            values.insert(values.end(), 6, 0);
+            const uint32_t polymod = bech32_polymod(values) ^ kBech32mConst;
+
+            std::array<uint8_t, 6> checksum{};
+            for (int i = 0; i < 6; ++i)
+            {
+                checksum[i] = (polymod >> (5 * (5 - i))) & 31;
+            }
+
+            std::string out = hrp + "1";
+            out.reserve(hrp.size() + 1 + data.size() + checksum.size());
+            for (auto v : data)
+            {
+                out.push_back(kBech32Charset[v]);
+            }
+            for (auto v : checksum)
+            {
+                out.push_back(kBech32Charset[v]);
+            }
+            return out;
+        }
+
+        static bool hex_to_bytes32(const std::string &hex_input, std::array<uint8_t, 32> &out)
+        {
+            std::string hex = hex_input;
+            if (hex.rfind("0x", 0) == 0 || hex.rfind("0X", 0) == 0)
+            {
+                hex = hex.substr(2);
+            }
+
+            if (hex.size() < 64)
+            {
+                return false;
+            }
+
+            auto nibble = [](char c) -> int
+            {
+                if (c >= '0' && c <= '9')
+                {
+                    return c - '0';
+                }
+                const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (lower >= 'a' && lower <= 'f')
+                {
+                    return 10 + (lower - 'a');
+                }
+                return -1;
+            };
+
+            for (size_t i = 0; i < out.size(); ++i)
+            {
+                const int hi = nibble(hex[i * 2]);
+                const int lo = nibble(hex[i * 2 + 1]);
+                if (hi < 0 || lo < 0)
+                {
+                    return false;
+                }
+                out[i] = static_cast<uint8_t>((hi << 4) | lo);
+            }
+
+            return true;
         }
     };
 
@@ -268,7 +396,7 @@ int main(int argc, char *argv[])
 
     auto print_doctor_result = [](const DoctorCheck &check)
     {
-        std::cout << (check.passed ? "✅ PASS " : "❌ FAIL ") << check.name << "\n";
+        std::cout << (check.passed ? "[PASS] " : "[FAIL] ") << check.name << "\n";
         std::cout << "   Endpoint: " << check.endpoint << "\n";
         std::cout << "   Detail: " << check.detail << "\n";
     };
@@ -278,9 +406,6 @@ int main(int argc, char *argv[])
         using midnight::network::NetworkConfig;
         using midnight::network::MidnightNodeRPC;
         using midnight::network::NetworkClient;
-        using midnight::zk::ProofServerClient;
-        using midnight::zk::ProofServerResilientClient;
-        using midnight::zk::ResilienceConfig;
 
         const auto testnet = NetworkConfig::Network::TESTNET;
         const std::string node_endpoint = NetworkConfig::get_rpc_endpoint(testnet);
@@ -326,17 +451,9 @@ int main(int argc, char *argv[])
         DoctorCheck proof_check{"Proof server", proof_endpoint, false, "Not checked"};
         try
         {
-            ProofServerClient::Config cfg;
-            cfg.host = "127.0.0.1";
-            cfg.port = 6300;
-            cfg.timeout_ms = std::chrono::milliseconds(3000);
-            auto proof_client = std::make_shared<ProofServerClient>(cfg);
-            ResilienceConfig resilience;
-            resilience.max_retries = 1;
-            resilience.initial_backoff_ms = std::chrono::milliseconds(100);
-            ProofServerResilientClient resilient(proof_client, resilience);
-            proof_check.passed = resilient.connect_resilient();
-            proof_check.detail = proof_check.passed ? "Proof server reachable" : proof_client->get_last_error();
+            NetworkClient proof(proof_endpoint, 3000);
+            proof_check.passed = proof.is_connected();
+            proof_check.detail = proof_check.passed ? "HTTP endpoint reachable" : "Connectivity check failed";
         }
         catch (const std::exception &e)
         {
@@ -375,11 +492,11 @@ int main(int argc, char *argv[])
         std::cout << "TX flow mode support: mock + real RPC\n";
         if (all_passed)
         {
-            std::cout << "Result: ✅ Ready for end-to-end preprod validation.\n";
+            std::cout << "Result: READY for end-to-end preprod validation.\n";
             return 0;
         }
 
-        std::cout << "Result: ⚠️  Environment not fully ready for end-to-end preprod validation.\n";
+        std::cout << "Result: NOT READY - environment is not fully prepared for end-to-end preprod validation.\n";
         std::cout << "Hint: bring up proof server and retry `wallet-generator --preprod-doctor`.\n";
         return 2;
     };

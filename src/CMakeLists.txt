@@ -77,7 +77,6 @@ if(ENABLE_BLOCKCHAIN)
         blockchain/block.cpp
         blockchain/wallet.cpp
         blockchain/midnight_adapter.cpp
-        node-connection/node_connection.cpp
         utxo-transactions/utxo_transactions.cpp
         compact-contracts/compact_contracts.cpp
         zk-proofs/zk_proofs.cpp
@@ -96,6 +95,15 @@ add_library(midnight-core
     ${MIDNIGHT_BLOCKCHAIN_SOURCES}
 )
 
+if(WIN32 AND BUILD_SHARED_LIBS)
+    # Ensure an import library is generated for examples linking against the DLL.
+    set_target_properties(midnight-core PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    target_compile_definitions(midnight-core
+        PRIVATE MIDNIGHT_BUILDING_DLL
+        INTERFACE MIDNIGHT_USING_DLL
+    )
+endif()
+
 target_include_directories(midnight-core
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
@@ -108,6 +116,76 @@ target_include_directories(midnight-core
 find_package(OpenSSL QUIET)
 find_package(Sodium QUIET)
 
+# Fallback to conda-provided crypto libraries when package config files are unavailable.
+if(NOT OPENSSL_FOUND AND DEFINED ENV{CONDA_PREFIX})
+    set(_MIDNIGHT_CONDA_LIB_ROOT "$ENV{CONDA_PREFIX}/Library")
+
+    find_path(OPENSSL_INCLUDE_DIR
+        NAMES openssl/ssl.h
+        PATHS "${_MIDNIGHT_CONDA_LIB_ROOT}/include"
+        NO_DEFAULT_PATH
+    )
+    find_library(OPENSSL_SSL_LIBRARY
+        NAMES libssl ssl
+        PATHS "${_MIDNIGHT_CONDA_LIB_ROOT}/lib"
+        NO_DEFAULT_PATH
+    )
+    find_library(OPENSSL_CRYPTO_LIBRARY
+        NAMES libcrypto crypto
+        PATHS "${_MIDNIGHT_CONDA_LIB_ROOT}/lib"
+        NO_DEFAULT_PATH
+    )
+
+    if(OPENSSL_INCLUDE_DIR AND OPENSSL_SSL_LIBRARY AND OPENSSL_CRYPTO_LIBRARY)
+        if(NOT TARGET OpenSSL::SSL)
+            add_library(OpenSSL::SSL UNKNOWN IMPORTED)
+            set_target_properties(OpenSSL::SSL PROPERTIES
+                IMPORTED_LOCATION "${OPENSSL_SSL_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${OPENSSL_INCLUDE_DIR}"
+            )
+        endif()
+
+        if(NOT TARGET OpenSSL::Crypto)
+            add_library(OpenSSL::Crypto UNKNOWN IMPORTED)
+            set_target_properties(OpenSSL::Crypto PROPERTIES
+                IMPORTED_LOCATION "${OPENSSL_CRYPTO_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${OPENSSL_INCLUDE_DIR}"
+            )
+        endif()
+
+        set(OPENSSL_FOUND TRUE)
+        message(STATUS "Using OpenSSL from CONDA_PREFIX: ${_MIDNIGHT_CONDA_LIB_ROOT}")
+    endif()
+endif()
+
+if(NOT Sodium_FOUND AND DEFINED ENV{CONDA_PREFIX})
+    set(_MIDNIGHT_CONDA_LIB_ROOT "$ENV{CONDA_PREFIX}/Library")
+
+    find_path(SODIUM_INCLUDE_DIR
+        NAMES sodium.h
+        PATHS "${_MIDNIGHT_CONDA_LIB_ROOT}/include"
+        NO_DEFAULT_PATH
+    )
+    find_library(SODIUM_LIBRARY
+        NAMES libsodium sodium
+        PATHS "${_MIDNIGHT_CONDA_LIB_ROOT}/lib"
+        NO_DEFAULT_PATH
+    )
+
+    if(SODIUM_INCLUDE_DIR AND SODIUM_LIBRARY)
+        if(NOT TARGET Sodium::Sodium)
+            add_library(Sodium::Sodium UNKNOWN IMPORTED)
+            set_target_properties(Sodium::Sodium PROPERTIES
+                IMPORTED_LOCATION "${SODIUM_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${SODIUM_INCLUDE_DIR}"
+            )
+        endif()
+
+        set(Sodium_FOUND TRUE)
+        message(STATUS "Using libsodium from CONDA_PREFIX: ${_MIDNIGHT_CONDA_LIB_ROOT}")
+    endif()
+endif()
+
 target_link_libraries(midnight-core
     PUBLIC
         nlohmann_json::nlohmann_json
@@ -118,6 +196,13 @@ target_link_libraries(midnight-core
         $<$<BOOL:${OPENSSL_FOUND}>:OpenSSL::SSL>
         $<$<BOOL:${OPENSSL_FOUND}>:OpenSSL::Crypto>
         $<$<BOOL:${Sodium_FOUND}>:Sodium::Sodium>
+)
+
+target_compile_definitions(midnight-core
+    PRIVATE
+        $<$<BOOL:${OPENSSL_FOUND}>:CPPHTTPLIB_OPENSSL_SUPPORT>
+        $<$<BOOL:${OPENSSL_FOUND}>:MIDNIGHT_ENABLE_OPENSSL_CRYPTO=1>
+        $<$<BOOL:${Sodium_FOUND}>:MIDNIGHT_ENABLE_SODIUM=1>
 )
 
 # Set warning levels

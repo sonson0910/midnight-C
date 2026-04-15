@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Solution>
+	<Configurations>
+		<BuildType Name="Debug"/>
+		<BuildType Name="Release"/>
+		<BuildType Name="MinSizeRel"/>
+		<BuildType Name="RelWithDebInfo"/>
+		<Platform Name="x64"/>
+	</Configurations>
+	<Project Path="ALL_BUILD.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="97357935-f3df-37c9-9fd3-318128658ef9" DefaultStartup="true">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="examples/blockchain_example.vcxproj"/>
+		<BuildDependency Project="_deps/googletest-build/googlemock/gmock.vcxproj"/>
+		<BuildDependency Project="_deps/googletest-build/googlemock/gmock_main.vcxproj"/>
+		<BuildDependency Project="_deps/googletest-build/googletest/gtest.vcxproj"/>
+		<BuildDependency Project="_deps/googletest-build/googletest/gtest_main.vcxproj"/>
+		<BuildDependency Project="examples/http_connectivity_test.vcxproj"/>
+		<BuildDependency Project="examples/http_example.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_object.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_static.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/test_lib_json/jsoncpp_test.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/jsontestrunner/jsontestrunner_exe.vcxproj"/>
+		<BuildDependency Project="src/midnight-core.vcxproj"/>
+		<BuildDependency Project="tests/midnight-tests.vcxproj"/>
+		<BuildDependency Project="examples/mqtt_example.vcxproj"/>
+		<BuildDependency Project="examples/phase3_end_to_end_example.vcxproj"/>
+		<BuildDependency Project="examples/phase4a_zk_types_example.vcxproj"/>
+		<BuildDependency Project="examples/phase4b_private_state_example.vcxproj"/>
+		<BuildDependency Project="examples/phase4c_proof_server_resilience_example.vcxproj"/>
+		<BuildDependency Project="examples/phase4d_ledger_state_sync_example.vcxproj"/>
+		<BuildDependency Project="examples/wallet-generator.vcxproj"/>
+	</Project>
+	<Project Path="_deps/jsoncpp-build/Continuous.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="874b76f6-7252-3597-b456-44f6c2af5953">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="_deps/jsoncpp-build/Experimental.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="3145dcf8-7c54-32f4-bf62-e55ab686dded">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="INSTALL.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="48c06ede-327b-3f99-95e1-cbbc0797ca69">
+		<BuildDependency Project="ALL_BUILD.vcxproj"/>
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="_deps/jsoncpp-build/Nightly.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="20b8cbc3-43fb-3645-978f-290438d9849e">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="_deps/jsoncpp-build/NightlyMemoryCheck.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="2efcb519-0c0c-3c85-b60c-21e90c95cb04">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="RUN_TESTS.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="fd53347c-ee06-31f7-8cea-6d98b71605ff">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="ZERO_CHECK.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5a750a5c-8039-3b6c-bbe1-001f45907073"/>
+	<Project Path="examples/blockchain_example.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="dacaa213-bf32-3dfe-a039-017352f07bfb">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+		<BuildDependency Project="src/midnight-core.vcxproj"/>
+	</Project>
+	<Project Path="_deps/googletest-build/googlemock/gmock.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="fb7e8e9b-62bf-3a79-bca7-0870401c65f7">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="_deps/googletest-build/googlemock/gmock_main.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="11619d35-b63a-3d89-bf77-231ce0440289">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="_deps/googletest-build/googletest/gtest.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="3cb9eb4b-faa8-3176-b8ae-f0320ffddf2d">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="_deps/googletest-build/googletest/gtest_main.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5edf7d49-6e41-354b-8799-b238a35ae062">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/googletest-build/googletest/gtest.vcxproj"/>
+	</Project>
+	<Project Path="examples/http_connectivity_test.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="b6ff85a7-4425-3080-928c-d15c6eb70115">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+		<BuildDependency Project="src/midnight-core.vcxproj"/>
+	</Project>
+	<Project Path="examples/http_example.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="0aea4dee-7cb8-33c4-b7f4-6c8a60450509">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+		<BuildDependency Project="src/midnight-core.vcxproj"/>
+	</Project>
+	<Project Path="_deps/jsoncpp-build/src/jsontestrunner/jsoncpp_check.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="60b5ec37-bf90-3dfb-8b6f-d853afa8a1fa">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/jsontestrunner/jsoncpp_readerwriter_tests.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="3848fb21-db97-34f7-ac2e-da142d99f354">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="_deps/jsoncpp-build/src/lib_json/jsoncpp_object.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="d981a51d-d44c-3347-b6f6-c5d7b12a7368">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="_deps/jsoncpp-build/src/jsontestrunner/jsoncpp_readerwriter_tests.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="3ac62a90-88b5-30ae-95e8-0a8b1072aa74">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/test_lib_json/jsoncpp_test.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/jsontestrunner/jsontestrunner_exe.vcxproj"/>
+	</Project>
+	<Project Path="_deps/jsoncpp-build/src/lib_json/jsoncpp_static.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="b62b44cc-79c9-30a4-9707-b4188a64a9c3">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="_deps/jsoncpp-build/src/test_lib_json/jsoncpp_test.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="6769ea8a-9de7-35a6-9819-54dff2df4c17">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+	</Project>
+	<Project Path="_deps/jsoncpp-build/src/jsontestrunner/jsontestrunner_exe.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="21af67e2-160f-3ea8-8f5b-8aa916fa1509">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+	</Project>
+	<Project Path="src/midnight-core.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="53763687-7298-3a3e-8345-cd36958c913f">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+	</Project>
+	<Project Path="tests/midnight-tests.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="10d1677c-e5fc-3344-b6ea-35ff708a0737">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/googletest-build/googletest/gtest.vcxproj"/>
+		<BuildDependency Project="_deps/googletest-build/googletest/gtest_main.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+		<BuildDependency Project="src/midnight-core.vcxproj"/>
+	</Project>
+	<Project Path="examples/mqtt_example.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="cf4d80ac-f5c5-378a-8e9b-84d8de1fb0a5">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+		<BuildDependency Project="src/midnight-core.vcxproj"/>
+	</Project>
+	<Project Path="examples/phase3_end_to_end_example.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1c8113ab-b268-3808-bf2f-23c773cfbeb0">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+		<BuildDependency Project="src/midnight-core.vcxproj"/>
+	</Project>
+	<Project Path="examples/phase4a_zk_types_example.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="9795d2a8-7a8a-3580-877b-72b60b40b1e5">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+		<BuildDependency Project="src/midnight-core.vcxproj"/>
+	</Project>
+	<Project Path="examples/phase4b_private_state_example.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="3a7ffd74-3527-3af3-9b10-c9c0bc96a44c">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+		<BuildDependency Project="src/midnight-core.vcxproj"/>
+	</Project>
+	<Project Path="examples/phase4c_proof_server_resilience_example.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="33beabff-dbf9-3e8f-bc45-5b5d012c230b">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+		<BuildDependency Project="src/midnight-core.vcxproj"/>
+	</Project>
+	<Project Path="examples/phase4d_ledger_state_sync_example.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="3c2f3a39-ca94-37ee-8c6d-7e47eaaba5ef">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+		<BuildDependency Project="src/midnight-core.vcxproj"/>
+	</Project>
+	<Project Path="examples/wallet-generator.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="b3122756-1397-3907-b5f4-e5058da0d5af">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="_deps/jsoncpp-build/src/lib_json/jsoncpp_lib.vcxproj"/>
+		<BuildDependency Project="src/midnight-core.vcxproj"/>
+	</Project>
+</Solution>

@@ -3,7 +3,7 @@
 Midnight Wallet Generator - CORRECT Implementation (from texswap_smc_v2)
 https://github.com/sonson0910/texswap_smc_v2
 
-Address Formats (Bech32m - RFC 3835):
+Address Formats (Bech32m - BIP 350):
   - Unshielded: mn_addr_preprod1<data> (NIGHT tokens)
   - Shielded:   mn_shield-addr_preprod1<data> (Zswap private)
   - Dust:       mn_dust_preprod1<data> (Fee tokens)
@@ -14,7 +14,7 @@ HD Wallet: m/0/[role]/0 (Midnight derivation)
   - role 3: Zswap (shielded private)
 
 Reference: counter-cli/src/api.ts (lines 945-1000)
-Official: ADR-0019 + Bech32m RFC 3835
+Official: ADR-0019 + Bech32m BIP 350
 """
 
 import json
@@ -230,9 +230,11 @@ class MidnightWallet:
 
         # Derive keys using Midnight's real derivation path: m/0/[role]/0
         # (NOT m/44'/2400'/account'/role/index as in some docs)
-        unshield_key = BIP32.derive_address_key(seed, account, role=0, index=0)   # NightExternal
-        shielded_key = BIP32.derive_address_key(seed, account, role=3, index=0)   # Zswap
-        dust_key = BIP32.derive_address_key(seed, account, role=2, index=0)       # Dust
+        unshield_key = BIP32.derive_address_key(
+            seed, account, role=0, index=0
+        )  # NightExternal
+        shielded_key = BIP32.derive_address_key(seed, account, role=3, index=0)  # Zswap
+        dust_key = BIP32.derive_address_key(seed, account, role=2, index=0)  # Dust
 
         # Generate addresses (Bech32m format with proper HRP)
         unshield_addr = self._generate_unshield_address(unshield_key)
@@ -254,8 +256,8 @@ class MidnightWallet:
                 },
                 "addresses": {
                     "unshielded": unshield_addr,  # NIGHT receive (transparent)
-                    "shielded": shielded_addr,    # Zswap (private)
-                    "dust": dust_addr,            # Fee authorization
+                    "shielded": shielded_addr,  # Zswap (private)
+                    "dust": dust_addr,  # Fee authorization
                 },
             }
         }
@@ -287,7 +289,9 @@ def main():
     import sys
 
     wallet_name = sys.argv[1] if len(sys.argv) > 1 else "default"
-    network = sys.argv[2] if len(sys.argv) > 2 else "preprod"  # preprod (default), preview, or undeployed
+    network = (
+        sys.argv[2] if len(sys.argv) > 2 else "preprod"
+    )  # preprod (default), preview, or undeployed
 
     wallet_gen = MidnightWallet(wallet_name, network=network)
     wallet_data = wallet_gen.create_wallet()
@@ -295,9 +299,7 @@ def main():
 
     print("\n" + "=" * 80)
     print(
-        f"MIDNIGHT WALLET - {network.upper()} (BECH32M - RFC 3835 - CORRECT)".center(
-            80
-        )
+        f"MIDNIGHT WALLET - {network.upper()} (BECH32M - BIP 350 - CORRECT)".center(80)
     )
     print("=" * 80)
 
@@ -307,34 +309,34 @@ def main():
     print(f"HD Path:            m/0/[role]/0 (Midnight standard)")
 
     print("\n" + "-" * 80)
-    print("📤 UNSHIELDED ADDRESS (NIGHT token receive - PUBLIC)".ljust(80))
+    print("[UNSHIELDED] ADDRESS (NIGHT token receive - PUBLIC)".ljust(80))
     print("-" * 80)
     print(f"Address:  {wallet['addresses']['unshielded']}")
     print(f"Format:   mn_addr_{network}1<data>")
     print("Type:     sr25519 keypair (standard pubkey)")
-    print("Privacy:  ❌ All transactions visible on-chain")
+    print("Privacy:  NO - All transactions visible on-chain")
     print("Use:      Receiving NIGHT tokens from faucet")
 
     print("\n" + "-" * 80)
-    print("🛡️  SHIELDED ADDRESS (ZSWAP private transactions - PRIVATE)".ljust(80))
+    print("[SHIELDED] ADDRESS (ZSWAP private transactions - PRIVATE)".ljust(80))
     print("-" * 80)
     print(f"Address:  {wallet['addresses']['shielded']}")
     print(f"Format:   mn_shield-addr_{network}1<data>")
     print("Type:     2 Edwards curve pubkeys (64 bytes)")
-    print("Privacy:  ✅ Full privacy via zero-knowledge proofs")
+    print("Privacy:  YES - Full privacy via zero-knowledge proofs")
     print("Use:      Private NIGHT transfers with Zswap")
 
     print("\n" + "-" * 80)
-    print("⛽ DUST ADDRESS (Fee token address)")
+    print("[DUST] ADDRESS (Fee token address)")
     print("-" * 80)
     print(f"Address:  {wallet['addresses']['dust']}")
     print(f"Format:   mn_dust_{network}1<data>")
     print("Type:     BLS scalar pubkey (32 bytes)")
-    print("Privacy:  ❌ Visible on-chain")
+    print("Privacy:  NO - Visible on-chain")
     print("Use:      Non-transferable fee authorization")
 
     print("\n" + "-" * 80)
-    print("🔐 SECRET KEYS (NEVER SHARE)".ljust(80))
+    print("[SECRET KEYS] (NEVER SHARE)".ljust(80))
     print("-" * 80)
     print(f"\nUnshielded Private Key:\n  {wallet['keys']['unshielded']}")
     print(f"\nShielded Private Key:\n  {wallet['keys']['shielded']}")
@@ -343,37 +345,37 @@ def main():
     print(f"\nEntropy (32 bytes):\n  {wallet['entropy']}")
 
     print("\n" + "=" * 80)
-    print("✅ HOW TO USE".ljust(80))
+    print("HOW TO USE".ljust(80))
     print("=" * 80)
     print(
         f"""
 1. GET TEST NIGHT TOKENS:
-   Copy UNSHIELDED address → https://faucet.{network}.midnight.network/
+    Copy UNSHIELDED address -> https://faucet.{network}.midnight.network/
    Paste: {wallet['addresses']['unshielded']}
 
 2. CHECK BALANCE:
    https://indexer.{network}.midnight.network/api/v3/graphql
 
-3. SHIELD TOKENS (NIGHT → Zswap):
+3. SHIELD TOKENS (NIGHT -> Zswap):
    midnight-cli shield --amount 100 --to {wallet['addresses']['shielded'][:30]}...
 
 4. PRIVATE TRANSACTION:
    midnight-cli shield-transfer --from <shielded-addr> --to <shielded-addr> --amount 50
 
-⚠️  ADDRESS FORMAT VERIFIED:
-  Framework: Bech32m (RFC 3835 BIP 350)
+ADDRESS FORMAT VERIFIED:
+    Framework: Bech32m (BIP 350)
   HRP Pattern: mn_[type]_{network}1
   Types: addr (unshielded), shield-addr (shielded), dust (fees)
   Network: {network} (embedded in address)
-  Checksum: 6-char Luhn-mod-32 (last 6 chars)
+    Checksum: Bech32m polymod (last 6 chars)
 
   These addresses match counter-cli implementation from texswap_smc_v2
 
-🎯 HD DERIVATION (from actual source code):
+HD DERIVATION (from actual source code):
   Path: m/0/[role]/0
-  Role 0 → NightExternal (receive address for NIGHT)
-  Role 2 → Dust (fee authorization)
-  Role 3 → Zswap (shielded private address)
+    Role 0 -> NightExternal (receive address for NIGHT)
+    Role 2 -> Dust (fee authorization)
+    Role 3 -> Zswap (shielded private address)
 """
     )
     print("=" * 80 + "\n")
@@ -383,7 +385,7 @@ def main():
     with open(filename, "w") as f:
         json.dump(wallet_data, f, indent=2)
 
-    print(f"✓ Wallet saved to: {filename}\n")
+    print(f"Wallet saved to: {filename}\n")
 
 
 if __name__ == "__main__":

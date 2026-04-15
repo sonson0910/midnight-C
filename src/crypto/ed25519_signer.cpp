@@ -4,7 +4,7 @@
 #include <sstream>
 #include <iomanip>
 
-#if __has_include(<sodium.h>)
+#if defined(MIDNIGHT_ENABLE_SODIUM) && MIDNIGHT_ENABLE_SODIUM && __has_include(<sodium.h>)
 #include <sodium.h>
 #define MIDNIGHT_HAS_SODIUM 1
 #else
@@ -34,10 +34,7 @@ namespace midnight::crypto
     Ed25519Signer::generate_keypair()
     {
 #if MIDNIGHT_HAS_SODIUM
-        if (sodium_initialized() == 0)
-        {
-            initialize();
-        }
+        initialize();
 
         PublicKey pub_key{};
         PrivateKey priv_key{};
@@ -60,10 +57,7 @@ namespace midnight::crypto
     Ed25519Signer::keypair_from_seed(const std::array<uint8_t, SECRET_SEED_SIZE> &seed)
     {
 #if MIDNIGHT_HAS_SODIUM
-        if (sodium_initialized() == 0)
-        {
-            initialize();
-        }
+        initialize();
 
         PublicKey pub_key{};
         PrivateKey priv_key{};
@@ -99,10 +93,7 @@ namespace midnight::crypto
         const PrivateKey &private_key)
     {
 #if MIDNIGHT_HAS_SODIUM
-        if (sodium_initialized() == 0)
-        {
-            initialize();
-        }
+        initialize();
 
         Signature sig{};
         unsigned long long sig_len = 0;
@@ -158,10 +149,7 @@ namespace midnight::crypto
         const PublicKey &public_key)
     {
 #if MIDNIGHT_HAS_SODIUM
-        if (sodium_initialized() == 0)
-        {
-            initialize();
-        }
+        initialize();
 
         int result = crypto_sign_verify_detached(
             signature.data(),

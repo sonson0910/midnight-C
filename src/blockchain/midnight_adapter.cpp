@@ -7,9 +7,235 @@
 #include <iomanip>
 #include <cstdlib>
 #include <algorithm>
+#include <array>
+#include <vector>
+#include <cctype>
+#include <cstring>
 
 namespace midnight::blockchain
 {
+
+    namespace
+    {
+        constexpr uint32_t kBech32mConst = 0x2BC830A3;
+        constexpr const char *kBech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+        uint32_t bech32_polymod(const std::vector<uint8_t> &values)
+        {
+            static constexpr uint32_t gen[5] = {0x3B6A57B2, 0x26508E6D, 0x1EA119FA, 0x3D4233DD, 0x2A1462B3};
+            uint32_t chk = 1;
+            for (auto value : values)
+            {
+                const uint32_t top = chk >> 25;
+                chk = ((chk & 0x1FFFFFF) << 5) ^ value;
+                for (int i = 0; i < 5; ++i)
+                {
+                    chk ^= ((top >> i) & 1) ? gen[i] : 0;
+                }
+            }
+            return chk;
+        }
+
+        std::vector<uint8_t> bech32_hrp_expand(const std::string &hrp)
+        {
+            std::vector<uint8_t> ret;
+            ret.reserve(hrp.size() * 2 + 1);
+            for (unsigned char c : hrp)
+            {
+                ret.push_back(c >> 5);
+            }
+            ret.push_back(0);
+            for (unsigned char c : hrp)
+            {
+                ret.push_back(c & 31);
+            }
+            return ret;
+        }
+
+        std::vector<uint8_t> convert_bits(const uint8_t *data, size_t data_len, int from_bits, int to_bits, bool pad)
+        {
+            int acc = 0;
+            int bits = 0;
+            const int maxv = (1 << to_bits) - 1;
+            const int max_acc = (1 << (from_bits + to_bits - 1)) - 1;
+            std::vector<uint8_t> ret;
+            ret.reserve((data_len * from_bits + to_bits - 1) / to_bits);
+
+            for (size_t i = 0; i < data_len; ++i)
+            {
+                const int value = data[i];
+                acc = ((acc << from_bits) | value) & max_acc;
+                bits += from_bits;
+                while (bits >= to_bits)
+                {
+                    bits -= to_bits;
+                    ret.push_back((acc >> bits) & maxv);
+                }
+            }
+
+            if (pad)
+            {
+                if (bits != 0)
+                {
+                    ret.push_back(static_cast<uint8_t>((acc << (to_bits - bits)) & maxv));
+                }
+            }
+            else if (bits >= from_bits || ((acc << (to_bits - bits)) & maxv) != 0)
+            {
+                return {};
+            }
+
+            return ret;
+        }
+
+        std::string bech32m_encode(const std::string &hrp, const std::array<uint8_t, 32> &payload)
+        {
+            std::vector<uint8_t> data;
+            data.push_back(0);
+            auto converted = convert_bits(payload.data(), payload.size(), 8, 5, true);
+            data.insert(data.end(), converted.begin(), converted.end());
+
+            auto values = bech32_hrp_expand(hrp);
+            values.insert(values.end(), data.begin(), data.end());
+            values.insert(values.end(), 6, 0);
+            const uint32_t polymod = bech32_polymod(values) ^ kBech32mConst;
+
+            std::array<uint8_t, 6> checksum{};
+            for (int i = 0; i < 6; ++i)
+            {
+                checksum[i] = (polymod >> (5 * (5 - i))) & 31;
+            }
+
+            std::string out = hrp + "1";
+            out.reserve(hrp.size() + 1 + data.size() + checksum.size());
+            for (auto v : data)
+            {
+                out.push_back(kBech32Charset[v]);
+            }
+            for (auto v : checksum)
+            {
+                out.push_back(kBech32Charset[v]);
+            }
+            return out;
+        }
+
+        bool hex_to_bytes32(const std::string &hex_input, std::array<uint8_t, 32> &out)
+        {
+            std::string hex = hex_input;
+            if (hex.rfind("0x", 0) == 0 || hex.rfind("0X", 0) == 0)
+            {
+                hex = hex.substr(2);
+            }
+
+            if (hex.size() < 64)
+            {
+                return false;
+            }
+
+            auto nibble = [](char c) -> int
+            {
+                if (c >= '0' && c <= '9')
+                {
+                    return c - '0';
+                }
+                const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (lower >= 'a' && lower <= 'f')
+                {
+                    return 10 + (lower - 'a');
+                }
+                return -1;
+            };
+
+            for (size_t i = 0; i < out.size(); ++i)
+            {
+                const int hi = nibble(hex[i * 2]);
+                const int lo = nibble(hex[i * 2 + 1]);
+                if (hi < 0 || lo < 0)
+                {
+                    return false;
+                }
+                out[i] = static_cast<uint8_t>((hi << 4) | lo);
+            }
+
+            return true;
+        }
+
+        bool has_supported_hrp(const std::string &hrp)
+        {
+            return hrp.rfind("mn_addr_", 0) == 0 ||
+                   hrp.rfind("mn_shield-addr_", 0) == 0 ||
+                   hrp.rfind("mn_dust_", 0) == 0;
+        }
+
+        bool bech32m_validate_address(const std::string &address)
+        {
+            if (address.empty())
+            {
+                return false;
+            }
+
+            bool has_lower = false;
+            bool has_upper = false;
+            std::string lower;
+            lower.reserve(address.size());
+
+            for (unsigned char c : address)
+            {
+                if (c < 33 || c > 126)
+                {
+                    return false;
+                }
+
+                if (std::isalpha(c))
+                {
+                    if (std::islower(c))
+                    {
+                        has_lower = true;
+                    }
+                    else
+                    {
+                        has_upper = true;
+                    }
+                }
+
+                lower.push_back(static_cast<char>(std::tolower(c)));
+            }
+
+            if (has_lower && has_upper)
+            {
+                return false;
+            }
+
+            const auto sep = lower.rfind('1');
+            if (sep == std::string::npos || sep == 0 || sep + 7 > lower.size())
+            {
+                return false;
+            }
+
+            const std::string hrp = lower.substr(0, sep);
+            if (!has_supported_hrp(hrp))
+            {
+                return false;
+            }
+
+            std::vector<uint8_t> data;
+            data.reserve(lower.size() - sep - 1);
+            for (size_t i = sep + 1; i < lower.size(); ++i)
+            {
+                const char ch = lower[i];
+                const char *pos = std::strchr(kBech32Charset, ch);
+                if (!pos)
+                {
+                    return false;
+                }
+                data.push_back(static_cast<uint8_t>(pos - kBech32Charset));
+            }
+
+            auto values = bech32_hrp_expand(hrp);
+            values.insert(values.end(), data.begin(), data.end());
+            return bech32_polymod(values) == kBech32mConst;
+        }
+    } // namespace
 
     MidnightBlockchain::MidnightBlockchain() : connected_(false) {}
 
@@ -83,13 +309,20 @@ namespace midnight::blockchain
             return "";
         }
 
-        const std::string prefix = (network_id == 0) ? "mn_addr_preprod1" : "mn_addr_mainnet1";
-        return prefix + public_key.substr(0, std::min<size_t>(public_key.size(), 48));
+        std::array<uint8_t, 32> payload{};
+        if (!hex_to_bytes32(public_key, payload))
+        {
+            midnight::g_logger->warn("Invalid public key hex when creating Midnight address");
+            return "";
+        }
+
+        const std::string hrp = (network_id == 0) ? "mn_addr_preprod" : "mn_addr_mainnet";
+        return bech32m_encode(hrp, payload);
     }
 
     bool MidnightBlockchain::validate_address(const std::string &address)
     {
-        return address.rfind("mn_addr_", 0) == 0 || address.rfind("addr", 0) == 0;
+        return bech32m_validate_address(address);
     }
 
     Result MidnightBlockchain::build_transaction(
@@ -299,15 +532,24 @@ namespace midnight::blockchain
     {
         Result result{false, "", ""};
 
-        if (!connected_)
+        if (!connected_ || !rpc_)
         {
-            result.error_message = "Not connected";
+            result.error_message = "Not connected to Midnight network";
             return result;
         }
 
-        // In production, would query node for tip
-        result.success = true;
-        result.result = "{\"network\": \"" + network_ + "\", \"status\": \"ok\"}";
+        try
+        {
+            auto tip = rpc_->get_chain_tip();
+            result.success = true;
+            result.result = "{\"height\":" + std::to_string(tip.first) +
+                            ",\"hash\":\"" + tip.second + "\"}";
+        }
+        catch (const std::exception &e)
+        {
+            result.success = false;
+            result.error_message = std::string("Failed to query chain tip: ") + e.what();
+        }
 
         return result;
     }

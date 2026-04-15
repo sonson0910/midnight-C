@@ -113,63 +113,71 @@ namespace midnight::network
     TransactionConfirmationMonitor::ConfirmationResult
     TransactionConfirmationMonitor::query_tx_status_(const std::string &tx_id)
     {
+        ConfirmationResult result;
+
+        try
+        {
+            result.current_block_height = query_chain_tip_();
+        }
+        catch (const std::exception &e)
+        {
+            midnight::g_logger->debug("Could not fetch chain tip while checking tx status: " + std::string(e.what()));
+        }
+
         // Create RPC client for this query
         NetworkClient rpc_client(rpc_url_, timeout_ms_);
 
         try
         {
-            // JSON-RPC 2.0 call to get transaction status
+            // Query mempool via Substrate RPC to detect pending extrinsic presence.
             json request = {
                 {"jsonrpc", "2.0"},
-                {"method", "getTransaction"},
-                {"params", {tx_id}},
+                {"method", "author_pendingExtrinsics"},
+                {"params", json::array()},
                 {"id", 1}};
 
             auto response = rpc_client.post_json("/", request);
 
-            ConfirmationResult result;
-
-            if (response.contains("result"))
+            if (response.contains("result") && response["result"].is_array())
             {
-                auto tx_result = response["result"];
-
-                // Parse transaction status
-                if (tx_result.contains("status"))
+                bool found_in_pending = false;
+                for (const auto &ext : response["result"])
                 {
-                    result.status = tx_result["status"].get<std::string>();
-                    result.confirmed = (result.status == "confirmed" || result.status == "finalized");
+                    if (!ext.is_string())
+                    {
+                        continue;
+                    }
+
+                    const std::string raw_extrinsic = ext.get<std::string>();
+                    if (raw_extrinsic == tx_id ||
+                        (tx_id.rfind("0x", 0) == 0 && tx_id.size() > 10 &&
+                         raw_extrinsic.find(tx_id.substr(2)) != std::string::npos))
+                    {
+                        found_in_pending = true;
+                        break;
+                    }
                 }
 
-                // Get confirmation details
-                if (tx_result.contains("blockNumber"))
-                {
-                    result.confirmation_block = tx_result["blockNumber"].get<uint32_t>();
-                }
-
-                if (tx_result.contains("confirmations"))
-                {
-                    result.confirmations = tx_result["confirmations"].get<uint32_t>();
-                }
-
-                // Get current block height
-                result.current_block_height = query_chain_tip_();
-
+                result.status = found_in_pending ? "pending" : "submitted_or_unknown";
+                result.confirmed = false;
                 return result;
             }
             else if (response.contains("error"))
             {
-                // Transaction not found or RPC error
-                result.status = "not_found";
+                result.status = "rpc_error";
                 result.confirmed = false;
                 return result;
             }
 
+            result.status = "rpc_error";
             return result;
         }
         catch (const std::exception &e)
         {
             midnight::g_logger->error("RPC error querying transaction: " + std::string(e.what()));
-            throw;
+            result.status = "rpc_error";
+            result.confirmed = false;
+            return result;
         }
     }
 
@@ -180,20 +188,28 @@ namespace midnight::network
 
         try
         {
-            // JSON-RPC 2.0 call to get chain tip
+            // JSON-RPC 2.0 call to get latest header.
             json request = {
                 {"jsonrpc", "2.0"},
-                {"method", "getChainTip"},
-                {"params", {}},
+                {"method", "chain_getHeader"},
+                {"params", json::array()},
                 {"id", 1}};
 
             auto response = rpc_client.post_json("/", request);
 
-            if (response.contains("result"))
+            if (response.contains("result") && response["result"].is_object())
             {
-                if (response["result"].contains("height"))
+                const auto &header = response["result"];
+                if (header.contains("number"))
                 {
-                    return response["result"]["height"].get<uint32_t>();
+                    if (header["number"].is_string())
+                    {
+                        return static_cast<uint32_t>(std::stoul(header["number"].get<std::string>(), nullptr, 0));
+                    }
+                    if (header["number"].is_number_unsigned())
+                    {
+                        return header["number"].get<uint32_t>();
+                    }
                 }
             }
 

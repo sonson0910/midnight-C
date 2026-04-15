@@ -26,12 +26,12 @@ namespace midnight::network
             uint32_t current_block_height = 0;
             uint32_t confirmation_block = 0;
             uint32_t confirmations = 0; // Number of blocks after tx block
-            std::string status;         // "pending", "confirmed", "failed"
+            std::string status;         // "pending", "submitted_or_unknown", "timeout", "rpc_error"
         };
 
         /**
          * Constructor
-         * @param base_url RPC endpoint URL (e.g., https://preprod.midnight.network/api)
+         * @param base_url RPC endpoint URL (e.g., https://rpc.preprod.midnight.network)
          * @param timeout_ms Request timeout in milliseconds
          */
         TransactionConfirmationMonitor(

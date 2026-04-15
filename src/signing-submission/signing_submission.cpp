@@ -325,12 +325,20 @@ namespace midnight::phase5
             }
 
             SubmissionResult result;
-            result.transaction_hash = signed_tx.transaction_hash;
+            const std::string rpc_tx_hash =
+                (response.isMember("result") && response["result"].isString())
+                    ? response["result"].asString()
+                    : "";
+            result.transaction_hash = rpc_tx_hash.empty() ? signed_tx.transaction_hash : rpc_tx_hash;
             result.status = SubmissionStatus::SUBMITTED;
             result.submission_timestamp = std::time(nullptr);
 
             // Cache result
-            submission_cache_[signed_tx.transaction_hash] = result;
+            submission_cache_[result.transaction_hash] = result;
+            if (!signed_tx.transaction_hash.empty() && signed_tx.transaction_hash != result.transaction_hash)
+            {
+                submission_cache_[signed_tx.transaction_hash] = result;
+            }
 
             return result;
         }
@@ -405,20 +413,29 @@ namespace midnight::phase5
         }
 
         midnight::network::NetworkClient client(rpc_url_, kSubmitRpcTimeoutMs);
+
+        std::string extrinsic_hex;
+        if (!signed_tx.signed_data.empty())
+        {
+            extrinsic_hex = to_hex(signed_tx.signed_data);
+        }
+        else
+        {
+            extrinsic_hex = signed_tx.transaction_hash;
+        }
+
+        if (extrinsic_hex.empty() || extrinsic_hex.rfind("0x", 0) != 0)
+        {
+            throw std::runtime_error("Cannot submit extrinsic: signed data missing or invalid hex payload");
+        }
+
         nlohmann::json request = {
             {"jsonrpc", "2.0"},
             {"id", 1},
-            {"method", "submitTransaction"},
-            {"params", {
-                           {"transaction_hash", signed_tx.transaction_hash},
-                           {"signature", signed_tx.signature},
-                           {"signer_address", signed_tx.signer_address},
-                           {"nonce", signed_tx.nonce},
-                           {"signed_data", to_hex(signed_tx.signed_data)}
-                       }}
-        };
+            {"method", "author_submitExtrinsic"},
+            {"params", nlohmann::json::array({extrinsic_hex})}};
 
-        std::vector<std::string> rpc_paths = {"/", "/rpc", "/api"};
+        std::vector<std::string> rpc_paths = {"/", "/rpc"};
         std::string accumulated_errors;
         for (const auto &path : rpc_paths)
         {
@@ -609,12 +626,38 @@ namespace midnight::phase5
 
     Json::Value MempoolMonitor::rpc_get_mempool()
     {
-        // In production: Query mempool via RPC
-        // For now: Return mock response
+        midnight::network::NetworkClient client(rpc_url_, kSubmitRpcTimeoutMs);
+        nlohmann::json request = {
+            {"jsonrpc", "2.0"},
+            {"id", 1},
+            {"method", "author_pendingExtrinsics"},
+            {"params", nlohmann::json::array()}};
 
-        Json::Value response;
-        response["extrinsics"] = Json::Value(Json::arrayValue);
-        return response;
+        auto response = client.post_json("/", request);
+        Json::Value parsed;
+        Json::CharReaderBuilder builder;
+        std::string errors;
+        std::istringstream stream(response.dump());
+        if (!Json::parseFromStream(builder, stream, &parsed, &errors))
+        {
+            throw std::runtime_error("parse error: " + errors);
+        }
+
+        Json::Value normalized;
+        normalized["extrinsics"] = Json::Value(Json::arrayValue);
+
+        if (parsed.isMember("result") && parsed["result"].isArray())
+        {
+            for (const auto &ext : parsed["result"])
+            {
+                Json::Value entry;
+                entry["raw"] = ext.asString();
+                entry["hash"] = ext.asString();
+                normalized["extrinsics"].append(entry);
+            }
+        }
+
+        return normalized;
     }
 
     // ============================================================================

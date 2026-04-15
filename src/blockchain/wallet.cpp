@@ -6,6 +6,18 @@
 #include <sstream>
 #include <iomanip>
 #include <functional>
+#include <algorithm>
+#include <cctype>
+#include <limits>
+#include <stdexcept>
+
+#if defined(MIDNIGHT_ENABLE_OPENSSL_CRYPTO) && MIDNIGHT_ENABLE_OPENSSL_CRYPTO
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
+#define MIDNIGHT_HAS_OPENSSL_CRYPTO 1
+#else
+#define MIDNIGHT_HAS_OPENSSL_CRYPTO 0
+#endif
 
 namespace midnight::blockchain
 {
@@ -13,6 +25,12 @@ namespace midnight::blockchain
     {
         constexpr uint32_t kBech32mConst = 0x2BC830A3;
         constexpr const char *kBech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+        struct Bip32Node
+        {
+            std::array<uint8_t, 32> key{};
+            std::array<uint8_t, 32> chain{};
+        };
 
         uint32_t bech32_polymod(const std::vector<uint8_t> &values)
         {
@@ -76,7 +94,6 @@ namespace midnight::blockchain
             }
             else if (bits >= from_bits || ((acc << (to_bits - bits)) & maxv) != 0)
             {
-                // Bech32m requires trailing pad bits to be zero when padding is disabled.
                 return {};
             }
 
@@ -86,7 +103,7 @@ namespace midnight::blockchain
         std::string bech32m_encode(const std::string &hrp, const std::array<uint8_t, 32> &payload)
         {
             std::vector<uint8_t> data;
-            data.push_back(0); // witness version 0
+            data.push_back(0);
             auto converted = convert_bits(payload.data(), payload.size(), 8, 5, true);
             data.insert(data.end(), converted.begin(), converted.end());
 
@@ -114,27 +131,212 @@ namespace midnight::blockchain
             return out;
         }
 
-        std::array<uint8_t, 32> derive_mock_key_material(const std::string &seed_material)
+        std::string normalize_words(const std::string &input)
         {
-            std::array<uint8_t, 32> out{};
-            uint64_t state = 1469598103934665603ULL; // FNV-1a offset basis
-            for (unsigned char c : seed_material)
+            std::istringstream iss(input);
+            std::string word;
+            std::string normalized;
+
+            while (iss >> word)
             {
-                state ^= c;
-                state *= 1099511628211ULL;
+                std::transform(word.begin(), word.end(), word.begin(),
+                               [](unsigned char c) -> char
+                               { return static_cast<char>(std::tolower(c)); });
+                if (!normalized.empty())
+                {
+                    normalized.push_back(' ');
+                }
+                normalized += word;
+            }
+            return normalized;
+        }
+
+        uint32_t parse_u32(const std::string &component)
+        {
+            if (component.empty())
+            {
+                throw std::invalid_argument("Empty derivation path component");
             }
 
-            for (size_t i = 0; i < out.size(); ++i)
+            size_t parsed = 0;
+            const unsigned long value = std::stoul(component, &parsed, 10);
+            if (parsed != component.size() || value > std::numeric_limits<uint32_t>::max())
             {
-                const unsigned char extra = seed_material.empty()
-                                                ? static_cast<unsigned char>(i)
-                                                : static_cast<unsigned char>(seed_material[(i * 7) % seed_material.size()]);
-                state ^= (static_cast<uint64_t>(extra) + i);
-                state *= 1099511628211ULL;
-                out[i] = static_cast<uint8_t>((state >> ((i % 8) * 8)) & 0xFF);
+                throw std::invalid_argument("Invalid derivation path component: " + component);
+            }
+            return static_cast<uint32_t>(value);
+        }
+
+        void parse_derivation_path(const std::string &derivation_path, uint32_t &account, uint32_t &role, uint32_t &address_index)
+        {
+            std::vector<std::string> parts;
+            std::stringstream ss(derivation_path);
+            std::string segment;
+            while (std::getline(ss, segment, '/'))
+            {
+                parts.push_back(segment);
             }
 
+            if (parts.size() != 4 || parts[0] != "m")
+            {
+                throw std::invalid_argument("Derivation path must follow m/<account>/<role>/<index>");
+            }
+
+            account = parse_u32(parts[1]);
+            role = parse_u32(parts[2]);
+            address_index = parse_u32(parts[3]);
+        }
+
+        std::string hex_encode(const uint8_t *data, size_t len)
+        {
+            std::ostringstream out;
+            out << std::hex << std::setfill('0');
+            for (size_t i = 0; i < len; ++i)
+            {
+                out << std::setw(2) << static_cast<int>(data[i]);
+            }
+            return out.str();
+        }
+
+        std::vector<uint8_t> hex_decode(std::string hex)
+        {
+            if (hex.rfind("0x", 0) == 0 || hex.rfind("0X", 0) == 0)
+            {
+                hex = hex.substr(2);
+            }
+
+            if (hex.size() % 2 != 0)
+            {
+                throw std::invalid_argument("Hex input must have even length");
+            }
+
+            auto nibble = [](char c) -> int
+            {
+                if (c >= '0' && c <= '9')
+                {
+                    return c - '0';
+                }
+                const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (lower >= 'a' && lower <= 'f')
+                {
+                    return 10 + (lower - 'a');
+                }
+                return -1;
+            };
+
+            std::vector<uint8_t> out;
+            out.reserve(hex.size() / 2);
+            for (size_t i = 0; i < hex.size(); i += 2)
+            {
+                const int hi = nibble(hex[i]);
+                const int lo = nibble(hex[i + 1]);
+                if (hi < 0 || lo < 0)
+                {
+                    throw std::invalid_argument("Invalid hex input");
+                }
+                out.push_back(static_cast<uint8_t>((hi << 4) | lo));
+            }
             return out;
+        }
+
+#if MIDNIGHT_HAS_OPENSSL_CRYPTO
+        std::vector<uint8_t> hmac_sha512_bytes(const std::vector<uint8_t> &key, const std::vector<uint8_t> &message)
+        {
+            unsigned int out_len = 0;
+            std::array<uint8_t, EVP_MAX_MD_SIZE> digest{};
+            unsigned char *result = HMAC(EVP_sha512(),
+                                         key.data(), static_cast<int>(key.size()),
+                                         message.data(), message.size(),
+                                         digest.data(), &out_len);
+            if (result == nullptr || out_len != 64)
+            {
+                throw std::runtime_error("HMAC-SHA512 failed");
+            }
+            return std::vector<uint8_t>(digest.begin(), digest.begin() + out_len);
+        }
+
+        std::vector<uint8_t> pbkdf2_hmac_sha512_bytes(const std::string &password, const std::string &salt, int iterations, size_t out_len)
+        {
+            std::vector<uint8_t> out(out_len);
+            const int ok = PKCS5_PBKDF2_HMAC(
+                password.c_str(), static_cast<int>(password.size()),
+                reinterpret_cast<const unsigned char *>(salt.data()), static_cast<int>(salt.size()),
+                iterations, EVP_sha512(), static_cast<int>(out_len), out.data());
+            if (ok != 1)
+            {
+                throw std::runtime_error("PBKDF2-HMAC-SHA512 failed");
+            }
+            return out;
+        }
+#endif
+
+        Bip32Node derive_master_node_from_seed(const std::vector<uint8_t> &seed)
+        {
+#if MIDNIGHT_HAS_OPENSSL_CRYPTO
+            const std::vector<uint8_t> master_key = {'B', 'i', 't', 'c', 'o', 'i', 'n', ' ', 's', 'e', 'e', 'd'};
+            const auto digest = hmac_sha512_bytes(master_key, seed);
+            Bip32Node node{};
+            std::copy_n(digest.begin(), 32, node.key.begin());
+            std::copy_n(digest.begin() + 32, 32, node.chain.begin());
+            return node;
+#else
+            (void)seed;
+            throw std::runtime_error("OpenSSL crypto support is required for wallet key derivation");
+#endif
+        }
+
+        Bip32Node derive_child_node(const Bip32Node &parent, uint32_t index)
+        {
+#if MIDNIGHT_HAS_OPENSSL_CRYPTO
+            std::vector<uint8_t> payload(parent.key.begin(), parent.key.end());
+            payload.push_back(static_cast<uint8_t>((index >> 24) & 0xFF));
+            payload.push_back(static_cast<uint8_t>((index >> 16) & 0xFF));
+            payload.push_back(static_cast<uint8_t>((index >> 8) & 0xFF));
+            payload.push_back(static_cast<uint8_t>(index & 0xFF));
+
+            std::vector<uint8_t> chain(parent.chain.begin(), parent.chain.end());
+            const auto digest = hmac_sha512_bytes(chain, payload);
+            Bip32Node child{};
+            std::copy_n(digest.begin(), 32, child.key.begin());
+            std::copy_n(digest.begin() + 32, 32, child.chain.begin());
+            return child;
+#else
+            (void)parent;
+            (void)index;
+            throw std::runtime_error("OpenSSL crypto support is required for wallet key derivation");
+#endif
+        }
+
+        std::array<uint8_t, 32> derive_role_payload(const std::vector<uint8_t> &seed, uint32_t account, uint32_t role, uint32_t address_index)
+        {
+            auto node = derive_master_node_from_seed(seed);
+            node = derive_child_node(node, account);
+            node = derive_child_node(node, role);
+            node = derive_child_node(node, address_index);
+            return node.key;
+        }
+
+        std::string role_to_hrp(uint32_t role)
+        {
+            switch (role)
+            {
+            case 3:
+                return "mn_shield-addr_preprod";
+            case 2:
+                return "mn_dust_preprod";
+            default:
+                return "mn_addr_preprod";
+            }
+        }
+
+        std::vector<uint8_t> decode_seed_hex_or_throw(const std::string &seed_hex)
+        {
+            auto seed = hex_decode(seed_hex);
+            if (seed.size() != 64)
+            {
+                throw std::runtime_error("Wallet seed must be 64 bytes");
+            }
+            return seed;
         }
     } // namespace
 
@@ -146,18 +348,17 @@ namespace midnight::blockchain
         msg << "Creating wallet from mnemonic (" << mnemonic.length() / 15 << " words)";
         midnight::g_logger->info(msg.str());
 
-#ifdef ENABLE_CARDANO_REAL
-        // In production, would use proper libraries:
-        // cardano_pbkdf2_t* pbkdf2 = cardano_pbkdf2_new();
-        // uint8_t root_key[32];
-        // cardano_pbkdf2_derive_from_mnemonic(
-        //     pbkdf2, mnemonic.c_str(), passphrase.c_str(),
-        //     root_key, sizeof(root_key));
-        // extended_private_key_ = to_hex(root_key);
-#else
-        // Mock implementation - derive from mnemonic string
-        extended_private_key_ = pbkdf2_derive(mnemonic, passphrase);
-#endif
+        const std::string normalized_mnemonic = normalize_words(mnemonic);
+        if (normalized_mnemonic.empty())
+        {
+            throw std::invalid_argument("Mnemonic cannot be empty");
+        }
+
+        // BIP39 seed: PBKDF2-HMAC-SHA512(mnemonic, "mnemonic" + passphrase, 2048, 64 bytes)
+        extended_private_key_ = pbkdf2_derive(normalized_mnemonic, passphrase);
+
+        addresses_.clear();
+        balances_.clear();
 
         // Generate primary address
         generate_address(0, 0, 0);
@@ -167,10 +368,35 @@ namespace midnight::blockchain
     void Wallet::create_from_xprv(const std::string &xprv, const std::string &passphrase)
     {
         wallet_type_ = WalletType::EXTENDED_KEY;
-        extended_private_key_ = xprv;
+
+        if (xprv.empty())
+        {
+            throw std::invalid_argument("Extended private key cannot be empty");
+        }
+
+        // Accept direct seed hex (64 bytes), otherwise derive deterministic seed from provided secret.
+        try
+        {
+            auto maybe_seed = hex_decode(xprv);
+            if (maybe_seed.size() == 64)
+            {
+                extended_private_key_ = hex_encode(maybe_seed.data(), maybe_seed.size());
+            }
+            else
+            {
+                extended_private_key_ = pbkdf2_derive(xprv, passphrase);
+            }
+        }
+        catch (const std::invalid_argument &)
+        {
+            extended_private_key_ = pbkdf2_derive(xprv, passphrase);
+        }
+
+        addresses_.clear();
+        balances_.clear();
 
         std::ostringstream msg;
-        msg << "Creating wallet from extended private key: " << xprv.substr(0, 20) << "...";
+        msg << "Creating wallet from extended private key: " << xprv.substr(0, std::min<size_t>(20, xprv.size())) << "...";
         midnight::g_logger->info(msg.str());
 
         generate_address(0, 0, 0);
@@ -187,6 +413,7 @@ namespace midnight::blockchain
         // 2. Decrypt with passphrase
         // 3. Extract extended private key
         // 4. Regenerate addresses from derivation paths
+        (void)passphrase;
     }
 
     void Wallet::save(const std::string &wallet_path, const std::string &passphrase)
@@ -199,6 +426,7 @@ namespace midnight::blockchain
         // 1. Create JSON structure with wallet metadata
         // 2. Encrypt extended private key with passphrase
         // 3. Write to file with proper permissions
+        (void)passphrase;
     }
 
     std::string Wallet::get_address() const
@@ -216,7 +444,7 @@ namespace midnight::blockchain
 
         std::ostringstream msg;
         msg << "Generated address (" << account << "/" << change << "/"
-            << address_index << "): " << address.substr(0, 30) << "...";
+            << address_index << "): " << address.substr(0, std::min<size_t>(30, address.size())) << "...";
         midnight::g_logger->debug(msg.str());
 
         return address;
@@ -232,13 +460,11 @@ namespace midnight::blockchain
         // // ... hex to bytes conversion ...
         // uint8_t signature[64];
         // cardano_sign_transaction(extended_private_key_.c_str(), tx_cbor, signature);
-#else
-        // Mock signing
-        std::string signature = "sig_" + tx_hex.substr(0, 32);
-        return signature;
-#endif
-
         return "";
+#else
+        // Placeholder signing logic - replace with real signing path once wire format is finalized.
+        return "sig_" + tx_hex.substr(0, std::min<size_t>(32, tx_hex.size()));
+#endif
     }
 
     uint64_t Wallet::get_balance(const std::string &address, MidnightBlockchain *adapter) const
@@ -251,7 +477,6 @@ namespace midnight::blockchain
 
         if (adapter)
         {
-            // Query from network if adapter provided
             auto utxos = adapter->query_utxos(address);
             uint64_t total = 0;
             for (const auto &utxo : utxos)
@@ -276,28 +501,46 @@ namespace midnight::blockchain
 
     std::string Wallet::derive_key(const std::string &derivation_path)
     {
-        // Midnight unshielded address format:
-        // mn_addr_<network>1<data+checksum> (Bech32m)
-        // TODO(ENABLE_CARDANO_REAL): replace with real key derivation + sr25519 pubkey.
-        const std::string derivation_seed = extended_private_key_ + "|" + derivation_path;
-        const auto key_material = derive_mock_key_material(derivation_seed);
-        return bech32m_encode("mn_addr_preprod", key_material);
+        if (extended_private_key_.empty())
+        {
+            throw std::runtime_error("Wallet seed is not initialized");
+        }
+
+        uint32_t account = 0;
+        uint32_t role = 0;
+        uint32_t address_index = 0;
+        parse_derivation_path(derivation_path, account, role, address_index);
+
+        const auto seed = decode_seed_hex_or_throw(extended_private_key_);
+        const auto payload = derive_role_payload(seed, account, role, address_index);
+        return bech32m_encode(role_to_hrp(role), payload);
     }
 
     std::string Wallet::pbkdf2_derive(const std::string &password, const std::string &salt)
     {
-        // Simplified PBKDF2 mock for demo
-        std::ostringstream key;
-        key << "xprv_" << std::hex << std::hash<std::string>{}(password + salt);
-        return key.str();
+#if MIDNIGHT_HAS_OPENSSL_CRYPTO
+        const std::string pbkdf2_salt = "mnemonic" + salt;
+        const auto seed = pbkdf2_hmac_sha512_bytes(password, pbkdf2_salt, 2048, 64);
+        return hex_encode(seed.data(), seed.size());
+#else
+        (void)password;
+        (void)salt;
+        throw std::runtime_error("OpenSSL crypto support is required for PBKDF2 derivation");
+#endif
     }
 
     std::string Wallet::hmac_sha512(const std::string &key, const std::string &message)
     {
-        // Simplified HMAC-SHA512 mock for demo
-        std::ostringstream result;
-        result << std::hex << std::hash<std::string>{}(key + message);
-        return result.str();
+#if MIDNIGHT_HAS_OPENSSL_CRYPTO
+        const std::vector<uint8_t> key_bytes(key.begin(), key.end());
+        const std::vector<uint8_t> msg_bytes(message.begin(), message.end());
+        const auto digest = hmac_sha512_bytes(key_bytes, msg_bytes);
+        return hex_encode(digest.data(), digest.size());
+#else
+        (void)key;
+        (void)message;
+        throw std::runtime_error("OpenSSL crypto support is required for HMAC-SHA512");
+#endif
     }
 
 } // namespace midnight::blockchain

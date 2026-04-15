@@ -1,8 +1,8 @@
 #include "midnight/network/network_client.hpp"
 #include "midnight/network/network_config.hpp"
-#include "midnight/core/logger.hpp"
 #include <iostream>
 #include <iomanip>
+#include <vector>
 
 /**
  * HTTP Connectivity Test - Verifies Phase 2 implementation
@@ -10,7 +10,6 @@
  */
 int main()
 {
-    midnight::g_logger->info("Phase 2: HTTP Connectivity Test Started");
     bool preprod_transport_ok = false;
     bool preprod_rpc_ok = false;
     bool public_http_get_ok = false;
@@ -48,7 +47,7 @@ int main()
         std::cout << "✗ Error: " << e.what() << std::endl;
     }
 
-    std::cout << "\nTest 2: Midnight Prepare (TESTNET)" << std::endl;
+    std::cout << "\nTest 2: Midnight Preprod (TESTNET)" << std::endl;
     std::cout << "------------------------------------" << std::endl;
     try
     {
@@ -64,38 +63,56 @@ int main()
             preprod_transport_ok = true;
             std::cout << "✓ Connected to Midnight TESTNET (Preprod)" << std::endl;
 
-            // Try a simple JSON-RPC health check
-            std::cout << "Attempting JSON-RPC health check..." << std::endl;
-            try
+            // Probe the Substrate-compatible RPC methods exposed by Midnight Preprod.
+            std::cout << "Attempting JSON-RPC compatibility probe..." << std::endl;
+
+            struct RpcProbe
             {
-                nlohmann::json health_request = {
-                    {"jsonrpc", "2.0"},
-                    {"method", "getNodeInfo"},
-                    {"params", nlohmann::json::array()},
-                    {"id", 1}};
+                const char *method;
+            };
 
-                auto response = testnet_client.post_json("/", health_request);
+            const std::vector<RpcProbe> probes = {
+                {"system_chain"},
+                {"system_health"},
+                {"chain_getHeader"}};
 
-                if (response.contains("result"))
+            size_t successful_probes = 0;
+            for (size_t i = 0; i < probes.size(); ++i)
+            {
+                try
                 {
-                    preprod_rpc_ok = true;
-                    std::cout << "✓ Node is responding to JSON-RPC calls" << std::endl;
-                    std::cout << "  Response: " << response.dump(2) << std::endl;
+                    nlohmann::json request = {
+                        {"jsonrpc", "2.0"},
+                        {"method", probes[i].method},
+                        {"params", nlohmann::json::array()},
+                        {"id", static_cast<int>(i + 1)}};
+
+                    auto response = testnet_client.post_json("/", request);
+                    if (response.contains("result"))
+                    {
+                        ++successful_probes;
+                        std::cout << "  ✓ " << probes[i].method << " responded" << std::endl;
+                    }
+                    else if (response.contains("error"))
+                    {
+                        std::cout << "  ✗ " << probes[i].method
+                                  << " error: " << response["error"].dump() << std::endl;
+                    }
+                    else
+                    {
+                        std::cout << "  ✗ " << probes[i].method
+                                  << " unexpected response: " << response.dump() << std::endl;
+                    }
                 }
-                else if (response.contains("error"))
+                catch (const std::exception &rpc_error)
                 {
-                    std::cout << "⚠ Node responded with error: " << response["error"].dump() << std::endl;
-                }
-                else
-                {
-                    std::cout << "⚠ Unexpected response format: " << response.dump(2) << std::endl;
+                    std::cout << "  ✗ " << probes[i].method
+                              << " failed: " << rpc_error.what() << std::endl;
                 }
             }
-            catch (const std::exception &rpc_error)
-            {
-                std::cout << "⚠ JSON-RPC call failed: " << rpc_error.what() << std::endl;
-                std::cout << "  (This is expected if node requires specific request format)" << std::endl;
-            }
+
+            preprod_rpc_ok = (successful_probes == probes.size());
+            std::cout << "JSON-RPC successful probes: " << successful_probes << "/" << probes.size() << std::endl;
         }
         else
         {
@@ -192,6 +209,5 @@ int main()
         std::cout << "Reason: SDK chưa chứng minh được giao tiếp JSON-RPC ổn định với Midnight Preprod." << std::endl;
     }
 
-    midnight::g_logger->info("Phase 2: HTTP Connectivity Test Finished");
     return production_ready ? 0 : 1;
 }

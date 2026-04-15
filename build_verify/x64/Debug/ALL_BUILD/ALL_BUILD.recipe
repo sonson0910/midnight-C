@@ -1,0 +1,71 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <ProjectOutputs>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\x64\Debug\ZERO_CHECK</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\jsoncpp.dll</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\midnight-core.dll</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\blockchain_example.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\gmock.dll</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\gmock_main.dll</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\gtest.dll</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\gtest_main.dll</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\http_connectivity_test.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\http_example.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\jsoncpp_test.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\jsontestrunner_exe.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\midnight-tests.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\mqtt_example.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\phase3_end_to_end_example.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\phase4a_zk_types_example.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\phase4b_private_state_example.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\phase4c_proof_server_resilience_example.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\phase4d_ledger_state_sync_example.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\bin\Debug\wallet-generator.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\venera\midnight\night_fund\build_verify\x64\Debug\ALL_BUILD</FullPath>
+    </ProjectOutput>
+  </ProjectOutputs>
+  <ContentFiles />
+  <SatelliteDlls />
+  <NonRecipeFileRefs />
+</Project>

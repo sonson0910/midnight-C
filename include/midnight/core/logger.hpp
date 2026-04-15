@@ -6,6 +6,14 @@
 namespace midnight
 {
 
+#if defined(_WIN32) && defined(MIDNIGHT_BUILDING_DLL)
+#define MIDNIGHT_LOGGER_API __declspec(dllexport)
+#elif defined(_WIN32) && defined(MIDNIGHT_USING_DLL)
+#define MIDNIGHT_LOGGER_API __declspec(dllimport)
+#else
+#define MIDNIGHT_LOGGER_API
+#endif
+
     enum class LogLevel
     {
         TRACE = 0,
@@ -44,6 +52,6 @@ namespace midnight
     };
 
     // Global logger instance
-    extern std::shared_ptr<Logger> g_logger;
+    extern MIDNIGHT_LOGGER_API std::shared_ptr<Logger> g_logger;
 
 } // namespace midnight

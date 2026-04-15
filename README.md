@@ -106,7 +106,7 @@ ctest --output-on-failure
 ### 1. Initialize Blockchain
 
 ```cpp
-#include "midnight/blockchain/cardano_adapter.hpp"
+#include "midnight/blockchain/midnight_adapter.hpp"
 
 // Setup protocol parameters
 midnight::blockchain::ProtocolParams params;
@@ -114,9 +114,9 @@ params.min_fee_a = 44;
 params.min_fee_b = 155381;
 
 // Create blockchain manager
-midnight::blockchain::BlockchainManager blockchain;
-blockchain.initialize("testnet", params);
-blockchain.connect("http://midnight-testnet:5678");
+midnight::blockchain::MidnightBlockchain blockchain;
+blockchain.initialize("preprod", params);
+blockchain.connect("https://rpc.preprod.midnight.network");
 ```
 
 ### 2. Create Wallet
@@ -162,7 +162,7 @@ if (submitted.success) {
 - ✅ Thiết lập cấu trúc dự án
 - ✅ Core components (Config, Logger, SessionManager)
 - ✅ Protocol clients (MQTT, CoAP, HTTP, WebSocket)
-- ✅ Blockchain components (Transaction, Wallet, BlockchainManager)
+- ✅ Blockchain components (Transaction, Wallet, MidnightBlockchain)
 - ⏳ Triển khai đầy đủ các giao thức với thư viện thư ba
 - ⏳ Thêm mã hóa và các tính năng bảo mật
 - ⏳ Hỗ trợ multi-sig transactions

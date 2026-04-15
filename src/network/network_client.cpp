@@ -7,7 +7,6 @@
 // cpp-httplib is a header-only HTTP client library
 // Download from: https://github.com/yhirose/cpp-httplib
 // Single file: httplib.h
-#define CPPHTTPLIB_OPENSSL_SUPPORT
 #include <httplib.h>
 
 namespace midnight::network
@@ -51,7 +50,6 @@ namespace midnight::network
             return normalized_base + normalized_path;
         }
     } // namespace
-
 
     NetworkClient::NetworkClient(const std::string &base_url, uint32_t timeout_ms)
         : base_url_(base_url), timeout_ms_(timeout_ms)
@@ -139,18 +137,36 @@ namespace midnight::network
             request_path = normalize_joined_path(request_path, "/");
 
             midnight::g_logger->debug("Checking connectivity to: " + host + ":" + std::to_string(port));
+            const char *rpc_probe_payload = "{\"jsonrpc\":\"2.0\",\"method\":\"system_chain\",\"params\":[],\"id\":1}";
 
-            // Probe endpoint with a lightweight GET request to verify real connectivity
+            // Probe endpoint with GET first, then POST for RPC/GraphQL endpoints.
             if (is_https)
             {
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
                 httplib::SSLClient cli(host, port);
                 cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
-                auto res = cli.Get(request_path.c_str());
-                if (res)
+
+                auto get_res = cli.Get(request_path.c_str());
+                if (get_res)
                 {
                     return true;
                 }
+
+                auto post_res = cli.Post(request_path.c_str(), rpc_probe_payload, "application/json");
+                if (post_res)
+                {
+                    return true;
+                }
+
+                if (request_path != "/")
+                {
+                    post_res = cli.Post("/", rpc_probe_payload, "application/json");
+                    if (post_res)
+                    {
+                        return true;
+                    }
+                }
+
                 midnight::g_logger->debug("Connectivity probe failed for HTTPS endpoint");
                 return false;
 #else
@@ -162,11 +178,28 @@ namespace midnight::network
             {
                 httplib::Client cli(host, port);
                 cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
-                auto res = cli.Get(request_path.c_str());
-                if (res)
+
+                auto get_res = cli.Get(request_path.c_str());
+                if (get_res)
                 {
                     return true;
                 }
+
+                auto post_res = cli.Post(request_path.c_str(), rpc_probe_payload, "application/json");
+                if (post_res)
+                {
+                    return true;
+                }
+
+                if (request_path != "/")
+                {
+                    post_res = cli.Post("/", rpc_probe_payload, "application/json");
+                    if (post_res)
+                    {
+                        return true;
+                    }
+                }
+
                 midnight::g_logger->debug("Connectivity probe failed for HTTP endpoint");
                 return false;
             }

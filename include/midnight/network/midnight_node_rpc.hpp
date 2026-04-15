@@ -2,10 +2,8 @@
 #define MIDNIGHT_NODE_RPC_HPP
 
 #include "network_client.hpp"
-#include "midnight/blockchain/transaction.hpp"
 #include "midnight/blockchain/midnight_adapter.hpp"
 #include <vector>
-#include <map>
 #include <string>
 
 namespace midnight::network

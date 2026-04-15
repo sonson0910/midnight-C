@@ -1,6 +1,7 @@
 enable_testing()
 
 include(FetchContent)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_Declare(
     googletest
     URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.zip
@@ -21,6 +22,12 @@ target_link_libraries(midnight-tests
         midnight-core
         GTest::gtest
         GTest::gtest_main
+)
+
+target_include_directories(midnight-tests
+    BEFORE
+    PRIVATE
+        ${googletest_SOURCE_DIR}/googletest/include
 )
 
 target_include_directories(midnight-tests

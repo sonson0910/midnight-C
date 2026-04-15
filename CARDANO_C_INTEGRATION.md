@@ -79,7 +79,7 @@ sudo cmake --install .
 
 ```cpp
 #include "midnight/blockchain/wallet.hpp"
-#include "midnight/blockchain/cardano_adapter.hpp"
+#include "midnight/blockchain/midnight_adapter.hpp"
 
 midnight::blockchain::Wallet wallet;
 
@@ -97,12 +97,12 @@ std::cout << "Address: " << address << std::endl;
 ### Example 2: Build and Sign Transaction
 
 ```cpp
-#include "midnight/blockchain/cardano_adapter.hpp"
+#include "midnight/blockchain/midnight_adapter.hpp"
 #include "midnight/blockchain/transaction.hpp"
 
 // Initialize adapter
-midnight::blockchain::CardanoAdapter adapter;
-midnight::blockchain::CardanoProtocolParams params;
+midnight::blockchain::MidnightBlockchain adapter;
+midnight::blockchain::ProtocolParams params;
 params.min_fee_a = 44;
 params.min_fee_b = 155381;
 params.utxo_cost_per_byte = 4310;
@@ -297,7 +297,7 @@ midnight::g_logger->trace("Trace level information");
 ### Preprod (Pre-Production Testnet)
 
 ```cpp
-::midnight::blockchain::CardanoProtocolParams params;
+::midnight::blockchain::ProtocolParams params;
 params.min_fee_a = 44;
 params.min_fee_b = 155381;
 

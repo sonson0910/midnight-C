@@ -36,7 +36,7 @@ namespace midnight::network
                 return "http://localhost:5678/api";
 
             case Network::TESTNET:
-                return "https://preprod.midnight.network/api";
+                return "https://rpc.preprod.midnight.network";
 
             case Network::STAGENET:
                 return "https://staging.midnight.network/api";
@@ -60,7 +60,7 @@ namespace midnight::network
                 return "http://localhost:9000/graphql";
 
             case Network::TESTNET:
-                return "https://preprod-explorer.midnight.network/graphql";
+                return "https://indexer.preprod.midnight.network/api/v3/graphql";
 
             case Network::STAGENET:
                 return "https://staging-explorer.midnight.network/graphql";
