@@ -12,6 +12,46 @@
 
 namespace midnight::network
 {
+    namespace
+    {
+        std::string normalize_joined_path(const std::string &base_path, const std::string &path)
+        {
+            std::string normalized_base = base_path.empty() ? "/" : base_path;
+            if (normalized_base.front() != '/')
+            {
+                normalized_base.insert(normalized_base.begin(), '/');
+            }
+            while (normalized_base.size() > 1 && normalized_base.back() == '/')
+            {
+                normalized_base.pop_back();
+            }
+
+            if (path.empty() || path == "/")
+            {
+                return normalized_base;
+            }
+
+            std::string normalized_path = path;
+            if (normalized_path.front() != '/')
+            {
+                normalized_path.insert(normalized_path.begin(), '/');
+            }
+
+            if (normalized_path == normalized_base ||
+                (normalized_base != "/" && normalized_path.rfind(normalized_base + "/", 0) == 0))
+            {
+                return normalized_path;
+            }
+
+            if (normalized_base == "/")
+            {
+                return normalized_path;
+            }
+
+            return normalized_base + normalized_path;
+        }
+    } // namespace
+
 
     NetworkClient::NetworkClient(const std::string &base_url, uint32_t timeout_ms)
         : base_url_(base_url), timeout_ms_(timeout_ms)
@@ -161,12 +201,7 @@ namespace midnight::network
                 host = host.substr(0, host.find(':'));
             }
 
-            // Append path to request path
-            if (!path.empty() && path[0] != '/')
-            {
-                request_path += '/';
-            }
-            request_path += path;
+            request_path = normalize_joined_path(request_path, path);
 
             msg.str("");
             msg << "POST " << host << ":" << port << request_path;
@@ -260,12 +295,7 @@ namespace midnight::network
                 host = host.substr(0, host.find(':'));
             }
 
-            // Append path to request path
-            if (!path.empty() && path[0] != '/')
-            {
-                request_path += '/';
-            }
-            request_path += path;
+            request_path = normalize_joined_path(request_path, path);
 
             msg.str("");
             msg << "GET " << host << ":" << port << request_path;

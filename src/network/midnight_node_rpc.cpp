@@ -3,6 +3,7 @@
 #include <sstream>
 #include <chrono>
 #include <thread>
+#include <vector>
 
 namespace midnight::network
 {
@@ -204,22 +205,50 @@ namespace midnight::network
 
         try
         {
-            json response = client_->post_json("/rpc", request);
+            std::vector<std::string> path_errors;
 
-            // Check for JSON-RPC error response
-            if (response.contains("error") && !response["error"].is_null())
+            for (const auto &path : rpc_paths_)
             {
-                json error_obj = response["error"];
-                std::string error_msg = error_obj.value("message", "Unknown error");
-                throw std::runtime_error("RPC error: " + error_msg);
+                try
+                {
+                    json response = client_->post_json(path, request);
+
+                    // Check for JSON-RPC error response
+                    if (response.contains("error") && !response["error"].is_null())
+                    {
+                        json error_obj = response["error"];
+                        std::string error_msg = error_obj.value("message", "Unknown error");
+                        throw std::runtime_error("RPC error: " + error_msg);
+                    }
+
+                    if (!response.contains("result"))
+                    {
+                        throw std::runtime_error("Invalid RPC response - missing result field");
+                    }
+
+                    return response["result"];
+                }
+                catch (const std::exception &path_error)
+                {
+                    const std::string path_error_message = "path " + path + ": " + path_error.what();
+                    path_errors.push_back(path_error_message);
+                    midnight::g_logger->debug("RPC path attempt failed: " + path_error_message);
+                }
             }
 
-            if (!response.contains("result"))
+            std::string combined_errors;
+            bool first_error = true;
+            for (const auto &error : path_errors)
             {
-                throw std::runtime_error("Invalid RPC response - missing result field");
+                if (!first_error)
+                {
+                    combined_errors += " | ";
+                }
+                combined_errors += error;
+                first_error = false;
             }
 
-            return response["result"];
+            throw std::runtime_error("All RPC path attempts failed: " + combined_errors);
         }
         catch (const std::exception &e)
         {
