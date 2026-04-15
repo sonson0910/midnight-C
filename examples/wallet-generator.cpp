@@ -335,7 +335,7 @@ int main(int argc, char *argv[])
             resilience.max_retries = 1;
             resilience.initial_backoff_ms = std::chrono::milliseconds(100);
             ProofServerResilientClient resilient(proof_client, resilience);
-            proof_check.passed = resilient.connect_resilient() || resilient.perform_health_check();
+            proof_check.passed = resilient.connect_resilient();
             proof_check.detail = proof_check.passed ? "Proof server reachable" : proof_client->get_last_error();
         }
         catch (const std::exception &e)

@@ -231,14 +231,16 @@ namespace midnight::phase3
 
     bool TransactionBuilder::validate()
     {
+        constexpr size_t MAX_INPUTS = 256;
+        constexpr size_t MAX_OUTPUTS = 256;
         if (tx_.inputs.empty() || tx_.outputs.empty())
         {
             std::cerr << "Transaction must have inputs and outputs" << std::endl;
             return false;
         }
 
-        if (tx_.inputs.size() > TransactionValidator::MAX_INPUTS ||
-            tx_.outputs.size() > TransactionValidator::MAX_OUTPUTS)
+        if (tx_.inputs.size() > MAX_INPUTS ||
+            tx_.outputs.size() > MAX_OUTPUTS)
         {
             std::cerr << "Too many inputs or outputs" << std::endl;
             return false;
