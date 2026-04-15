@@ -124,7 +124,7 @@ namespace midnight::network
         {
             std::string normalized = network_name;
             std::transform(normalized.begin(), normalized.end(), normalized.begin(),
-                           [](unsigned char c)
+                           [](unsigned char c) -> char
                            { return static_cast<char>(std::tolower(c)); });
 
             if (normalized == "devnet" || normalized == "midnight-devnet")

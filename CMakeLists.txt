@@ -36,7 +36,7 @@ if(NOT DEFINED HTTPLIB_SOURCE_DIR)
     message(STATUS "Fetching cpp-httplib...")
     FetchContent_Declare(
         cpp-httplib
-        URL https://github.com/yhirose/cpp-httplib/archive/refs/heads/master.zip
+        URL https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.42.0.zip
         QUIET
     )
     FetchContent_GetProperties(cpp-httplib)
