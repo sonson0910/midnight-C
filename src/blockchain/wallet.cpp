@@ -1,12 +1,142 @@
 #include "midnight/blockchain/wallet.hpp"
 #include "midnight/blockchain/midnight_adapter.hpp"
 #include "midnight/core/logger.hpp"
+#include <array>
+#include <vector>
 #include <sstream>
 #include <iomanip>
 #include <functional>
 
 namespace midnight::blockchain
 {
+    namespace
+    {
+        constexpr uint32_t kBech32mConst = 0x2BC830A3;
+        constexpr const char *kBech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+        uint32_t bech32_polymod(const std::vector<uint8_t> &values)
+        {
+            static constexpr uint32_t gen[5] = {0x3B6A57B2, 0x26508E6D, 0x1EA119FA, 0x3D4233DD, 0x2A1462B3};
+            uint32_t chk = 1;
+            for (auto value : values)
+            {
+                const uint32_t top = chk >> 25;
+                chk = ((chk & 0x1FFFFFF) << 5) ^ value;
+                for (int i = 0; i < 5; ++i)
+                {
+                    chk ^= ((top >> i) & 1) ? gen[i] : 0;
+                }
+            }
+            return chk;
+        }
+
+        std::vector<uint8_t> bech32_hrp_expand(const std::string &hrp)
+        {
+            std::vector<uint8_t> ret;
+            ret.reserve(hrp.size() * 2 + 1);
+            for (unsigned char c : hrp)
+            {
+                ret.push_back(c >> 5);
+            }
+            ret.push_back(0);
+            for (unsigned char c : hrp)
+            {
+                ret.push_back(c & 31);
+            }
+            return ret;
+        }
+
+        std::vector<uint8_t> convert_bits(const uint8_t *data, size_t data_len, int from_bits, int to_bits, bool pad)
+        {
+            int acc = 0;
+            int bits = 0;
+            const int maxv = (1 << to_bits) - 1;
+            const int max_acc = (1 << (from_bits + to_bits - 1)) - 1;
+            std::vector<uint8_t> ret;
+            ret.reserve((data_len * from_bits + to_bits - 1) / to_bits);
+
+            for (size_t i = 0; i < data_len; ++i)
+            {
+                const int value = data[i];
+                acc = ((acc << from_bits) | value) & max_acc;
+                bits += from_bits;
+                while (bits >= to_bits)
+                {
+                    bits -= to_bits;
+                    ret.push_back((acc >> bits) & maxv);
+                }
+            }
+
+            if (pad)
+            {
+                if (bits != 0)
+                {
+                    ret.push_back(static_cast<uint8_t>((acc << (to_bits - bits)) & maxv));
+                }
+            }
+            else if (bits >= from_bits || ((acc << (to_bits - bits)) & maxv) != 0)
+            {
+                // Bech32m requires trailing pad bits to be zero when padding is disabled.
+                return {};
+            }
+
+            return ret;
+        }
+
+        std::string bech32m_encode(const std::string &hrp, const std::array<uint8_t, 32> &payload)
+        {
+            std::vector<uint8_t> data;
+            data.push_back(0); // witness version 0
+            auto converted = convert_bits(payload.data(), payload.size(), 8, 5, true);
+            data.insert(data.end(), converted.begin(), converted.end());
+
+            auto values = bech32_hrp_expand(hrp);
+            values.insert(values.end(), data.begin(), data.end());
+            values.insert(values.end(), 6, 0);
+            const uint32_t polymod = bech32_polymod(values) ^ kBech32mConst;
+
+            std::array<uint8_t, 6> checksum{};
+            for (int i = 0; i < 6; ++i)
+            {
+                checksum[i] = (polymod >> (5 * (5 - i))) & 31;
+            }
+
+            std::string out = hrp + "1";
+            out.reserve(hrp.size() + 1 + data.size() + checksum.size());
+            for (auto v : data)
+            {
+                out.push_back(kBech32Charset[v]);
+            }
+            for (auto v : checksum)
+            {
+                out.push_back(kBech32Charset[v]);
+            }
+            return out;
+        }
+
+        std::array<uint8_t, 32> derive_mock_key_material(const std::string &seed_material)
+        {
+            std::array<uint8_t, 32> out{};
+            uint64_t state = 1469598103934665603ULL; // FNV-1a offset basis
+            for (unsigned char c : seed_material)
+            {
+                state ^= c;
+                state *= 1099511628211ULL;
+            }
+
+            for (size_t i = 0; i < out.size(); ++i)
+            {
+                const unsigned char extra = seed_material.empty()
+                                                ? static_cast<unsigned char>(i)
+                                                : static_cast<unsigned char>(seed_material[(i * 7) % seed_material.size()]);
+                state ^= (static_cast<uint64_t>(extra) + i);
+                state *= 1099511628211ULL;
+                out[i] = static_cast<uint8_t>((state >> ((i % 8) * 8)) & 0xFF);
+            }
+
+            return out;
+        }
+    } // namespace
 
     void Wallet::create_from_mnemonic(const std::string &mnemonic, const std::string &passphrase)
     {
@@ -79,8 +209,7 @@ namespace midnight::blockchain
     std::string Wallet::generate_address(uint32_t account, uint32_t change, uint32_t address_index)
     {
         std::ostringstream derivation_path;
-        derivation_path << "m/1852'/1815'/" << account << "'/"
-                        << change << "/" << address_index;
+        derivation_path << "m/" << account << "/" << change << "/" << address_index;
 
         std::string address = derive_key(derivation_path.str());
         addresses_.push_back(address);
@@ -147,26 +276,12 @@ namespace midnight::blockchain
 
     std::string Wallet::derive_key(const std::string &derivation_path)
     {
-        // CIP1852 derivation path parsing
-        // Format: m/1852'/1815'/account'/change/address_index
-
-        std::ostringstream derived;
-        derived << "xpub_" << derivation_path.substr(0, 30);
-
-#ifdef ENABLE_CARDANO_REAL
-        // In production, would use:
-        // cardano_extended_key_derive(extended_private_key_.c_str(),
-        //     derivation_path.c_str(), derived_key)
-        // Then generate address from derived_key
-#endif
-
-        // All keys, regardless of how derived, are prefixed with "addr"
-        // In a real implementation, this would go through cardano-c's address generation
-        // For now, create a test address
-        std::ostringstream addr;
-        addr << "addr_test_" << std::hex << std::hash<std::string>{}(derived.str());
-
-        return addr.str();
+        // Midnight unshielded address format:
+        // mn_addr_<network>1<data+checksum> (Bech32m)
+        // TODO(ENABLE_CARDANO_REAL): replace with real key derivation + sr25519 pubkey.
+        const std::string derivation_seed = extended_private_key_ + "|" + derivation_path;
+        const auto key_material = derive_mock_key_material(derivation_seed);
+        return bech32m_encode("mn_addr_preprod", key_material);
     }
 
     std::string Wallet::pbkdf2_derive(const std::string &password, const std::string &salt)
