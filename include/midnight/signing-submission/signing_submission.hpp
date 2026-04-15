@@ -18,6 +18,7 @@
 #include <optional>
 #include <json/json.h>
 #include <cstdint>
+#include <functional>
 
 namespace midnight::phase5 {
 
@@ -74,6 +75,11 @@ enum class SubmissionStatus {
     INCLUDED_IN_BLOCK,
     FINALIZED,
     FAILED,
+};
+
+enum class SubmissionTransportMode {
+    MOCK,
+    REAL_RPC,
 };
 
 /**
@@ -243,6 +249,10 @@ public:
      * @param node_rpc_url: Node RPC endpoint
      */
     explicit TransactionSubmitter(const std::string& node_rpc_url);
+    TransactionSubmitter(const std::string& node_rpc_url, SubmissionTransportMode mode);
+
+    void set_transport_mode(SubmissionTransportMode mode);
+    SubmissionTransportMode get_transport_mode() const;
     
     /**
      * Submit signed transaction
@@ -270,6 +280,7 @@ public:
     
 private:
     std::string rpc_url_;
+    SubmissionTransportMode transport_mode_ = SubmissionTransportMode::MOCK;
     std::map<std::string, SubmissionResult> submission_cache_;
     
     /**

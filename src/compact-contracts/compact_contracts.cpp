@@ -6,6 +6,7 @@
 #include <iostream>
 #include <regex>
 #include <algorithm>
+#include <fstream>
 
 namespace midnight::phase2
 {

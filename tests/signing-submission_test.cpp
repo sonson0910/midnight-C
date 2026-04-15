@@ -227,6 +227,37 @@ TEST_F(Phase5SigningSubmissionTest, Submit_ValidSignedTx_ReturnsSubmissionResult
     EXPECT_EQ(result.transaction_hash, signed_tx.transaction_hash);
 }
 
+TEST_F(Phase5SigningSubmissionTest, Submit_MockTransport_AlwaysReturnsSubmitted)
+{
+    TransactionSubmitter submitter(node_rpc_url, SubmissionTransportMode::MOCK);
+
+    SignedTransaction signed_tx;
+    signed_tx.transaction_hash = "0x" + std::string(64, 'm');
+    signed_tx.signature = "0x" + std::string(128, 's');
+    signed_tx.signer_address = "5mock";
+    signed_tx.nonce = 7;
+
+    auto result = submitter.submit(signed_tx);
+
+    EXPECT_EQ(result.status, SubmissionStatus::SUBMITTED);
+}
+
+TEST_F(Phase5SigningSubmissionTest, Submit_RealTransportBadEndpoint_ReturnsFailed)
+{
+    TransactionSubmitter submitter("invalid-url", SubmissionTransportMode::REAL_RPC);
+
+    SignedTransaction signed_tx;
+    signed_tx.transaction_hash = "0x" + std::string(64, 'r');
+    signed_tx.signature = "0x" + std::string(128, 's');
+    signed_tx.signer_address = "5real";
+    signed_tx.nonce = 8;
+
+    auto result = submitter.submit(signed_tx);
+
+    EXPECT_EQ(result.status, SubmissionStatus::FAILED);
+    EXPECT_FALSE(result.error_message.empty());
+}
+
 // ============================================================================
 // Test 12: Get Submission Status
 // ============================================================================

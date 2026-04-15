@@ -68,6 +68,15 @@ TEST_F(Phase3UtxoTransactionsTest, QueryUnspentUtxos_ValidAddress_ReturnsUtxos)
     EXPECT_TRUE(utxos.has_value());
 }
 
+TEST_F(Phase3UtxoTransactionsTest, QueryUnspentUtxos_RealRpcBadEndpoint_ReturnsEmptyOptional)
+{
+    UtxoSetManager manager("invalid-url", node_rpc_url, DataSourceMode::REAL_RPC);
+
+    auto utxos = manager.query_unspent_utxos(test_address);
+
+    EXPECT_FALSE(utxos.has_value());
+}
+
 // ============================================================================
 // Test 2: Query Specific UTXO
 // ============================================================================

@@ -5,6 +5,7 @@
 #include "midnight/zk-proofs/zk_proofs.hpp"
 #include <iostream>
 #include <algorithm>
+#include <thread>
 #include <chrono>
 #include <ctime>
 

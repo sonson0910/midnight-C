@@ -21,6 +21,11 @@
 
 namespace midnight::phase3 {
 
+enum class DataSourceMode {
+    MOCK,
+    REAL_RPC,
+};
+
 /**
  * UTXO Input (with commitment-based amounts)
  */
@@ -119,7 +124,11 @@ public:
      * @param node_rpc_url: Midnight Node RPC endpoint
      */
     UtxoSetManager(const std::string& indexer_graphql_url,
-                  const std::string& node_rpc_url);
+                   const std::string& node_rpc_url,
+                   DataSourceMode mode = DataSourceMode::MOCK);
+
+    void set_data_source_mode(DataSourceMode mode);
+    DataSourceMode get_data_source_mode() const;
     
     /**
      * Query UTXOs for an address
@@ -151,6 +160,7 @@ public:
 private:
     std::string indexer_url_;
     std::string rpc_url_;
+    DataSourceMode data_source_mode_;
     
     /**
      * GraphQL query

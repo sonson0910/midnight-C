@@ -3,14 +3,34 @@
  */
 
 #include "midnight/signing-submission/signing_submission.hpp"
+#include "midnight/network/network_client.hpp"
 #include <iostream>
 #include <algorithm>
 #include <thread>
 #include <chrono>
 #include <ctime>
+#include <sstream>
+#include <stdexcept>
 
 namespace midnight::phase5
 {
+    namespace
+    {
+        constexpr uint32_t kSubmitRpcTimeoutMs = 10000;
+
+        std::string to_hex(const std::vector<uint8_t> &data)
+        {
+            static const char *hex = "0123456789abcdef";
+            std::string out = "0x";
+            out.reserve(2 + data.size() * 2);
+            for (uint8_t byte : data)
+            {
+                out.push_back(hex[(byte >> 4) & 0x0F]);
+                out.push_back(hex[byte & 0x0F]);
+            }
+            return out;
+        }
+    } // namespace
 
     // ============================================================================
     // KeyManager Implementation
@@ -267,8 +287,25 @@ namespace midnight::phase5
     // ============================================================================
 
     TransactionSubmitter::TransactionSubmitter(const std::string &node_rpc_url)
+        : TransactionSubmitter(node_rpc_url, SubmissionTransportMode::MOCK)
+    {
+    }
+
+    TransactionSubmitter::TransactionSubmitter(const std::string &node_rpc_url,
+                                               SubmissionTransportMode mode)
         : rpc_url_(node_rpc_url)
     {
+        transport_mode_ = mode;
+    }
+
+    void TransactionSubmitter::set_transport_mode(SubmissionTransportMode mode)
+    {
+        transport_mode_ = mode;
+    }
+
+    SubmissionTransportMode TransactionSubmitter::get_transport_mode() const
+    {
+        return transport_mode_;
     }
 
     SubmissionResult TransactionSubmitter::submit(const SignedTransaction &signed_tx)
@@ -276,6 +313,16 @@ namespace midnight::phase5
         try
         {
             auto response = rpc_submit_extrinsic(signed_tx);
+            if (response.isMember("error"))
+            {
+                Json::StreamWriterBuilder writer;
+                writer["indentation"] = "";
+                throw std::runtime_error("RPC error: " + Json::writeString(writer, response["error"]));
+            }
+            if (!response.isMember("result"))
+            {
+                throw std::runtime_error("RPC response missing result");
+            }
 
             SubmissionResult result;
             result.transaction_hash = signed_tx.transaction_hash;
@@ -350,12 +397,55 @@ namespace midnight::phase5
 
     Json::Value TransactionSubmitter::rpc_submit_extrinsic(const SignedTransaction &signed_tx)
     {
-        // In production: Send HTTP POST to RPC endpoint
-        // For now: Return mock response
+        if (transport_mode_ == SubmissionTransportMode::MOCK)
+        {
+            Json::Value response;
+            response["result"] = signed_tx.transaction_hash;
+            return response;
+        }
 
-        Json::Value response;
-        response["result"] = signed_tx.transaction_hash;
-        return response;
+        midnight::network::NetworkClient client(rpc_url_, kSubmitRpcTimeoutMs);
+        nlohmann::json request = {
+            {"jsonrpc", "2.0"},
+            {"id", 1},
+            {"method", "submitTransaction"},
+            {"params", {
+                           {"transaction_hash", signed_tx.transaction_hash},
+                           {"signature", signed_tx.signature},
+                           {"signer_address", signed_tx.signer_address},
+                           {"nonce", signed_tx.nonce},
+                           {"signed_data", to_hex(signed_tx.signed_data)}
+                       }}
+        };
+
+        std::vector<std::string> rpc_paths = {"/", "/rpc", "/api"};
+        std::string accumulated_errors;
+        for (const auto &path : rpc_paths)
+        {
+            try
+            {
+                auto response = client.post_json(path, request);
+                Json::Value parsed;
+                Json::CharReaderBuilder builder;
+                std::string errors;
+                std::istringstream stream(response.dump());
+                if (!Json::parseFromStream(builder, stream, &parsed, &errors))
+                {
+                    throw std::runtime_error("parse error: " + errors);
+                }
+                return parsed;
+            }
+            catch (const std::exception &e)
+            {
+                if (!accumulated_errors.empty())
+                {
+                    accumulated_errors += " | ";
+                }
+                accumulated_errors += path + ": " + e.what();
+            }
+        }
+
+        throw std::runtime_error("Real RPC submission failed for all paths: " + accumulated_errors);
     }
 
     // ============================================================================

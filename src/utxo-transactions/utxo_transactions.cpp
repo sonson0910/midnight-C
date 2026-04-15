@@ -3,21 +3,41 @@
  */
 
 #include "midnight/utxo-transactions/utxo_transactions.hpp"
+#include "midnight/network/network_client.hpp"
 #include <iostream>
 #include <algorithm>
 #include <cstring>
+#include <sstream>
+#include <stdexcept>
 
 namespace midnight::phase3
 {
+    namespace
+    {
+        constexpr uint32_t kIndexerRpcTimeoutMs = 8000;
+        constexpr size_t kMaxTxInputs = 256;
+        constexpr size_t kMaxTxOutputs = 256;
+    } // namespace
 
     // ============================================================================
     // UtxoSetManager Implementation
     // ============================================================================
 
     UtxoSetManager::UtxoSetManager(const std::string &indexer_graphql_url,
-                                   const std::string &node_rpc_url)
-        : indexer_url_(indexer_graphql_url), rpc_url_(node_rpc_url)
+                                   const std::string &node_rpc_url,
+                                   DataSourceMode mode)
+        : indexer_url_(indexer_graphql_url), rpc_url_(node_rpc_url), data_source_mode_(mode)
     {
+    }
+
+    void UtxoSetManager::set_data_source_mode(DataSourceMode mode)
+    {
+        data_source_mode_ = mode;
+    }
+
+    DataSourceMode UtxoSetManager::get_data_source_mode() const
+    {
+        return data_source_mode_;
     }
 
     std::optional<std::vector<Utxo>> UtxoSetManager::query_unspent_utxos(const std::string &address)
@@ -151,12 +171,31 @@ namespace midnight::phase3
 
     Json::Value UtxoSetManager::graphql_query(const std::string &query)
     {
-        // In production: Send HTTP POST to indexer_url_
-        // For now: Return mock response
+        if (data_source_mode_ == DataSourceMode::MOCK)
+        {
+            Json::Value response;
+            response["data"]["utxoSet"] = Json::Value(Json::arrayValue);
+            return response;
+        }
 
-        Json::Value response;
-        response["data"]["utxoSet"] = Json::Value(Json::arrayValue);
-        return response;
+        midnight::network::NetworkClient client(indexer_url_, kIndexerRpcTimeoutMs);
+        nlohmann::json payload = {
+            {"query", query}
+        };
+
+        auto raw_response = client.post_json("/", payload);
+        auto raw_string = raw_response.dump();
+
+        Json::CharReaderBuilder builder;
+        Json::Value parsed;
+        std::string errors;
+        std::istringstream stream(raw_string);
+        if (!Json::parseFromStream(builder, stream, &parsed, &errors))
+        {
+            throw std::runtime_error("Failed to parse GraphQL response: " + errors);
+        }
+
+        return parsed;
     }
 
     // ============================================================================
@@ -204,8 +243,8 @@ namespace midnight::phase3
             return false;
         }
 
-        if (tx_.inputs.size() > TransactionValidator::MAX_INPUTS ||
-            tx_.outputs.size() > TransactionValidator::MAX_OUTPUTS)
+        if (tx_.inputs.size() > kMaxTxInputs ||
+            tx_.outputs.size() > kMaxTxOutputs)
         {
             std::cerr << "Too many inputs or outputs" << std::endl;
             return false;
