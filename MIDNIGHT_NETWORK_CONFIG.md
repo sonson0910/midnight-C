@@ -114,7 +114,7 @@ All requests use **JSON-RPC 2.0** format:
   "jsonrpc": "2.0",
   "method": "getUTXOs",
   "params": {
-    "address": "addr_test_..."
+    "address": "mn_addr_preprod1..."
   },
   "id": 1
 }
@@ -129,7 +129,7 @@ All requests use **JSON-RPC 2.0** format:
       "txHash": "abc123...",
       "outputIndex": 0,
       "amount": 5000000,
-      "address": "addr_test_..."
+      "address": "mn_addr_preprod1..."
     }
   ],
   "id": 1
@@ -221,7 +221,7 @@ uint64_t fee = min_fee_a * tx_size_bytes + min_fee_b;
 ## Wallet Integration
 
 ### Address Format
-- **Bech32 Format**: `addr_test_...` (testnet)
+- **Bech32m Format**: `mn_addr_preprod1...` (Preprod/Testnet)
 - **Encoding**: Base32 with checksum
 - **Validation**: Checksum verification
 

@@ -2,6 +2,8 @@
 #define MIDNIGHT_NETWORK_CONFIG_HPP
 
 #include <string>
+#include <algorithm>
+#include <cctype>
 
 namespace midnight::network
 {
@@ -120,13 +122,19 @@ namespace midnight::network
          */
         static Network from_string(const std::string &network_name)
         {
-            if (network_name == "devnet")
+            std::string normalized = network_name;
+            std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                           [](unsigned char c) -> char
+                           { return static_cast<char>(std::tolower(c)); });
+
+            if (normalized == "devnet" || normalized == "midnight-devnet")
                 return Network::DEVNET;
-            if (network_name == "testnet" || network_name == "preprod")
+            if (normalized == "testnet" || normalized == "preprod" ||
+                normalized == "midnight-testnet" || normalized == "midnight-preprod")
                 return Network::TESTNET;
-            if (network_name == "stagenet")
+            if (normalized == "stagenet" || normalized == "midnight-stagenet")
                 return Network::STAGENET;
-            if (network_name == "mainnet")
+            if (normalized == "mainnet" || normalized == "midnight-mainnet")
                 return Network::MAINNET;
             return Network::TESTNET; // Default to testnet
         }
