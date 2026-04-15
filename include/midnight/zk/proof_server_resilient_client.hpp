@@ -267,7 +267,7 @@ namespace midnight::zk
          * @param retry_count Number of retries so far
          * @return Duration to backoff
          */
-        std::chrono::milliseconds calculate_backoff(uint32_t retry_count);
+        std::chrono::milliseconds calculate_backoff(uint32_t retry_count) const;
 
         /**
          * @brief Update circuit breaker state based on success/failure

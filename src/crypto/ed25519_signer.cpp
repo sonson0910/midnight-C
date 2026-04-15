@@ -3,7 +3,6 @@
 #include <stdexcept>
 #include <sstream>
 #include <iomanip>
-#include <random>
 
 #if __has_include(<sodium.h>)
 #include <sodium.h>
@@ -14,29 +13,6 @@
 
 namespace midnight::crypto
 {
-    namespace
-    {
-#if !MIDNIGHT_HAS_SODIUM
-        Ed25519Signer::Signature pseudo_sign(
-            const uint8_t *message,
-            size_t message_len,
-            const Ed25519Signer::PublicKey &public_key)
-        {
-            Ed25519Signer::Signature sig{};
-            std::hash<std::string> hasher;
-            std::string seed(reinterpret_cast<const char *>(message), message_len);
-            seed.append(reinterpret_cast<const char *>(public_key.data()), public_key.size());
-
-            for (size_t i = 0; i < sig.size(); ++i)
-            {
-                size_t mixed = hasher(seed + std::to_string(i));
-                sig[i] = static_cast<uint8_t>((mixed >> ((i % sizeof(size_t)) * 8)) & 0xFF);
-            }
-            return sig;
-        }
-#endif
-    } // namespace
-
     void Ed25519Signer::initialize()
     {
 #if MIDNIGHT_HAS_SODIUM
@@ -48,7 +24,9 @@ namespace midnight::crypto
         }
         midnight::g_logger->info("libsodium initialized for Ed25519 cryptography");
 #else
-        midnight::g_logger->warn("libsodium not available, using deterministic fallback signer");
+        const std::string error = "libsodium is required for Ed25519 cryptography";
+        midnight::g_logger->error(error);
+        throw std::runtime_error(error);
 #endif
     }
 
@@ -74,19 +52,7 @@ namespace midnight::crypto
         midnight::g_logger->debug("Generated new Ed25519 keypair");
         return {pub_key, priv_key};
 #else
-        PublicKey pub_key{};
-        PrivateKey priv_key{};
-        std::random_device rd;
-        for (auto &b : pub_key)
-        {
-            b = static_cast<uint8_t>(rd());
-        }
-        for (size_t i = 0; i < 32; ++i)
-        {
-            priv_key[i] = static_cast<uint8_t>(rd());
-            priv_key[i + 32] = pub_key[i];
-        }
-        return {pub_key, priv_key};
+        throw std::runtime_error("libsodium is required for Ed25519 key generation");
 #endif
     }
 
@@ -112,15 +78,8 @@ namespace midnight::crypto
         midnight::g_logger->debug("Generated Ed25519 keypair from seed (deterministic)");
         return {pub_key, priv_key};
 #else
-        PublicKey pub_key{};
-        PrivateKey priv_key{};
-        for (size_t i = 0; i < 32; ++i)
-        {
-            pub_key[i] = static_cast<uint8_t>(seed[i] ^ seed[(i + 13) % 32] ^ static_cast<uint8_t>(i));
-            priv_key[i] = seed[i];
-            priv_key[i + 32] = pub_key[i];
-        }
-        return {pub_key, priv_key};
+        (void)seed;
+        throw std::runtime_error("libsodium is required for Ed25519 deterministic derivation");
 #endif
     }
 
@@ -173,7 +132,10 @@ namespace midnight::crypto
                                   std::to_string(message_len) + " bytes)");
         return sig;
 #else
-        return pseudo_sign(message, message_len, extract_public_key(private_key));
+        (void)message;
+        (void)message_len;
+        (void)private_key;
+        throw std::runtime_error("libsodium is required for Ed25519 signing");
 #endif
     }
 
@@ -211,7 +173,11 @@ namespace midnight::crypto
         midnight::g_logger->debug("Signature verification: " + std::string(valid ? "VALID" : "INVALID"));
         return valid;
 #else
-        return signature == pseudo_sign(message, message_len, public_key);
+        (void)message;
+        (void)message_len;
+        (void)signature;
+        (void)public_key;
+        throw std::runtime_error("libsodium is required for Ed25519 verification");
 #endif
     }
 
