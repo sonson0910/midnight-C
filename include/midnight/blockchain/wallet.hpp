@@ -95,9 +95,9 @@ namespace midnight::blockchain
         WalletType get_type() const { return wallet_type_; }
 
         /**
-         * @brief Derive child key from derivation path (CIP1852)
-         * @param derivation_path Standard CIP1852 path (m/1852'/1815'/0'/0/0)
-         * @return Public key at that path
+         * @brief Derive child key from derivation path
+         * @param derivation_path Midnight wallet path (m/account/role/index)
+         * @return Midnight unshielded address (Bech32m)
          */
         std::string derive_key(const std::string &derivation_path);
 
