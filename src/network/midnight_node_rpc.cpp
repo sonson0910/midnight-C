@@ -205,10 +205,9 @@ namespace midnight::network
 
         try
         {
-            const std::vector<std::string> candidate_paths = {"/", "/rpc", "/api"};
-            std::string last_error;
+            std::vector<std::string> path_errors;
 
-            for (const auto &path : candidate_paths)
+            for (const auto &path : rpc_paths_)
             {
                 try
                 {
@@ -231,12 +230,23 @@ namespace midnight::network
                 }
                 catch (const std::exception &path_error)
                 {
-                    last_error = path_error.what();
-                    midnight::g_logger->debug("RPC path attempt failed (" + path + "): " + last_error);
+                    const std::string path_error_message = "path " + path + ": " + path_error.what();
+                    path_errors.push_back(path_error_message);
+                    midnight::g_logger->debug("RPC path attempt failed (" + path + "): " + path_error.what());
                 }
             }
 
-            throw std::runtime_error("All RPC path attempts failed: " + last_error);
+            std::string combined_errors;
+            for (size_t i = 0; i < path_errors.size(); ++i)
+            {
+                if (i > 0)
+                {
+                    combined_errors += " | ";
+                }
+                combined_errors += path_errors[i];
+            }
+
+            throw std::runtime_error("All RPC path attempts failed: " + combined_errors);
         }
         catch (const std::exception &e)
         {
