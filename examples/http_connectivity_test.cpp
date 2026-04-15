@@ -11,6 +11,10 @@
 int main()
 {
     midnight::g_logger->info("Phase 2: HTTP Connectivity Test Started");
+    bool preprod_transport_ok = false;
+    bool preprod_rpc_ok = false;
+    bool public_http_get_ok = false;
+    bool public_http_post_ok = false;
 
     std::cout << "\n"
               << std::string(70, '=') << std::endl;
@@ -57,6 +61,7 @@ int main()
 
         if (testnet_client.is_connected())
         {
+            preprod_transport_ok = true;
             std::cout << "✓ Connected to Midnight TESTNET (Preprod)" << std::endl;
 
             // Try a simple JSON-RPC health check
@@ -73,6 +78,7 @@ int main()
 
                 if (response.contains("result"))
                 {
+                    preprod_rpc_ok = true;
                     std::cout << "✓ Node is responding to JSON-RPC calls" << std::endl;
                     std::cout << "  Response: " << response.dump(2) << std::endl;
                 }
@@ -119,6 +125,7 @@ int main()
             auto get_response = http_test.get_json("/get");
             if (get_response.contains("headers"))
             {
+                public_http_get_ok = true;
                 std::cout << "✓ GET request successful" << std::endl;
                 std::cout << "  Contains " << get_response.size() << " response fields" << std::endl;
             }
@@ -140,6 +147,7 @@ int main()
             auto post_response = http_test.post_json("/post", test_payload);
             if (post_response.contains("json"))
             {
+                public_http_post_ok = true;
                 std::cout << "✓ POST request successful" << std::endl;
                 std::cout << "  Echoed payload: " << post_response["json"].dump() << std::endl;
             }
@@ -169,8 +177,21 @@ int main()
     std::cout << "✓ Connection timeout support" << std::endl;
     std::cout << "✓ JSON request/response handling" << std::endl;
     std::cout << "✓ HTTP GET and POST methods" << std::endl;
-    std::cout << "\nPhase 2 Status: Fully Implemented and Tested ✅" << std::endl;
+    std::cout << "\nCompatibility verdict:" << std::endl;
+    std::cout << "- Midnight Preprod transport: " << (preprod_transport_ok ? "PASS" : "FAIL") << std::endl;
+    std::cout << "- Midnight JSON-RPC response: " << (preprod_rpc_ok ? "PASS" : "FAIL") << std::endl;
+    std::cout << "- Public HTTPS GET/POST sanity: "
+              << ((public_http_get_ok && public_http_post_ok) ? "PASS" : "FAIL") << std::endl;
+
+    const bool production_ready = preprod_transport_ok && preprod_rpc_ok;
+    std::cout << "\nProduction readiness: "
+              << (production_ready ? "READY ✅" : "NOT READY ❌")
+              << std::endl;
+    if (!production_ready)
+    {
+        std::cout << "Reason: SDK chưa chứng minh được giao tiếp JSON-RPC ổn định với Midnight Preprod." << std::endl;
+    }
 
     midnight::g_logger->info("Phase 2: HTTP Connectivity Test Finished");
-    return 0;
+    return production_ready ? 0 : 1;
 }

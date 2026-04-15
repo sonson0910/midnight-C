@@ -85,6 +85,10 @@ cmake --build . --target midnight-examples
 
 # HTTP example
 ./bin/http_example
+
+# Kiểm tra tương thích/giao tiếp với Midnight Preprod
+# Trả về exit code 0 khi đủ điều kiện READY cho production
+./bin/http_connectivity_test
 ```
 
 ## Chạy Tests
