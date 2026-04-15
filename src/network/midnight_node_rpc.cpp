@@ -3,6 +3,7 @@
 #include <sstream>
 #include <chrono>
 #include <thread>
+#include <vector>
 
 namespace midnight::network
 {
@@ -204,22 +205,38 @@ namespace midnight::network
 
         try
         {
-            json response = client_->post_json("/rpc", request);
+            const std::vector<std::string> candidate_paths = {"/", "/rpc", "/api"};
+            std::string last_error;
 
-            // Check for JSON-RPC error response
-            if (response.contains("error") && !response["error"].is_null())
+            for (const auto &path : candidate_paths)
             {
-                json error_obj = response["error"];
-                std::string error_msg = error_obj.value("message", "Unknown error");
-                throw std::runtime_error("RPC error: " + error_msg);
+                try
+                {
+                    json response = client_->post_json(path, request);
+
+                    // Check for JSON-RPC error response
+                    if (response.contains("error") && !response["error"].is_null())
+                    {
+                        json error_obj = response["error"];
+                        std::string error_msg = error_obj.value("message", "Unknown error");
+                        throw std::runtime_error("RPC error: " + error_msg);
+                    }
+
+                    if (!response.contains("result"))
+                    {
+                        throw std::runtime_error("Invalid RPC response - missing result field");
+                    }
+
+                    return response["result"];
+                }
+                catch (const std::exception &path_error)
+                {
+                    last_error = path_error.what();
+                    midnight::g_logger->debug("RPC path attempt failed (" + path + "): " + last_error);
+                }
             }
 
-            if (!response.contains("result"))
-            {
-                throw std::runtime_error("Invalid RPC response - missing result field");
-            }
-
-            return response["result"];
+            throw std::runtime_error("All RPC path attempts failed: " + last_error);
         }
         catch (const std::exception &e)
         {
