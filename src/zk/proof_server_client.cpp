@@ -11,10 +11,17 @@ namespace midnight::zk
         return fmt::format("{}{}:{}", protocol, host, port);
     }
 
+    ProofServerClient::ProofServerClient()
+        : ProofServerClient(Config())
+    {
+    }
+
     ProofServerClient::ProofServerClient(const Config &config)
         : config_(config)
     {
-        network_client_ = std::make_shared<midnight::network::NetworkClient>();
+        network_client_ = std::make_shared<midnight::network::NetworkClient>(
+            config_.base_url(),
+            static_cast<uint32_t>(config_.timeout_ms.count()));
     }
 
     bool ProofServerClient::connect()
@@ -40,8 +47,7 @@ namespace midnight::zk
 
         try
         {
-            std::string endpoint = fmt::format("{}/status", config_.base_url());
-            auto response = network_client_->get_json(endpoint, config_.timeout_ms.count());
+            auto response = network_client_->get_json("/status");
             return response.contains("version");
         }
         catch (...)
@@ -85,11 +91,9 @@ namespace midnight::zk
             request.witnesses = witnesses;
 
             // Send to Proof Server
-            std::string endpoint = fmt::format("{}/generate", config_.base_url());
             json response = network_client_->post_json(
-                endpoint,
-                request.to_json(),
-                config_.timeout_ms.count());
+                "/generate",
+                request.to_json());
 
             // Parse response
             result = parse_proof_response(response);
@@ -134,17 +138,14 @@ namespace midnight::zk
             }
 
             // Send verification request to Proof Server
-            std::string endpoint = fmt::format("{}/verify", config_.base_url());
-
             json verify_request;
             verify_request["circuit_name"] = proof.metadata.circuit_name;
             verify_request["proof"] = proof.proof.to_json();
             verify_request["public_inputs"] = proof.public_inputs.to_json();
 
             json response = network_client_->post_json(
-                endpoint,
-                verify_request,
-                config_.timeout_ms.count());
+                "/verify",
+                verify_request);
 
             if (response.contains("valid"))
             {
@@ -166,8 +167,8 @@ namespace midnight::zk
 
         try
         {
-            std::string endpoint = fmt::format("{}/circuits/{}", config_.base_url(), circuit_name);
-            json response = network_client_->get_json(endpoint, config_.timeout_ms.count());
+            std::string endpoint = fmt::format("/circuits/{}", circuit_name);
+            json response = network_client_->get_json(endpoint);
 
             metadata = CircuitProofMetadata::from_json(response);
         }
@@ -185,8 +186,7 @@ namespace midnight::zk
     {
         try
         {
-            std::string endpoint = fmt::format("{}/status", config_.base_url());
-            json response = network_client_->get_json(endpoint, config_.timeout_ms.count());
+            json response = network_client_->get_json("/status");
             return response;
         }
         catch (const std::exception &e)
@@ -213,10 +213,10 @@ namespace midnight::zk
             rpc_request["params"] = params;
 
             // Send to Midnight RPC node
-            json response = network_client_->post_json(
+            midnight::network::NetworkClient rpc_client(
                 rpc_endpoint,
-                rpc_request,
-                config_.timeout_ms.count());
+                static_cast<uint32_t>(config_.timeout_ms.count()));
+            json response = rpc_client.post_json("/", rpc_request);
 
             // Extract transaction hash from response
             if (response.contains("result"))

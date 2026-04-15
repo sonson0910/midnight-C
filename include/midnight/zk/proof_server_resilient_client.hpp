@@ -115,7 +115,7 @@ namespace midnight::zk
          */
         ProofResult generate_proof_resilient(
             const std::string &circuit_name,
-            const std::string &circuit_data,
+            const std::vector<uint8_t> &circuit_data,
             const PublicInputs &inputs,
             const WitnessOutput &witnesses);
 
@@ -237,7 +237,7 @@ namespace midnight::zk
             std::string operation_type;                       ///< Type of operation (e.g., "generate_proof")
             std::chrono::system_clock::time_point created_at; ///< When request was queued
             std::string circuit_name;
-            std::string circuit_data;
+            std::vector<uint8_t> circuit_data;
             PublicInputs inputs;
             WitnessOutput witnesses;
             json user_data; ///< Additional user-provided data
@@ -267,7 +267,7 @@ namespace midnight::zk
          * @param retry_count Number of retries so far
          * @return Duration to backoff
          */
-        std::chrono::milliseconds calculate_backoff(uint32_t retry_count) const;
+        std::chrono::milliseconds calculate_backoff(uint32_t retry_count);
 
         /**
          * @brief Update circuit breaker state based on success/failure

@@ -31,7 +31,7 @@ namespace midnight::zk
 
     ProofResult ProofServerResilientClient::generate_proof_resilient(
         const std::string &circuit_name,
-        const std::string &circuit_data,
+        const std::vector<uint8_t> &circuit_data,
         const PublicInputs &inputs,
         const WitnessOutput &witnesses)
     {
@@ -62,7 +62,11 @@ namespace midnight::zk
                 total_operations_++;
 
                 // Perform operation
-                result = client_->generate_proof(circuit_name, circuit_data, inputs, witnesses);
+                result = client_->generate_proof(
+                    circuit_name,
+                    circuit_data,
+                    inputs,
+                    {{"default", witnesses}});
 
                 // Success
                 successful_operations_++;
@@ -86,6 +90,7 @@ namespace midnight::zk
                 if (attempt < config_.max_retries)
                 {
                     // Calculate backoff and retry
+                    total_retries_++;
                     auto backoff = calculate_backoff(attempt);
                     log_metrics("generate_proof (retry " + std::to_string(attempt + 1) + ")", metrics, false);
                     std::this_thread::sleep_for(backoff);
@@ -154,6 +159,7 @@ namespace midnight::zk
                 if (attempt < config_.max_retries)
                 {
                     auto backoff = calculate_backoff(attempt);
+                    total_retries_++;
                     std::this_thread::sleep_for(backoff);
                     continue;
                 }
@@ -218,6 +224,7 @@ namespace midnight::zk
                 if (attempt < config_.max_retries)
                 {
                     auto backoff = calculate_backoff(attempt);
+                    total_retries_++;
                     std::this_thread::sleep_for(backoff);
                     continue;
                 }
@@ -279,6 +286,7 @@ namespace midnight::zk
                 if (attempt < config_.max_retries)
                 {
                     auto backoff = calculate_backoff(attempt);
+                    total_retries_++;
                     std::this_thread::sleep_for(backoff);
                     continue;
                 }
@@ -344,6 +352,7 @@ namespace midnight::zk
                 if (attempt < config_.max_retries)
                 {
                     auto backoff = calculate_backoff(attempt);
+                    total_retries_++;
                     std::this_thread::sleep_for(backoff);
                     continue;
                 }
@@ -525,7 +534,7 @@ namespace midnight::zk
 
     // ============ Internal helper methods ============
 
-    std::chrono::milliseconds ProofServerResilientClient::calculate_backoff(uint32_t retry_count) const
+    std::chrono::milliseconds ProofServerResilientClient::calculate_backoff(uint32_t retry_count)
     {
         // Exponential backoff: initial_backoff * (multiplier ^ retry_count)
         double backoff_ms = config_.initial_backoff_ms.count();
@@ -539,7 +548,6 @@ namespace midnight::zk
             }
         }
 
-        total_retries_++;
         return std::chrono::milliseconds(static_cast<int64_t>(backoff_ms));
     }
 
@@ -589,7 +597,7 @@ namespace midnight::zk
                     req.circuit_name,
                     req.circuit_data,
                     req.inputs,
-                    req.witnesses);
+                    {{"default", req.witnesses}});
                 request_queue_.pop();
                 successful_operations_++;
             }

@@ -5,6 +5,7 @@
 #include <string>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include "midnight/zk/proof_types.hpp"
 
 namespace midnight::zk
 {

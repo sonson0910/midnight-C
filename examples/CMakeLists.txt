@@ -34,3 +34,6 @@ add_executable(phase4d_ledger_state_sync_example phase4d_ledger_state_sync_examp
 target_link_libraries(phase4d_ledger_state_sync_example PRIVATE midnight-core)
 target_include_directories(phase4d_ledger_state_sync_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
+add_executable(wallet-generator wallet-generator.cpp)
+target_link_libraries(wallet-generator PRIVATE midnight-core)
+target_include_directories(wallet-generator PRIVATE ${CMAKE_SOURCE_DIR}/include)

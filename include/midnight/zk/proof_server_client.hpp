@@ -41,7 +41,8 @@ namespace midnight::zk
          * @brief Constructor
          * @param config Proof Server configuration
          */
-        explicit ProofServerClient(const Config &config = Config());
+        ProofServerClient();
+        explicit ProofServerClient(const Config &config);
 
         /**
          * @brief Initialize connection to Proof Server
