@@ -178,4 +178,4 @@ Apache License 2.0
 
 **Dự án**: Midnight SDK - Blockchain-enabled IoT Infrastructure
 
-**Repository**: https://github.com/venera-midnight/night_fund
+**Repository**: https://github.com/sonson0910/midnight-C

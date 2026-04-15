@@ -47,3 +47,9 @@ compile_commands.json
 # Test results
 *.log
 test_results/
+
+# Local wallet/test dumps
+final-test.json
+midnight-test.json
+midnight-correct.json
+my-test-wallet.json
