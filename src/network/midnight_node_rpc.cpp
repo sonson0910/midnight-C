@@ -232,18 +232,20 @@ namespace midnight::network
                 {
                     const std::string path_error_message = "path " + path + ": " + path_error.what();
                     path_errors.push_back(path_error_message);
-                    midnight::g_logger->debug("RPC path attempt failed (" + path + "): " + path_error.what());
+                    midnight::g_logger->debug("RPC path attempt failed: " + path_error_message);
                 }
             }
 
             std::string combined_errors;
-            for (size_t i = 0; i < path_errors.size(); ++i)
+            bool first_error = true;
+            for (const auto &error : path_errors)
             {
-                if (i > 0)
+                if (!first_error)
                 {
                     combined_errors += " | ";
                 }
-                combined_errors += path_errors[i];
+                combined_errors += error;
+                first_error = false;
             }
 
             throw std::runtime_error("All RPC path attempts failed: " + combined_errors);
