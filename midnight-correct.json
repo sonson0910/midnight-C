@@ -1,0 +1,20 @@
+{
+  "wallet": {
+    "name": "midnight-correct",
+    "version": "1.0",
+    "created": "2026-04-15T17:45:14.889405",
+    "network": "testnet",
+    "entropy": "d92a1f5732f42fb3afef9588a40ef70377d630f7cdf177f9547f39165f30470c",
+    "seed": "87d7eb334ceb2581155b32b49e879e65d540c21b3f4a54cb44739ecf1ed96b9b7b0bef25f2c8fde3a0f6c45b5ec254c8d66ebf9c839ca17289d49c2f32f908ea",
+    "keys": {
+      "unshielded": "4622622dbb0ff899581d9d5bbd835758eb4abe50ef319c4e7c66f52c06d93553",
+      "shielded": "8e558aec06e949fc6419c9fece26d9c7add9ad7f38cd728ff4a177fd1cb801ee",
+      "dust": "93a519d2038722052b67029c35fb8d7ad91a4aac1ed07c4f4b04dc73ba7183fb"
+    },
+    "addresses": {
+      "unshielded": "mn_addr_testnet1qgc3xytdmplufjkqan4dmmq6htr4540jsaucecnnuvm6jcpkex4fs0lryy3",
+      "shielded": "mn_shield-addr_testnet1q83ad54a74yy9ml9zwq8vqefdrzrpt5umajjam3p6hz5llzfrhazq7rqsfz",
+      "dust": "mn_dust_testnet1qjwj3n5srsu3q22m8q2wrt7ud0tv35j4vrmg8cn6tqnw88wn3s0asaydp7e"
+    }
+  }
+}

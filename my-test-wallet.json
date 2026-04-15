@@ -1,0 +1,25 @@
+{
+  "wallet": {
+    "name": "my-test-wallet",
+    "version": "1.0",
+    "created": "2026-04-15T17:18:39.231493",
+    "network": "midnight-preprod",
+    "coin_type": 877,
+    "entropy": "8616377c8f0a613012d2cd463a4c4167f3d9364193cd44e78aad4dacbcc50fb9",
+    "seed": "7db4bb1c59ff61a308fda386e2219e16765768eef45c2384b45694ab757a5147",
+    "keys": {
+      "unshielded": {
+        "private_key": "5316885b279ca782e1300d55027fa9541c143039f26a55efb3cd7f43d2567bf1",
+        "public_key": "51558077c78300c3bdd3abc3e8bdd1802d46ce4de98f8313be4c8b386c63978e"
+      },
+      "shielded": {
+        "private_key": "5316885b279ca782e1300d55027fa9541c143039f26a55efb3cd7f43d2567bf1",
+        "public_key": "51558077c78300c3bdd3abc3e8bdd1802d46ce4de98f8313be4c8b386c63978e"
+      }
+    },
+    "addresses": {
+      "unshielded": "mn1q292cqa78svqv80wn40p730w3sqk5dnjdrefg2t",
+      "shielded": "mns1q292cqa78svqv80wn40p730w3sqk5dnjde3gcme"
+    }
+  }
+}

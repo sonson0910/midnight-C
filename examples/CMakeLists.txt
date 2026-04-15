@@ -1,0 +1,36 @@
+add_executable(mqtt_example mqtt_example.cpp)
+target_link_libraries(mqtt_example PRIVATE midnight-core)
+target_include_directories(mqtt_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(blockchain_example blockchain_example.cpp)
+target_link_libraries(blockchain_example PRIVATE midnight-core)
+target_include_directories(blockchain_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(http_example http_example.cpp)
+target_link_libraries(http_example PRIVATE midnight-core)
+target_include_directories(http_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(http_connectivity_test http_connectivity_test.cpp)
+target_link_libraries(http_connectivity_test PRIVATE midnight-core)
+target_include_directories(http_connectivity_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(phase3_end_to_end_example phase3_end_to_end_example.cpp)
+target_link_libraries(phase3_end_to_end_example PRIVATE midnight-core)
+target_include_directories(phase3_end_to_end_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(phase4a_zk_types_example phase4a_zk_types_example.cpp)
+target_link_libraries(phase4a_zk_types_example PRIVATE midnight-core)
+target_include_directories(phase4a_zk_types_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(phase4b_private_state_example phase4b_private_state_example.cpp)
+target_link_libraries(phase4b_private_state_example PRIVATE midnight-core)
+target_include_directories(phase4b_private_state_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(phase4c_proof_server_resilience_example phase4c_proof_server_resilience_example.cpp)
+target_link_libraries(phase4c_proof_server_resilience_example PRIVATE midnight-core)
+target_include_directories(phase4c_proof_server_resilience_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(phase4d_ledger_state_sync_example phase4d_ledger_state_sync_example.cpp)
+target_link_libraries(phase4d_ledger_state_sync_example PRIVATE midnight-core)
+target_include_directories(phase4d_ledger_state_sync_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+

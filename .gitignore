@@ -1,0 +1,49 @@
+# Build directories
+build/
+Build/
+cmake_build/
+out/
+
+# Compiled files
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+
+# IDE files
+.vscode/
+.idea/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.VC.db
+
+# CMake
+CMakeLists.txt.user
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+compile_commands.json
+
+# OSX
+.DS_Store
+*.dSYM/
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# Binaries
+/bin/
+/lib/
+/install/
+
+# Test results
+*.log
+test_results/

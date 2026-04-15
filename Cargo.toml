@@ -1,0 +1,9 @@
+[package]
+name = "midnight"
+version = "0.1.0"
+description = "Midnight SDK - Blockchain-enabled IoT infrastructure library"
+authors = ["Midnight Development Team"]
+license = "Unlicense"
+
+# This is the raw cargoenv.toml equivalent for documentation
+# The actual build uses CMake for C++ projects
