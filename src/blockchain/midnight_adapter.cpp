@@ -91,7 +91,6 @@ namespace midnight::blockchain
         std::string bech32m_encode(const std::string &hrp, const std::array<uint8_t, 32> &payload)
         {
             std::vector<uint8_t> data;
-            data.push_back(0);
             auto converted = convert_bits(payload.data(), payload.size(), 8, 5, true);
             data.insert(data.end(), converted.begin(), converted.end());
 

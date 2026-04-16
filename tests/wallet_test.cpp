@@ -7,9 +7,9 @@ namespace
 {
     constexpr size_t kBech32ChecksumLength = 6;
     constexpr const char *kTestMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-    constexpr const char *kExpectedAddr = "mn_addr_preprod1qu9vv9jcrkl5v75nz5jd9hfvcyq328jm50309qf065yqwfkgk0cgsjlnrv5";
-    constexpr const char *kExpectedShield = "mn_shield-addr_preprod1q7hltlkdthaw00gfhm7phdfgtnv2hd40wn5hh7awhsadwk7t78zfscc4xe3";
-    constexpr const char *kExpectedDust = "mn_dust_preprod1q5xldjvn6ymmskvtzg0xly8jk2wxhw23swmvyg457k8a6fgcmll6q8qzemx";
+    constexpr const char *kExpectedAddr = "mn_addr_preprod1u9vv9jcrkl5v75nz5jd9hfvcyq328jm50309qf065yqwfkgk0cgsdfyzhd";
+    constexpr const char *kExpectedShield = "mn_shield-addr_preprod17hltlkdthaw00gfhm7phdfgtnv2hd40wn5hh7awhsadwk7t78zfsdetafd";
+    constexpr const char *kExpectedDust = "mn_dust_preprod15xldjvn6ymmskvtzg0xly8jk2wxhw23swmvyg457k8a6fgcmll6q4cm2j7";
 }
 
 namespace midnight::blockchain

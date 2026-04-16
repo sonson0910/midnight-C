@@ -76,6 +76,7 @@ if(ENABLE_BLOCKCHAIN)
         blockchain/transaction.cpp
         blockchain/block.cpp
         blockchain/wallet.cpp
+        blockchain/official_sdk_bridge.cpp
         blockchain/midnight_adapter.cpp
         utxo-transactions/utxo_transactions.cpp
         compact-contracts/compact_contracts.cpp

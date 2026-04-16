@@ -1,6 +1,8 @@
 # Build directories
 build/
 Build/
+build_verify/
+build_check/
 cmake_build/
 out/
 
@@ -13,6 +15,12 @@ out/
 *.dylib
 *.dll
 *.exe
+*.pdb
+*.ilk
+*.exp
+*.recipe
+*.tlog
+*.slnx
 
 # IDE files
 .vscode/

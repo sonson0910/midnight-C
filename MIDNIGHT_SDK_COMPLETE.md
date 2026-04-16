@@ -149,11 +149,10 @@ midnight/night_fund/
 │   ├── http_connectivity_test.cpp [PHASE 2 tests]
 │   └── ... other examples
 │
-├── CMakeLists.txt [PHASE 2 + 3 - Dependencies configured]
-├── PHASE3_REAL_CRYPTOGRAPHY.md
-├── PHASE3_COMPLETION_SUMMARY.md
-├── PHASE2_HTTP_IMPLEMENTATION.md
-├── PHASE1_RPC_IMPLEMENTATION.md
+├── CMakeLists.txt [Dependencies configured]
+├── MIDNIGHT_BLOCKCHAIN.md
+├── API_REFERENCE.md
+├── MIDNIGHT_NETWORK_CONFIG.md
 └── README.md
 ```
 
@@ -428,9 +427,8 @@ auto endpoint = NetworkConfig::get_rpc_endpoint(
 
 ### Documentation
 - `README.md` - Getting started
-- `PHASE3_REAL_CRYPTOGRAPHY.md` - Ed25519 details
-- `PHASE2_HTTP_IMPLEMENTATION.md` - HTTP/HTTPS
-- `PHASE1_RPC_IMPLEMENTATION.md` - RPC protocol
+- `MIDNIGHT_BLOCKCHAIN.md` - Blockchain integration
+- `API_REFERENCE.md` - API details
 - `MIDNIGHT_NETWORK_CONFIG.md` - Network info
 
 ### Examples

@@ -2,7 +2,7 @@
  * Midnight Wallet Generator - CLI Tool
  *
  * Generates sr25519 keypair and unshield address for Midnight Preprod
- * Usage: wallet-generator [--save-private-key] [--output-file wallet.json]
+ * Usage: wallet-generator [--save-private-key] [--output-file wallet.json | --output wallet.json]
  */
 
 #include <iostream>
@@ -24,6 +24,7 @@
 #include "midnight/network/midnight_node_rpc.hpp"
 #include "midnight/zk/proof_server_client.hpp"
 #include "midnight/zk/proof_server_resilient_client.hpp"
+#include "midnight/blockchain/official_sdk_bridge.hpp"
 
 namespace midnight::wallet
 {
@@ -105,6 +106,22 @@ namespace midnight::wallet
             return bech32m_encode("mn_shield-addr_preprod", payload);
         }
 
+        static std::string generate_dust_address(const std::string &private_key)
+        {
+            std::array<uint8_t, 32> payload{};
+            if (!hex_to_bytes32(private_key, payload))
+            {
+                return "";
+            }
+
+            for (size_t i = 0; i < payload.size(); ++i)
+            {
+                payload[i] = static_cast<uint8_t>(payload[i] ^ static_cast<uint8_t>((i * 29U + 0x3CU) & 0xFFU));
+            }
+
+            return bech32m_encode("mn_dust_preprod", payload);
+        }
+
     private:
         static constexpr uint32_t kBech32mConst = 0x2BC830A3;
         static constexpr const char *kBech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
@@ -180,7 +197,6 @@ namespace midnight::wallet
         static std::string bech32m_encode(const std::string &hrp, const std::array<uint8_t, 32> &payload)
         {
             std::vector<uint8_t> data;
-            data.push_back(0);
             auto converted = convert_bits(payload.data(), payload.size(), 8, 5, true);
             data.insert(data.end(), converted.begin(), converted.end());
 
@@ -266,9 +282,17 @@ namespace midnight::wallet
 
         std::string unshield_address; // Public address (for receiving)
         std::string shielded_address; // Private address (for private txs)
+        std::string dust_address;     // Dust address
 
         std::string network = "midnight-preprod";
         uint32_t coin_type = 877; // Midnight coin type
+        std::string source = "internal-mock";
+
+        bool dust_registration_requested = false;
+        bool dust_registration_attempted = false;
+        bool dust_registration_success = false;
+        std::string dust_registration_message;
+        std::string dust_registration_txid;
     };
 
     // ============================================================================
@@ -302,6 +326,7 @@ namespace midnight::wallet
             // Generate addresses
             wallet.unshield_address = AddressGenerator::generate_unshield_address(keypair.public_key);
             wallet.shielded_address = AddressGenerator::generate_shielded_address(keypair.private_key);
+            wallet.dust_address = AddressGenerator::generate_dust_address(keypair.private_key);
 
             return wallet;
         }
@@ -318,6 +343,7 @@ namespace midnight::wallet
             ss << "    \"version\": \"" << wallet.version << "\",\n";
             ss << "    \"created\": \"" << wallet.created << "\",\n";
             ss << "    \"network\": \"" << wallet.network << "\",\n";
+            ss << "    \"source\": \"" << wallet.source << "\",\n";
             ss << "    \"coin_type\": " << wallet.coin_type << ",\n";
 
             if (include_private_key)
@@ -329,8 +355,26 @@ namespace midnight::wallet
             ss << "    \"public_key\": \"" << wallet.public_key << "\",\n";
             ss << "    \"addresses\": {\n";
             ss << "      \"unshield\": \"" << wallet.unshield_address << "\",\n";
-            ss << "      \"shielded\": \"" << wallet.shielded_address << "\"\n";
-            ss << "    }\n";
+            ss << "      \"shielded\": \"" << wallet.shielded_address << "\",\n";
+            ss << "      \"dust\": \"" << wallet.dust_address << "\"\n";
+            ss << "    }";
+
+            if (wallet.dust_registration_requested)
+            {
+                ss << ",\n";
+                ss << "    \"dust_registration\": {\n";
+                ss << "      \"requested\": " << (wallet.dust_registration_requested ? "true" : "false") << ",\n";
+                ss << "      \"attempted\": " << (wallet.dust_registration_attempted ? "true" : "false") << ",\n";
+                ss << "      \"success\": " << (wallet.dust_registration_success ? "true" : "false") << ",\n";
+                ss << "      \"message\": \"" << wallet.dust_registration_message << "\",\n";
+                ss << "      \"txid\": \"" << wallet.dust_registration_txid << "\"\n";
+                ss << "    }\n";
+            }
+            else
+            {
+                ss << "\n";
+            }
+
             ss << "  }\n";
             ss << "}\n";
 
@@ -385,6 +429,14 @@ int main(int argc, char *argv[])
     bool save_private_key = false;
     bool show_private_key = false;
     bool run_preprod_doctor = false;
+    bool use_official_sdk = false;
+    bool register_dust = false;
+    std::string official_network = "preprod";
+    std::string seed_hex = "";
+    std::string proof_server = "";
+    uint32_t sync_timeout_seconds = 120;
+    std::string official_transfer_to = "";
+    std::string official_transfer_amount = "";
 
     struct DoctorCheck
     {
@@ -514,13 +566,62 @@ int main(int argc, char *argv[])
         {
             show_private_key = true;
         }
-        else if (arg == "--output-file" && i + 1 < argc)
+        else if ((arg == "--output-file" || arg == "--output") && i + 1 < argc)
         {
             output_file = argv[++i];
         }
         else if (arg == "--name" && i + 1 < argc)
         {
             wallet_name = argv[++i];
+        }
+        else if (arg == "--official-sdk")
+        {
+            use_official_sdk = true;
+        }
+        else if (arg == "--network" && i + 1 < argc)
+        {
+            official_network = argv[++i];
+        }
+        else if (arg == "--seed-hex" && i + 1 < argc)
+        {
+            seed_hex = argv[++i];
+        }
+        else if (arg == "--register-dust")
+        {
+            register_dust = true;
+            use_official_sdk = true;
+        }
+        else if (arg == "--proof-server" && i + 1 < argc)
+        {
+            proof_server = argv[++i];
+        }
+        else if (arg == "--sync-timeout" && i + 1 < argc)
+        {
+            try
+            {
+                const int parsed = std::stoi(argv[++i]);
+                if (parsed <= 0)
+                {
+                    std::cerr << "sync-timeout must be > 0 seconds\n";
+                    return 1;
+                }
+                sync_timeout_seconds = static_cast<uint32_t>(parsed);
+            }
+            catch (const std::exception &)
+            {
+                std::cerr << "Invalid value for --sync-timeout\n";
+                return 1;
+            }
+        }
+        else if (arg == "--official-transfer-to" && i + 1 < argc)
+        {
+            official_transfer_to = argv[++i];
+            use_official_sdk = true;
+        }
+        else if (arg == "--official-transfer-amount" && i + 1 < argc)
+        {
+            official_transfer_amount = argv[++i];
+            use_official_sdk = true;
         }
         else if (arg == "--help" || arg == "-h")
         {
@@ -529,21 +630,41 @@ int main(int argc, char *argv[])
             std::cout << "Options:\n";
             std::cout << "  --name NAME              Wallet name (default: 'default')\n";
             std::cout << "  --output-file FILE       Save wallet JSON to file\n";
+            std::cout << "  --output FILE            Alias of --output-file\n";
             std::cout << "  --save-private-key       Save private key to PEM file\n";
             std::cout << "  --show-private-key       Display private key in output\n";
             std::cout << "  --preprod-doctor         Run preprod connectivity checklist\n";
+            std::cout << "  --official-sdk           Generate addresses via official Midnight SDK bridge\n";
+            std::cout << "  --network ID             Official SDK network: preprod|preview|mainnet|undeployed\n";
+            std::cout << "  --seed-hex HEX           Optional 32-byte seed (64 hex chars) for deterministic output\n";
+            std::cout << "  --register-dust          Register NIGHT UTXOs for DUST generation (official SDK mode)\n";
+            std::cout << "  --proof-server URL       Override proof server URL for dust registration\n";
+            std::cout << "  --sync-timeout SEC       Sync timeout seconds for dust registration (default: 120)\n";
+            std::cout << "  --official-transfer-to ADDRESS      Submit transfer to destination address (official SDK mode)\n";
+            std::cout << "  --official-transfer-amount UNITS    Transfer amount in smallest units (official SDK mode)\n";
             std::cout << "  --help                   Show this help message\n\n";
             std::cout << "Examples:\n";
             std::cout << "  wallet-generator\n";
             std::cout << "  wallet-generator --name my-wallet --output-file wallet.json\n";
+            std::cout << "  wallet-generator --name my-wallet --output wallet.json\n";
             std::cout << "  wallet-generator --save-private-key --show-private-key\n";
             std::cout << "  wallet-generator --preprod-doctor\n";
+            std::cout << "  wallet-generator --official-sdk --network preprod\n";
+            std::cout << "  wallet-generator --official-sdk --register-dust --proof-server http://127.0.0.1:6300\n";
+            std::cout << "  wallet-generator --official-sdk --seed-hex <64hex> --official-transfer-to <mn_addr...> --official-transfer-amount 1\n";
             return 0;
         }
         else if (arg == "--preprod-doctor")
         {
             run_preprod_doctor = true;
         }
+    }
+
+    const bool transfer_requested = !official_transfer_to.empty() || !official_transfer_amount.empty();
+    if (transfer_requested && (official_transfer_to.empty() || official_transfer_amount.empty()))
+    {
+        std::cerr << "Both --official-transfer-to and --official-transfer-amount are required together\n";
+        return 1;
     }
 
     if (run_preprod_doctor)
@@ -556,10 +677,97 @@ int main(int argc, char *argv[])
     std::cout << "║        Midnight Wallet Generator - Preprod Testnet        ║\n";
     std::cout << "╠════════════════════════════════════════════════════════════╣\n";
 
-    Wallet wallet = WalletManager::create_wallet(wallet_name);
+    Wallet wallet;
+    bool dust_registration_requested = false;
+    bool dust_registration_attempted = false;
+    bool dust_registration_success = false;
+    std::string dust_registration_message;
+    std::string dust_registration_txid;
+    bool official_transfer_attempted = false;
+    bool official_transfer_success = false;
+    std::string official_transfer_message;
+    std::string official_transfer_txid;
+    std::string official_seed_for_transfer;
+
+    if (use_official_sdk)
+    {
+        const auto official = midnight::blockchain::generate_official_wallet_addresses(
+            official_network,
+            seed_hex,
+            0,
+            0,
+            register_dust,
+            proof_server,
+            sync_timeout_seconds,
+            "tools/official-wallet-address.mjs");
+
+        if (!official.success)
+        {
+            std::cerr << "Official SDK bridge failed: " << official.error << "\n";
+            return 1;
+        }
+
+        wallet.name = wallet_name;
+        wallet.source = "official-midnight-sdk";
+        wallet.network = "midnight-" + official_network;
+        wallet.public_key = "N/A (managed by official SDK)";
+        wallet.private_key = "";
+        wallet.seed = official.seed_hex.empty() ? "" : ("0x" + official.seed_hex);
+        official_seed_for_transfer = official.seed_hex;
+        wallet.unshield_address = official.unshielded_address;
+        wallet.shielded_address = official.shielded_address;
+        wallet.dust_address = official.dust_address;
+        wallet.dust_registration_requested = official.dust_registration_requested;
+        wallet.dust_registration_attempted = official.dust_registration_attempted;
+        wallet.dust_registration_success = official.dust_registration_success;
+        wallet.dust_registration_message = official.dust_registration_message;
+        wallet.dust_registration_txid = official.dust_registration_txid;
+
+        auto now = std::time(nullptr);
+        auto tm = std::localtime(&now);
+        char timestamp[32];
+        std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm);
+        wallet.created = timestamp;
+
+        dust_registration_requested = wallet.dust_registration_requested;
+        dust_registration_attempted = wallet.dust_registration_attempted;
+        dust_registration_success = wallet.dust_registration_success;
+        dust_registration_message = wallet.dust_registration_message;
+        dust_registration_txid = wallet.dust_registration_txid;
+
+        if (transfer_requested)
+        {
+            if (official_seed_for_transfer.empty())
+            {
+                std::cerr << "Official SDK transfer requires deterministic seed (--seed-hex) or bridge-returned seed\n";
+                return 1;
+            }
+
+            official_transfer_attempted = true;
+            const auto transfer = midnight::blockchain::transfer_official_night(
+                official_seed_for_transfer,
+                official_transfer_to,
+                official_transfer_amount,
+                official_network,
+                proof_server,
+                sync_timeout_seconds,
+                "tools/official-transfer-night.mjs");
+
+            official_transfer_success = transfer.success;
+            official_transfer_txid = transfer.txid;
+            official_transfer_message = transfer.success
+                                            ? std::string("Transfer submitted")
+                                            : transfer.error;
+        }
+    }
+    else
+    {
+        wallet = WalletManager::create_wallet(wallet_name);
+    }
 
     std::cout << "║ Generating wallet: " << std::setw(40) << std::left << wallet_name << "║\n";
     std::cout << "║ Network: " << std::setw(49) << std::left << wallet.network << "║\n";
+    std::cout << "║ Source: " << std::setw(50) << std::left << wallet.source << "║\n";
     std::cout << "║ Created: " << std::setw(49) << std::left << wallet.created << "║\n";
     std::cout << "╠════════════════════════════════════════════════════════════╣\n";
 
@@ -581,23 +789,85 @@ int main(int argc, char *argv[])
     std::cout << "║                                                            ║\n";
     std::cout << "║ " << std::setw(62) << wallet.shielded_address << "║\n";
     std::cout << "║                                                            ║\n";
+    std::cout << "╠════════════════════════════════════════════════════════════╣\n";
+    std::cout << "║ DUST ADDRESS (for fee generation):                         ║\n";
+    std::cout << "║                                                            ║\n";
+    std::cout << "║ " << std::setw(62) << wallet.dust_address << "║\n";
+    std::cout << "║                                                            ║\n";
 
     // Display private information if requested
     if (show_private_key)
     {
         std::cout << "╠════════════════════════════════════════════════════════════╣\n";
         std::cout << "║ ⚠️  PRIVATE KEY (DO NOT SHARE!):                            ║\n";
-        std::cout << "║ " << std::setw(62) << wallet.private_key.substr(0, 60) << "║\n";
-        if (wallet.private_key.length() > 60)
+        if (wallet.private_key.empty())
         {
-            std::cout << "║ " << std::setw(62) << wallet.private_key.substr(60) << "║\n";
+            std::cout << "║ " << std::setw(62) << std::left << "N/A (managed by official SDK)" << "║\n";
+        }
+        else
+        {
+            std::cout << "║ " << std::setw(62) << wallet.private_key.substr(0, 60) << "║\n";
+            if (wallet.private_key.length() > 60)
+            {
+                std::cout << "║ " << std::setw(62) << wallet.private_key.substr(60) << "║\n";
+            }
         }
         std::cout << "║                                                            ║\n";
         std::cout << "║ RECOVERY SEED (BACKUP THIS NOW!):                         ║\n";
-        std::cout << "║ " << std::setw(62) << wallet.seed.substr(0, 60) << "║\n";
-        if (wallet.seed.length() > 60)
+        if (wallet.seed.empty())
         {
-            std::cout << "║ " << std::setw(62) << wallet.seed.substr(60) << "║\n";
+            std::cout << "║ " << std::setw(62) << std::left << "N/A" << "║\n";
+        }
+        else
+        {
+            std::cout << "║ " << std::setw(62) << wallet.seed.substr(0, 60) << "║\n";
+            if (wallet.seed.length() > 60)
+            {
+                std::cout << "║ " << std::setw(62) << wallet.seed.substr(60) << "║\n";
+            }
+        }
+    }
+
+    if (use_official_sdk && dust_registration_requested)
+    {
+        std::cout << "╠════════════════════════════════════════════════════════════╣\n";
+        std::cout << "║ DUST REGISTRATION STATUS:                                  ║\n";
+        std::cout << "║ " << std::setw(62) << std::left
+                  << (dust_registration_success ? "SUCCESS" : "FAILED OR PENDING") << "║\n";
+        std::cout << "║ Attempted: " << std::setw(51) << std::left
+                  << (dust_registration_attempted ? "yes" : "no") << "║\n";
+
+        if (!dust_registration_message.empty())
+        {
+            std::cout << "║ " << std::setw(62) << std::left << dust_registration_message.substr(0, 62) << "║\n";
+        }
+
+        if (!dust_registration_txid.empty())
+        {
+            std::cout << "║ TXID: " << std::setw(56) << std::left << dust_registration_txid.substr(0, 56) << "║\n";
+        }
+
+        if (!dust_registration_success)
+        {
+            std::cout << "║ Hint: ensure NIGHT UTXO + proof server are available       ║\n";
+        }
+    }
+
+    if (use_official_sdk && official_transfer_attempted)
+    {
+        std::cout << "╠════════════════════════════════════════════════════════════╣\n";
+        std::cout << "║ OFFICIAL TRANSFER STATUS:                                  ║\n";
+        std::cout << "║ " << std::setw(62) << std::left
+                  << (official_transfer_success ? "SUCCESS" : "FAILED") << "║\n";
+
+        if (!official_transfer_message.empty())
+        {
+            std::cout << "║ " << std::setw(62) << std::left << official_transfer_message.substr(0, 62) << "║\n";
+        }
+
+        if (!official_transfer_txid.empty())
+        {
+            std::cout << "║ TXID: " << std::setw(56) << std::left << official_transfer_txid.substr(0, 56) << "║\n";
         }
     }
 
@@ -616,11 +886,18 @@ int main(int argc, char *argv[])
 
     if (save_private_key)
     {
-        std::string privkey_file = wallet_name + "_private.pem";
-        WalletManager::save_private_key(wallet, privkey_file);
+        if (wallet.private_key.empty())
+        {
+            std::cout << "║ ! Private key export unavailable in official SDK mode      ║\n";
+        }
+        else
+        {
+            std::string privkey_file = wallet_name + "_private.pem";
+            WalletManager::save_private_key(wallet, privkey_file);
 
-        std::cout << "║ ✓ Private key saved to: " << std::setw(40) << std::left
-                  << privkey_file << "║\n";
+            std::cout << "║ ✓ Private key saved to: " << std::setw(40) << std::left
+                      << privkey_file << "║\n";
+        }
     }
 
     std::cout << "╠════════════════════════════════════════════════════════════╣\n";
@@ -637,6 +914,11 @@ int main(int argc, char *argv[])
     std::cout << "║ - Backup recovery seed in secure location                  ║\n";
     std::cout << "║ - This is testnet - for demo purposes only                 ║\n";
     std::cout << "╚════════════════════════════════════════════════════════════╝\n";
+
+    if (official_transfer_attempted && !official_transfer_success)
+    {
+        return 2;
+    }
 
     return 0;
 }
