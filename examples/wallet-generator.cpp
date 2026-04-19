@@ -649,7 +649,7 @@ int main(int argc, char *argv[])
             std::cout << "  wallet-generator --name my-wallet --output wallet.json\n";
             std::cout << "  wallet-generator --save-private-key --show-private-key\n";
             std::cout << "  wallet-generator --preprod-doctor\n";
-            std::cout << "  wallet-generator --official-sdk --network preprod\n";
+            std::cout << "  wallet-generator --official-sdk --network preview\n";
             std::cout << "  wallet-generator --official-sdk --register-dust --proof-server http://127.0.0.1:6300\n";
             std::cout << "  wallet-generator --official-sdk --seed-hex <64hex> --official-transfer-to <mn_addr...> --official-transfer-amount 1\n";
             return 0;
@@ -672,9 +672,38 @@ int main(int argc, char *argv[])
         return run_doctor();
     }
 
+    const std::string guidance_network = use_official_sdk ? official_network : "preprod";
+    const std::string banner_title = "Midnight Wallet Generator - " + guidance_network;
+    const auto faucet_url_for_network = [](const std::string &network) -> std::string
+    {
+        if (network == "preview")
+        {
+            return "https://faucet.preview.midnight.network/";
+        }
+        if (network == "preprod")
+        {
+            return "https://faucet.preprod.midnight.network/";
+        }
+        return "N/A";
+    };
+    const auto indexer_url_for_network = [](const std::string &network) -> std::string
+    {
+        if (network == "preview")
+        {
+            return "https://indexer.preview.midnight.network/";
+        }
+        if (network == "preprod")
+        {
+            return "https://indexer.preprod.midnight.network/";
+        }
+        return "N/A";
+    };
+    const std::string faucet_url = faucet_url_for_network(guidance_network);
+    const std::string indexer_url = indexer_url_for_network(guidance_network);
+
     // Generate wallet
     std::cout << "╔════════════════════════════════════════════════════════════╗\n";
-    std::cout << "║        Midnight Wallet Generator - Preprod Testnet        ║\n";
+    std::cout << "║ " << std::setw(58) << std::left << banner_title << " ║\n";
     std::cout << "╠════════════════════════════════════════════════════════════╣\n";
 
     Wallet wallet;
@@ -903,9 +932,9 @@ int main(int argc, char *argv[])
     std::cout << "╠════════════════════════════════════════════════════════════╣\n";
     std::cout << "║ NEXT STEPS:                                                ║\n";
     std::cout << "║ 1. Copy your UNSHIELD ADDRESS above                        ║\n";
-    std::cout << "║ 2. Go to: https://faucet.preprod.midnight.network/         ║\n";
+    std::cout << "║ 2. Go to: " << std::setw(50) << std::left << faucet_url << "║\n";
     std::cout << "║ 3. Paste address and request NIGHT tokens                  ║\n";
-    std::cout << "║ 4. Check balance: https://indexer.preprod.midnight.network/║\n";
+    std::cout << "║ 4. Check balance: " << std::setw(46) << std::left << indexer_url << "║\n";
     std::cout << "║ 5. Use for testing transactions                            ║\n";
     std::cout << "║                                                            ║\n";
     std::cout << "║ ⚠️  SECURITY WARNING:                                       ║\n";

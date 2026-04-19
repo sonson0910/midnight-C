@@ -41,3 +41,11 @@ target_include_directories(wallet-generator PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_executable(official_sdk_bridge_example official_sdk_bridge_example.cpp)
 target_link_libraries(official_sdk_bridge_example PRIVATE midnight-core)
 target_include_directories(official_sdk_bridge_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(compact_contract_deploy_undeployed_example compact_contract_deploy_undeployed_example.cpp)
+target_link_libraries(compact_contract_deploy_undeployed_example PRIVATE midnight-core)
+target_include_directories(compact_contract_deploy_undeployed_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(compact_contract_deploy_custom_example compact_contract_deploy_custom_example.cpp)
+target_link_libraries(compact_contract_deploy_custom_example PRIVATE midnight-core)
+target_include_directories(compact_contract_deploy_custom_example PRIVATE ${CMAKE_SOURCE_DIR}/include)

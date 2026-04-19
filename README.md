@@ -89,6 +89,28 @@ cmake --build . --target midnight-examples
 # Kiểm tra tương thích/giao tiếp với Midnight Preprod
 # Trả về exit code 0 khi đủ điều kiện READY cho production
 ./bin/http_connectivity_test
+
+# Deploy FaucetAMM lên mạng undeployed (qua official JS bridge)
+# Yêu cầu: đã cài dependencies ở midnight-research và ví có NIGHT + DUST
+MIDNIGHT_DEPLOY_SEED_HEX=<seed_hex_32_bytes> \
+    ./bin/compact_contract_deploy_undeployed_example
+
+# Deploy contract custom (ngoài FaucetAMM) qua bridge
+# Cấu hình trong constructor_args của ContractDeployer:
+#   use_official_sdk_bridge=true
+#   contract=<ContractName>
+#   contract_module=<path hoặc package specifier tới JS module export contract>
+#   contract_export=<tên export trong module>
+#   zk_config_path=<đường dẫn assets managed của contract>
+#   private_state_id=<id private state>
+#   constructor_args_json=<JSON args constructor, hỗ trợ typed bigint/bytes>
+
+# Chạy example C++ cho custom deploy trực tiếp
+./bin/compact_contract_deploy_custom_example \
+    --contract FaucetAMM \
+    --contract-module @midnight-ntwrk/counter-contract \
+    --contract-export FaucetAMM \
+    --zk-config-path midnight-research/node_modules/@midnight-ntwrk/counter-contract/dist/managed/FaucetAMM
 ```
 
 ## Chạy Tests

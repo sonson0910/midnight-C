@@ -5,7 +5,7 @@ import path from 'node:path';
 import { Buffer } from 'node:buffer';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const DEFAULT_NETWORK = 'preprod';
+const DEFAULT_NETWORK = 'preview';
 const ALLOWED_NETWORKS = new Set(['preprod', 'preview', 'mainnet', 'undeployed']);
 
 function printHelp() {
@@ -16,7 +16,7 @@ function printHelp() {
     '  node tools/official-wallet-address.mjs [options]',
     '',
     'Options:',
-    '  --network <id>   Network ID: preprod|preview|mainnet|undeployed (default: preprod)',
+    '  --network <id>   Network ID: preprod|preview|mainnet|undeployed (default: preview)',
     '  --seed <hex>     Optional 32-byte seed hex (64 hex chars, optional 0x prefix)',
     '  --account <n>    HD account index (default: 0)',
     '  --index <n>      Address index (default: 0)',
@@ -174,7 +174,7 @@ async function loadOfficialModules(nodeModulesRoot) {
   const shieldedMod = await import(resolve('@midnight-ntwrk', 'wallet-sdk-shielded', 'dist', 'index.js'));
   const dustMod = await import(resolve('@midnight-ntwrk', 'wallet-sdk-dust-wallet', 'dist', 'index.js'));
   const addressMod = await import(resolve('@midnight-ntwrk', 'wallet-sdk-address-format', 'dist', 'index.js'));
-  const ledgerMod = await import(resolve('@midnight-ntwrk', 'ledger-v7', 'midnight_ledger_wasm_fs.js'));
+  const ledgerMod = await import(resolve('@midnight-ntwrk', 'ledger-v8', 'midnight_ledger_wasm_fs.js'));
   const undiciMod = await import(resolve('undici', 'index.js'));
   const wsMod = await import(resolve('ws', 'wrapper.mjs'));
 
@@ -231,7 +231,15 @@ function getDefaultEndpoints(network) {
     },
   };
 
-  return map[network] ?? map.preprod;
+  return map[network] ?? map.preview;
+}
+
+function getDustFeeOverhead(networkId) {
+  const normalized = String(networkId ?? '').toLowerCase();
+  if (normalized.includes('undeployed')) {
+    return 500000000000000000n;
+  }
+  return 1000n;
 }
 
 function buildWalletConfigs(networkId, endpoints, modules) {
@@ -256,7 +264,7 @@ function buildWalletConfigs(networkId, endpoints, modules) {
     dustConfig: {
       networkId,
       costParameters: {
-        additionalFeeOverhead: 300000000000000n,
+        additionalFeeOverhead: getDustFeeOverhead(networkId),
         feeBlocksMargin: 5,
       },
       indexerClientConnection: {
@@ -282,6 +290,43 @@ function timeout(ms, message) {
 
 function withTimeout(promise, ms, message) {
   return Promise.race([promise, timeout(ms, message)]);
+}
+
+function getDustBalance(dustState, at = new Date()) {
+  if (!dustState || typeof dustState !== 'object') {
+    return 0n;
+  }
+
+  const toBigInt = (value) => {
+    if (typeof value === 'bigint') {
+      return value;
+    }
+    if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) {
+      return BigInt(value);
+    }
+    if (typeof value === 'string' && /^-?[0-9]+$/.test(value)) {
+      try {
+        return BigInt(value);
+      } catch {
+        return 0n;
+      }
+    }
+    return 0n;
+  };
+
+  try {
+    if (typeof dustState.walletBalance === 'function') {
+      return toBigInt(dustState.walletBalance(at));
+    }
+
+    if (typeof dustState.balance === 'function') {
+      return toBigInt(dustState.balance(at));
+    }
+  } catch {
+    return 0n;
+  }
+
+  return 0n;
 }
 
 function waitForState(observable, predicate, timeoutMs, timeoutMessage) {
@@ -460,7 +505,22 @@ async function registerDustIfRequested(opts, modules, seeds, dustAddress) {
     modules.ledger.LedgerParameters.initialParameters().dust,
   );
 
-  const wallet = new modules.WalletFacade(shieldedWallet, unshieldedWallet, dustWallet);
+  const wallet = typeof modules.WalletFacade.init === 'function'
+    ? await modules.WalletFacade.init({
+      configuration: {
+        networkId,
+        indexerClientConnection: {
+          indexerHttpUrl: endpoints.indexerUrl,
+          indexerWsUrl: endpoints.indexerWsUrl,
+        },
+        relayURL: new URL(endpoints.nodeUrl.replace(/^http/, 'ws')),
+        provingServerUrl: new URL(endpoints.proofServer),
+      },
+      shielded: () => shieldedWallet,
+      unshielded: () => unshieldedWallet,
+      dust: () => dustWallet,
+    })
+    : new modules.WalletFacade(shieldedWallet, unshieldedWallet, dustWallet);
 
   try {
     await wallet.start(shieldedSecretKeys, dustSecretKey);
@@ -481,10 +541,25 @@ async function registerDustIfRequested(opts, modules, seeds, dustAddress) {
       state = await firstObservedState(wallet.state(), 15_000);
     }
 
-    const availableCoins =
-      state?.unshielded?.capabilities?.coinsAndBalances?.getAvailableCoins?.(state?.unshielded?.state) ??
-      state?.unshielded?.availableCoins ??
-      [];
+    let availableCoins = [];
+
+    if (Array.isArray(state?.unshielded?.availableCoins)) {
+      availableCoins = state.unshielded.availableCoins;
+    } else if (Array.isArray(state?.unshielded?.state?.availableUtxos)) {
+      availableCoins = state.unshielded.state.availableUtxos;
+    } else {
+      try {
+        const getAvailableCoins = state?.unshielded?.capabilities?.coinsAndBalances?.getAvailableCoins;
+        if (typeof getAvailableCoins === 'function') {
+          const fromCapabilities = getAvailableCoins(state?.unshielded?.state ?? state?.unshielded ?? state);
+          if (Array.isArray(fromCapabilities)) {
+            availableCoins = fromCapabilities;
+          }
+        }
+      } catch {
+        availableCoins = [];
+      }
+    }
 
     const dustGracePeriodSeconds = Number(
       modules.ledger.LedgerParameters.initialParameters().dust.dustGracePeriodSeconds ?? 0n,
@@ -501,7 +576,7 @@ async function registerDustIfRequested(opts, modules, seeds, dustAddress) {
 
     if (nightUtxos.length === 0) {
       const hasFunds = availableCoins.length > 0;
-      const dustBalance = state?.dust?.walletBalance?.(new Date()) ?? 0n;
+      const dustBalance = getDustBalance(state?.dust);
       if (dustBalance > 0n) {
         result.success = true;
         result.message = `Dust already available (${dustBalance.toString()}), no registration needed`;
@@ -601,15 +676,15 @@ async function registerDustIfRequested(opts, modules, seeds, dustAddress) {
       `Timed out submitting dust registration transaction (${Math.floor(opTimeoutMs / 1000)}s)`,
     );
 
-    let dustBalanceAfter = state?.dust?.walletBalance?.(new Date()) ?? 0n;
+    let dustBalanceAfter = getDustBalance(state?.dust);
     try {
       const dustState = await waitForState(
         wallet.state(),
-        (s) => (s?.dust?.walletBalance?.(new Date()) ?? 0n) > 0n,
+        (s) => getDustBalance(s?.dust) > 0n,
         Math.max(60, opts.syncTimeoutSeconds) * 1000,
         `Timed out waiting for DUST balance update (${Math.max(60, opts.syncTimeoutSeconds)}s)`,
       );
-      dustBalanceAfter = dustState?.dust?.walletBalance?.(new Date()) ?? dustBalanceAfter;
+      dustBalanceAfter = getDustBalance(dustState?.dust);
     } catch {
       // DUST may appear with delay after registration submission.
     }

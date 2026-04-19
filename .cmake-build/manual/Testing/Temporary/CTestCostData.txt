@@ -1,0 +1,6 @@
+jsoncpp_readerwriter 3 0.508698
+jsoncpp_readerwriter_json_checker 3 0.969822
+jsoncpp_test 3 0.00505779
+core_tests 0 0
+---
+core_tests

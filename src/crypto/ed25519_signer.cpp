@@ -1,5 +1,8 @@
 #include "midnight/crypto/ed25519_signer.hpp"
 #include "midnight/core/logger.hpp"
+#include <algorithm>
+#include <cctype>
+#include <mutex>
 #include <stdexcept>
 #include <sstream>
 #include <iomanip>
@@ -13,19 +16,71 @@
 
 namespace midnight::crypto
 {
+    namespace
+    {
+        int hex_nibble(char c)
+        {
+            if (c >= '0' && c <= '9')
+            {
+                return c - '0';
+            }
+
+            const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (lower >= 'a' && lower <= 'f')
+            {
+                return 10 + (lower - 'a');
+            }
+
+            return -1;
+        }
+
+        uint8_t parse_hex_byte(char hi, char lo)
+        {
+            const int high = hex_nibble(hi);
+            const int low = hex_nibble(lo);
+            if (high < 0 || low < 0)
+            {
+                throw std::invalid_argument("Invalid hex string format");
+            }
+
+            return static_cast<uint8_t>((high << 4) | low);
+        }
+
+#if MIDNIGHT_HAS_SODIUM
+        void ensure_sodium_initialized()
+        {
+            static std::once_flag init_once;
+
+            std::call_once(init_once, []()
+                           {
+                if (sodium_init() < 0)
+                {
+                    const std::string error = "libsodium initialization failed";
+                    if (midnight::g_logger)
+                    {
+                        midnight::g_logger->error(error);
+                    }
+                    throw std::runtime_error(error);
+                }
+
+                if (midnight::g_logger)
+                {
+                    midnight::g_logger->info("libsodium initialized for Ed25519 cryptography");
+                } });
+        }
+#endif
+    } // namespace
+
     void Ed25519Signer::initialize()
     {
 #if MIDNIGHT_HAS_SODIUM
-        if (sodium_init() < 0)
-        {
-            std::string error = "libsodium initialization failed";
-            midnight::g_logger->error(error);
-            throw std::runtime_error(error);
-        }
-        midnight::g_logger->info("libsodium initialized for Ed25519 cryptography");
+        ensure_sodium_initialized();
 #else
         const std::string error = "libsodium is required for Ed25519 cryptography";
-        midnight::g_logger->error(error);
+        if (midnight::g_logger)
+        {
+            midnight::g_logger->error(error);
+        }
         throw std::runtime_error(error);
 #endif
     }
@@ -192,7 +247,13 @@ namespace midnight::crypto
     Ed25519Signer::PublicKey Ed25519Signer::public_key_from_hex(
         const std::string &hex_string)
     {
-        if (hex_string.length() != 64)
+        std::string hex = hex_string;
+        if (hex.rfind("0x", 0) == 0 || hex.rfind("0X", 0) == 0)
+        {
+            hex = hex.substr(2);
+        }
+
+        if (hex.length() != 64)
         {
             throw std::invalid_argument(
                 "Public key hex string must be exactly 64 characters (32 bytes hex)");
@@ -201,15 +262,7 @@ namespace midnight::crypto
         PublicKey key{};
         for (size_t i = 0; i < 32; ++i)
         {
-            std::string byte_str = hex_string.substr(i * 2, 2);
-            try
-            {
-                key[i] = static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16));
-            }
-            catch (...)
-            {
-                throw std::invalid_argument("Invalid hex string format");
-            }
+            key[i] = parse_hex_byte(hex[i * 2], hex[i * 2 + 1]);
         }
         return key;
     }
@@ -227,7 +280,13 @@ namespace midnight::crypto
     Ed25519Signer::Signature Ed25519Signer::signature_from_hex(
         const std::string &hex_string)
     {
-        if (hex_string.length() != 128)
+        std::string hex = hex_string;
+        if (hex.rfind("0x", 0) == 0 || hex.rfind("0X", 0) == 0)
+        {
+            hex = hex.substr(2);
+        }
+
+        if (hex.length() != 128)
         {
             throw std::invalid_argument(
                 "Signature hex string must be exactly 128 characters (64 bytes hex)");
@@ -236,15 +295,7 @@ namespace midnight::crypto
         Signature sig{};
         for (size_t i = 0; i < 64; ++i)
         {
-            std::string byte_str = hex_string.substr(i * 2, 2);
-            try
-            {
-                sig[i] = static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16));
-            }
-            catch (...)
-            {
-                throw std::invalid_argument("Invalid hex string format");
-            }
+            sig[i] = parse_hex_byte(hex[i * 2], hex[i * 2 + 1]);
         }
         return sig;
     }

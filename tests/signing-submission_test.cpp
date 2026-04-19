@@ -223,8 +223,9 @@ TEST_F(Phase5SigningSubmissionTest, Submit_ValidSignedTx_ReturnsSubmissionResult
 
     auto result = submitter.submit(signed_tx);
 
-    EXPECT_EQ(result.status, SubmissionStatus::SUBMITTED);
-    EXPECT_EQ(result.transaction_hash, signed_tx.transaction_hash);
+    // Placeholder payload is not a valid extrinsic for real RPC submission.
+    EXPECT_EQ(result.status, SubmissionStatus::FAILED);
+    EXPECT_FALSE(result.error_message.empty());
 }
 
 TEST_F(Phase5SigningSubmissionTest, Submit_MockTransport_AlwaysReturnsSubmitted)
@@ -273,7 +274,9 @@ TEST_F(Phase5SigningSubmissionTest, GetSubmissionStatus_SubmittedTx_ReturnsStatu
     auto submit_result = submitter.submit(signed_tx);
     auto status_result = submitter.get_submission_status("0x" + std::string(64, 't'));
 
-    EXPECT_EQ(status_result.status, SubmissionStatus::SUBMITTED);
+    EXPECT_EQ(submit_result.status, SubmissionStatus::FAILED);
+    // Failed submissions are not cached as in-flight/executed transactions.
+    EXPECT_EQ(status_result.status, SubmissionStatus::CREATED);
 }
 
 // ============================================================================
@@ -402,7 +405,8 @@ TEST_F(Phase5SigningSubmissionTest, SubmitBatch_MultipleTransactions_SubmitsAll)
     EXPECT_EQ(results.size(), 3);
     for (const auto &result : results)
     {
-        EXPECT_EQ(result.status, SubmissionStatus::SUBMITTED);
+        EXPECT_EQ(result.status, SubmissionStatus::FAILED);
+        EXPECT_FALSE(result.error_message.empty());
     }
 }
 
@@ -443,7 +447,8 @@ TEST_F(Phase5SigningSubmissionTest, Integration_FullSigningWorkflow_Success)
     TransactionSubmitter submitter(node_rpc_url);
     auto result = submitter.submit(signed_tx);
 
-    EXPECT_EQ(result.status, SubmissionStatus::SUBMITTED);
+    // Integration uses placeholder payloads and should fail cleanly on real RPC.
+    EXPECT_EQ(result.status, SubmissionStatus::FAILED);
 }
 
 // ============================================================================

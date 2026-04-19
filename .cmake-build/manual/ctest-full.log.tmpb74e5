@@ -1,0 +1,13 @@
+[OUTPUT] 
+Internal ctest changing into directory: /media/son/Projects1/venera/midnight/night_fund/.cmake-build/manual
+
+[HANDLER_OUTPUT] 
+Test project /media/son/Projects1/venera/midnight/night_fund/.cmake-build/manual
+
+    Start 1: jsoncpp_readerwriter
+1/4 Test #1: jsoncpp_readerwriter ................   Passed    2.06 sec
+    Start 2: jsoncpp_readerwriter_json_checker
+2/4 Test #2: jsoncpp_readerwriter_json_checker ...   Passed    2.86 sec
+    Start 3: jsoncpp_test
+3/4 Test #3: jsoncpp_test ........................   Passed    0.02 sec
+    Start 4: core_tests

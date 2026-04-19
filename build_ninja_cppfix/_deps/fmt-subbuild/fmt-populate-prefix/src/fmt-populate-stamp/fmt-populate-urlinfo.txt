@@ -1,0 +1,12 @@
+# This is a generated file and its contents are an internal implementation detail.
+# The download step will be re-executed if anything in this file changes.
+# No other meaning or use of this file is supported.
+
+method=url
+command=C:/Users/Admin/anaconda3/Lib/site-packages/cmake/data/bin/cmake.exe;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;D:/venera/midnight/night_fund/build_ninja_cppfix/_deps/fmt-subbuild/fmt-populate-prefix/src/fmt-populate-stamp/download-fmt-populate.cmake;COMMAND;C:/Users/Admin/anaconda3/Lib/site-packages/cmake/data/bin/cmake.exe;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;D:/venera/midnight/night_fund/build_ninja_cppfix/_deps/fmt-subbuild/fmt-populate-prefix/src/fmt-populate-stamp/verify-fmt-populate.cmake;COMMAND;C:/Users/Admin/anaconda3/Lib/site-packages/cmake/data/bin/cmake.exe;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;D:/venera/midnight/night_fund/build_ninja_cppfix/_deps/fmt-subbuild/fmt-populate-prefix/src/fmt-populate-stamp/extract-fmt-populate.cmake
+source_dir=D:/venera/midnight/night_fund/build_ninja_cppfix/_deps/fmt-src
+work_dir=D:/venera/midnight/night_fund/build_ninja_cppfix/_deps
+url(s)=https://github.com/fmtlib/fmt/archive/refs/tags/11.1.4.zip
+hash=
+      no_extract=
+

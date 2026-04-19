@@ -9,8 +9,28 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# In Linux host shells with Conda activated, find_package can incorrectly bind
+# against Conda's older runtime libs (libstdc++, OpenSSL, fmt), causing test
+# executables to fail at runtime. Keep Conda available for tooling, but ignore
+# it for CMake package discovery.
+if(UNIX AND NOT WIN32 AND DEFINED ENV{CONDA_PREFIX})
+    list(APPEND CMAKE_IGNORE_PREFIX_PATH
+        "$ENV{CONDA_PREFIX}"
+        "$ENV{CONDA_PREFIX}/lib"
+        "$ENV{CONDA_PREFIX}/lib/cmake"
+    )
+    message(STATUS "Ignoring CONDA_PREFIX for package resolution: $ENV{CONDA_PREFIX}")
+endif()
+
 # Options
-option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+set(_MIDNIGHT_DEFAULT_SHARED_LIBS ON)
+if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # MinGW DLL export discovery is fragile for this codebase; static linking is more reliable.
+    set(_MIDNIGHT_DEFAULT_SHARED_LIBS OFF)
+endif()
+
+option(BUILD_SHARED_LIBS "Build shared libraries" ${_MIDNIGHT_DEFAULT_SHARED_LIBS})
+unset(_MIDNIGHT_DEFAULT_SHARED_LIBS)
 option(BUILD_TESTS "Build test suite" ON)
 option(BUILD_EXAMPLES "Build examples" ON)
 option(ENABLE_MQTT "Enable MQTT protocol support" ON)
@@ -26,7 +46,16 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # Find required packages
 find_package(nlohmann_json 3.2.0 QUIET)
-find_package(fmt 7.1.0 QUIET)
+
+set(MIDNIGHT_FORCE_FETCH_FMT OFF)
+if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # Avoid ABI mismatch with prebuilt MSVC fmt binaries when building with MinGW.
+    set(MIDNIGHT_FORCE_FETCH_FMT ON)
+endif()
+
+if(NOT MIDNIGHT_FORCE_FETCH_FMT)
+    find_package(fmt 7.1.0 QUIET)
+endif()
 
 # Include FetchContent for header-only libraries
 include(FetchContent)
@@ -41,14 +70,40 @@ if(NOT nlohmann_json_FOUND)
     FetchContent_MakeAvailable(nlohmann_json)
 endif()
 
-if(NOT fmt_FOUND)
-    message(STATUS "Fetching fmt...")
-    FetchContent_Declare(
-        fmt
-        URL https://github.com/fmtlib/fmt/archive/refs/tags/11.1.4.zip
-        QUIET
+if(MIDNIGHT_FORCE_FETCH_FMT OR NOT fmt_FOUND)
+    set(_MIDNIGHT_LOCAL_FMT_DIR "")
+    foreach(_MIDNIGHT_FMT_CANDIDATE
+        "${CMAKE_SOURCE_DIR}/build_ninja_cppfix/_deps/fmt-src"
+        "${CMAKE_SOURCE_DIR}/build_ninja/_deps/fmt-src"
+        "${CMAKE_SOURCE_DIR}/build/_deps/fmt-src"
     )
-    FetchContent_MakeAvailable(fmt)
+        if(EXISTS "${_MIDNIGHT_FMT_CANDIDATE}/CMakeLists.txt")
+            set(_MIDNIGHT_LOCAL_FMT_DIR "${_MIDNIGHT_FMT_CANDIDATE}")
+            break()
+        endif()
+    endforeach()
+
+    if(_MIDNIGHT_LOCAL_FMT_DIR)
+        message(STATUS "Using cached fmt source: ${_MIDNIGHT_LOCAL_FMT_DIR}")
+        if(NOT TARGET fmt)
+            add_subdirectory(
+                "${_MIDNIGHT_LOCAL_FMT_DIR}"
+                "${CMAKE_BINARY_DIR}/_deps/fmt-build"
+                EXCLUDE_FROM_ALL
+            )
+        endif()
+    else()
+        message(STATUS "Fetching fmt...")
+        FetchContent_Declare(
+            fmt
+            URL https://github.com/fmtlib/fmt/archive/refs/tags/11.1.4.zip
+            QUIET
+        )
+        FetchContent_MakeAvailable(fmt)
+    endif()
+
+    unset(_MIDNIGHT_LOCAL_FMT_DIR)
+    unset(_MIDNIGHT_FMT_CANDIDATE)
 endif()
 
 find_package(jsoncpp QUIET)

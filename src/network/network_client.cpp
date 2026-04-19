@@ -13,6 +13,54 @@ namespace midnight::network
 {
     namespace
     {
+        struct ParsedEndpoint
+        {
+            std::string host_and_path;
+            bool use_tls = false;
+        };
+
+        ParsedEndpoint parse_endpoint_scheme(const std::string &base_url)
+        {
+            ParsedEndpoint parsed;
+            parsed.host_and_path = base_url;
+
+            if (base_url.rfind("https://", 0) == 0)
+            {
+                parsed.use_tls = true;
+                parsed.host_and_path = base_url.substr(8);
+                return parsed;
+            }
+
+            if (base_url.rfind("http://", 0) == 0)
+            {
+                parsed.use_tls = false;
+                parsed.host_and_path = base_url.substr(7);
+                return parsed;
+            }
+
+            // Treat websocket endpoints as HTTP(S) transport for JSON-RPC POSTs.
+            if (base_url.rfind("wss://", 0) == 0)
+            {
+                parsed.use_tls = true;
+                parsed.host_and_path = base_url.substr(6);
+                return parsed;
+            }
+
+            if (base_url.rfind("ws://", 0) == 0)
+            {
+                parsed.use_tls = false;
+                parsed.host_and_path = base_url.substr(5);
+                return parsed;
+            }
+
+            if (base_url.find("://") != std::string::npos)
+            {
+                parsed.host_and_path = base_url.substr(base_url.find("://") + 3);
+            }
+
+            return parsed;
+        }
+
         std::string normalize_joined_path(const std::string &base_path, const std::string &path)
         {
             std::string normalized_base = base_path.empty() ? "/" : base_path;
@@ -109,13 +157,9 @@ namespace midnight::network
         try
         {
             // Parse URL to get host
-            std::string url = base_url_;
-            bool is_https = (url.find("https://") == 0);
-
-            if (url.find("://") != std::string::npos)
-            {
-                url = url.substr(url.find("://") + 3);
-            }
+            ParsedEndpoint parsed = parse_endpoint_scheme(base_url_);
+            std::string url = parsed.host_and_path;
+            bool is_https = parsed.use_tls;
 
             // Extract host and port
             std::string host = url;
@@ -223,13 +267,9 @@ namespace midnight::network
         try
         {
             // Parse URL
-            std::string url = base_url_;
-            bool is_https = (url.find("https://") == 0);
-
-            if (url.find("://") != std::string::npos)
-            {
-                url = url.substr(url.find("://") + 3);
-            }
+            ParsedEndpoint parsed = parse_endpoint_scheme(base_url_);
+            std::string url = parsed.host_and_path;
+            bool is_https = parsed.use_tls;
 
             // Extract host and port
             std::string host = url;
@@ -316,13 +356,9 @@ namespace midnight::network
         try
         {
             // Parse URL (same logic as http_post)
-            std::string url = base_url_;
-            bool is_https = (url.find("https://") == 0);
-
-            if (url.find("://") != std::string::npos)
-            {
-                url = url.substr(url.find("://") + 3);
-            }
+            ParsedEndpoint parsed = parse_endpoint_scheme(base_url_);
+            std::string url = parsed.host_and_path;
+            bool is_https = parsed.use_tls;
 
             std::string host = url;
             std::string request_path = "/";

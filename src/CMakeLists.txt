@@ -113,6 +113,10 @@ target_include_directories(midnight-core
         ${HTTPLIB_SOURCE_DIR}
 )
 
+if(DEFINED jsoncpp_SOURCE_DIR)
+    target_include_directories(midnight-core PRIVATE "${jsoncpp_SOURCE_DIR}/include")
+endif()
+
 # Link dependencies
 find_package(OpenSSL QUIET)
 find_package(Sodium QUIET)
@@ -197,10 +201,19 @@ target_link_libraries(midnight-core
         $<$<BOOL:${OPENSSL_FOUND}>:OpenSSL::SSL>
         $<$<BOOL:${OPENSSL_FOUND}>:OpenSSL::Crypto>
         $<$<BOOL:${Sodium_FOUND}>:Sodium::Sodium>
+        $<$<PLATFORM_ID:Windows>:ws2_32>
+        $<$<PLATFORM_ID:Windows>:crypt32>
+        $<$<PLATFORM_ID:Windows>:secur32>
+        $<$<PLATFORM_ID:Windows>:bcrypt>
+        $<$<PLATFORM_ID:Windows>:iphlpapi>
 )
 
 target_compile_definitions(midnight-core
     PRIVATE
+        $<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
+        $<$<PLATFORM_ID:Windows>:NOMINMAX>
+        $<$<PLATFORM_ID:Windows>:_WIN32_WINNT=0x0A00>
+        $<$<PLATFORM_ID:Windows>:WINVER=0x0A00>
         $<$<BOOL:${OPENSSL_FOUND}>:CPPHTTPLIB_OPENSSL_SUPPORT>
         $<$<BOOL:${OPENSSL_FOUND}>:MIDNIGHT_ENABLE_OPENSSL_CRYPTO=1>
         $<$<BOOL:${Sodium_FOUND}>:MIDNIGHT_ENABLE_SODIUM=1>

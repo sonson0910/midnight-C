@@ -68,6 +68,8 @@ protected:
 
     std::string indexer_url = "https://indexer.preprod.midnight.network/api/v3/graphql";
     std::string node_rpc_url = "wss://rpc.preprod.midnight.network";
+    std::string placeholder_contract_address = "0x0000000000000000000000000000000000000000";
+    std::string placeholder_tx_hash = "0x0000000000000000000000000000000000000000000000000000000000000000";
 };
 
 // ============================================================================
@@ -133,10 +135,14 @@ TEST_F(Phase2CompactContractsTest, QueryPublicState_ValidContract_ReturnsState)
 {
     ContractQueryEngine engine(indexer_url);
 
-    auto state = engine.query_public_state("0xcontract123", "totalVotes");
+    auto state = engine.query_public_state(placeholder_contract_address, "totalVotes");
 
-    // Mock response
-    EXPECT_TRUE(state.has_value() || !state.has_value()); // Valid either way in mock
+    // On-chain query may return empty for placeholder addresses, but must not throw.
+    if (state.has_value())
+    {
+        EXPECT_TRUE((*state).isObject());
+        EXPECT_TRUE((*state).isMember("value"));
+    }
 }
 
 // ============================================================================
@@ -147,10 +153,10 @@ TEST_F(Phase2CompactContractsTest, QueryAllPublicState_ValidContract_ReturnsAllS
 {
     ContractQueryEngine engine(indexer_url);
 
-    auto state = engine.query_all_public_state("0xcontract123");
+    auto state = engine.query_all_public_state(placeholder_contract_address);
 
-    ASSERT_TRUE(state.has_value());
-    EXPECT_EQ(state->contract_address, "0xcontract123");
+    // Placeholder address is expected to have no on-chain contract state.
+    EXPECT_FALSE(state.has_value());
 }
 
 // ============================================================================
@@ -161,10 +167,10 @@ TEST_F(Phase2CompactContractsTest, QueryContractAbi_ValidContract_ReturnsAbi)
 {
     ContractQueryEngine engine(indexer_url);
 
-    // Mock: would return actual ABI from contract
-    auto abi = engine.query_contract_abi("0xcontract123");
+    // ABI is not exposed by the v3 indexer API for arbitrary contract addresses.
+    auto abi = engine.query_contract_abi(placeholder_contract_address);
 
-    // Result may be empty in mock, but no exception should occur
+    EXPECT_FALSE(abi.has_value());
 }
 
 // ============================================================================
@@ -175,10 +181,10 @@ TEST_F(Phase2CompactContractsTest, QueryDeploymentInfo_ValidContract_ReturnsInfo
 {
     ContractQueryEngine engine(indexer_url);
 
-    auto info = engine.query_deployment_info("0xcontract123");
+    auto info = engine.query_deployment_info(placeholder_contract_address);
 
-    ASSERT_TRUE(info.has_value());
-    EXPECT_GT(info->block_height, 0);
+    // Placeholder address is not a deployed contract.
+    EXPECT_FALSE(info.has_value());
 }
 
 // ============================================================================
@@ -281,8 +287,8 @@ TEST_F(Phase2CompactContractsTest, DeployContract_ValidContract_ReturnsAddress)
     Json::Value constructor_args;
     auto address = deployer.deploy_contract(contract, constructor_args);
 
-    ASSERT_TRUE(address.has_value());
-    EXPECT_EQ(address->size(), 42); // 0x + 40 hex chars
+    // On-chain deployment path is intentionally not faked.
+    EXPECT_FALSE(address.has_value());
 }
 
 // ============================================================================
@@ -293,11 +299,10 @@ TEST_F(Phase2CompactContractsTest, GetDeploymentStatus_ValidTx_ReturnsStatus)
 {
     ContractDeployer deployer(node_rpc_url);
 
-    auto status = deployer.get_deployment_status("0xtx123");
+    auto status = deployer.get_deployment_status(placeholder_tx_hash);
 
-    ASSERT_TRUE(status.has_value());
-    EXPECT_EQ(status->status, ContractDeployer::DeploymentStatus::Status::FINALIZED);
-    EXPECT_GT(status->block_height, 0);
+    // Placeholder tx hash should not resolve to on-chain deployment state.
+    EXPECT_FALSE(status.has_value());
 }
 
 // ============================================================================

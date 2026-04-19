@@ -3,11 +3,138 @@
  */
 
 #include "midnight/zk-proofs/zk_proofs.hpp"
+#include "midnight/network/network_client.hpp"
 #include <iostream>
 #include <algorithm>
 #include <thread>
 #include <chrono>
 #include <ctime>
+#include <sstream>
+#include <cctype>
+#include <stdexcept>
+
+namespace
+{
+    using NJson = nlohmann::json;
+    constexpr uint32_t kProofServerTimeoutMs = 30000;
+
+    std::string strip_hex_prefix(const std::string &value)
+    {
+        if (value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0)
+        {
+            return value.substr(2);
+        }
+        return value;
+    }
+
+    bool is_hex_string(const std::string &value)
+    {
+        if (value.empty())
+        {
+            return false;
+        }
+
+        for (char c : value)
+        {
+            if (!std::isxdigit(static_cast<unsigned char>(c)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    std::vector<uint8_t> decode_hex_or_ascii(const std::string &value)
+    {
+        const std::string normalized = strip_hex_prefix(value);
+        if (is_hex_string(normalized) && (normalized.size() % 2 == 0))
+        {
+            std::vector<uint8_t> bytes;
+            bytes.reserve(normalized.size() / 2);
+            for (size_t i = 0; i < normalized.size(); i += 2)
+            {
+                const std::string byte_str = normalized.substr(i, 2);
+                bytes.push_back(static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16)));
+            }
+            return bytes;
+        }
+
+        return std::vector<uint8_t>(value.begin(), value.end());
+    }
+
+    std::string bytes_to_hex(const std::vector<uint8_t> &bytes)
+    {
+        static const char *kHex = "0123456789abcdef";
+        std::string encoded;
+        encoded.reserve(bytes.size() * 2);
+        for (uint8_t byte : bytes)
+        {
+            encoded.push_back(kHex[(byte >> 4) & 0x0F]);
+            encoded.push_back(kHex[byte & 0x0F]);
+        }
+        return encoded;
+    }
+
+    Json::Value nlohmann_to_jsoncpp(const NJson &input)
+    {
+        Json::CharReaderBuilder builder;
+        Json::Value parsed;
+        std::string errors;
+        std::istringstream stream(input.dump());
+        if (!Json::parseFromStream(builder, stream, &parsed, &errors))
+        {
+            throw std::runtime_error("Failed to convert JSON response: " + errors);
+        }
+        return parsed;
+    }
+
+    NJson jsoncpp_to_nlohmann(const Json::Value &input)
+    {
+        Json::StreamWriterBuilder writer;
+        writer["indentation"] = "";
+        const std::string serialized = Json::writeString(writer, input);
+        return NJson::parse(serialized.empty() ? "{}" : serialized, nullptr, false);
+    }
+
+    std::optional<std::string> extract_proof_hex(const NJson &node)
+    {
+        if (node.is_string())
+        {
+            return node.get<std::string>();
+        }
+
+        if (node.is_object())
+        {
+            if (node.contains("proof_hex") && node["proof_hex"].is_string())
+            {
+                return node["proof_hex"].get<std::string>();
+            }
+            if (node.contains("proof") && node["proof"].is_string())
+            {
+                return node["proof"].get<std::string>();
+            }
+            if (node.contains("proof") && node["proof"].is_object())
+            {
+                const auto &proof_obj = node["proof"];
+                if (proof_obj.contains("proof_hex") && proof_obj["proof_hex"].is_string())
+                {
+                    return proof_obj["proof_hex"].get<std::string>();
+                }
+            }
+            if (node.contains("proof_data") && node["proof_data"].is_string())
+            {
+                return node["proof_data"].get<std::string>();
+            }
+            if (node.contains("hex") && node["hex"].is_string())
+            {
+                return node["hex"].get<std::string>();
+            }
+        }
+
+        return {};
+    }
+}
 
 namespace midnight::phase4
 {
@@ -23,10 +150,36 @@ namespace midnight::phase4
 
     bool ProofServerClient::connect()
     {
-        // In production: Establish connection to Proof Server
-        // For now: Mock connection
-        connected_ = true;
-        return true;
+        connected_ = false;
+        if (proof_server_url_.empty())
+        {
+            return false;
+        }
+
+        midnight::network::NetworkClient client(proof_server_url_, kProofServerTimeoutMs);
+        const std::vector<std::string> health_endpoints = {
+            "/status",
+            "/health",
+        };
+
+        for (const auto &endpoint : health_endpoints)
+        {
+            try
+            {
+                NJson response = client.get_json(endpoint);
+                if (response.is_object() || response.is_array())
+                {
+                    connected_ = true;
+                    return true;
+                }
+            }
+            catch (...)
+            {
+                // Try the next health endpoint.
+            }
+        }
+
+        return false;
     }
 
     void ProofServerClient::disconnect()
@@ -37,18 +190,28 @@ namespace midnight::phase4
     bool ProofServerClient::is_healthy()
     {
         if (!connected_)
+        {
             return false;
+        }
 
-        // In production: Send health check request
-        // For now: Return true
-        return true;
+        try
+        {
+            midnight::network::NetworkClient client(proof_server_url_, kProofServerTimeoutMs);
+            NJson response = client.get_json("/status");
+            return response.is_object() || response.is_array();
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 
     ProofGenResult ProofServerClient::request_proof(const ProofRequest &request)
     {
-        if (!is_healthy())
+        ProofGenResult result;
+
+        if (!is_healthy() && !connect())
         {
-            ProofGenResult result;
             result.success = false;
             result.error_message = "Proof Server not available";
             return result;
@@ -56,36 +219,163 @@ namespace midnight::phase4
 
         try
         {
-            // In production: Send proof request to Proof Server
-            // Server generates zk-SNARK
+            const auto started = std::chrono::high_resolution_clock::now();
 
-            auto start = std::chrono::high_resolution_clock::now();
+            const std::string circuit_name =
+                request.circuit_id.empty() ? "default_circuit" : request.circuit_id;
 
-            // Mock: Simulate proof generation (100-500ms)
-            std::this_thread::sleep_for(std::chrono::milliseconds(150));
+            std::vector<uint8_t> circuit_data;
+            auto circuit_data_it = request.private_inputs.find("__circuit_data_hex");
+            if (circuit_data_it != request.private_inputs.end())
+            {
+                circuit_data = decode_hex_or_ascii(circuit_data_it->second);
+            }
+            if (circuit_data.empty())
+            {
+                circuit_data.assign(circuit_name.begin(), circuit_name.end());
+            }
 
-            auto end = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+            NJson proof_request;
+            proof_request["circuit_name"] = circuit_name;
+            proof_request["circuit_data_hex"] = bytes_to_hex(circuit_data);
 
-            ProofGenResult result;
-            result.success = true;
-            result.generation_time_ms = duration.count();
-
-            result.proof.proof_data = "0x" + std::string(256, 'p'); // 128 bytes = 256 hex
-            result.proof.circuit_id = request.circuit_id;
-            result.proof.verified = false;
-
-            // Copy public inputs
+            NJson inputs_json = NJson::object();
             for (const auto &[key, value] : request.public_inputs)
             {
-                result.proof.public_inputs.push_back(value);
+                std::string normalized = strip_hex_prefix(value);
+                if (normalized.empty())
+                {
+                    normalized = "00";
+                }
+                else if (!is_hex_string(normalized))
+                {
+                    normalized = bytes_to_hex(std::vector<uint8_t>(value.begin(), value.end()));
+                }
+                inputs_json[key] = normalized;
+            }
+            proof_request["circuit_inputs"] = inputs_json;
+
+            NJson witnesses_json = NJson::object();
+            for (const auto &[key, value] : request.private_inputs)
+            {
+                if (key == "__circuit_data_hex")
+                {
+                    continue;
+                }
+
+                const std::vector<uint8_t> witness_bytes = decode_hex_or_ascii(value);
+                NJson witness_json;
+                witness_json["witness_name"] = key;
+                witness_json["output_type"] = "Bytes";
+                witness_json["output_hex"] = bytes_to_hex(witness_bytes);
+                witness_json["size"] = witness_bytes.size();
+                witnesses_json[key] = witness_json;
+            }
+            proof_request["witnesses"] = witnesses_json;
+
+            midnight::network::NetworkClient client(proof_server_url_, kProofServerTimeoutMs);
+            const std::vector<std::string> generate_endpoints = {
+                "/generate",
+                "/proof/generate",
+            };
+
+            NJson response;
+            bool endpoint_hit = false;
+            std::string last_error;
+            for (const auto &endpoint : generate_endpoints)
+            {
+                try
+                {
+                    response = client.post_json(endpoint, proof_request);
+                    endpoint_hit = true;
+                    break;
+                }
+                catch (const std::exception &e)
+                {
+                    last_error = e.what();
+                }
+            }
+
+            if (!endpoint_hit)
+            {
+                throw std::runtime_error(last_error.empty() ? "No generate endpoint available" : last_error);
+            }
+
+            const auto finished = std::chrono::high_resolution_clock::now();
+            result.generation_time_ms =
+                static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(finished - started).count());
+
+            result.proof.circuit_id = circuit_name;
+            const NJson result_node = response.contains("result") ? response["result"] : response;
+
+            if (response.contains("success") && response["success"].is_boolean())
+            {
+                result.success = response["success"].get<bool>();
+            }
+            else
+            {
+                result.success = true;
+            }
+
+            if (response.contains("error"))
+            {
+                result.success = false;
+                if (response["error"].is_string())
+                {
+                    result.error_message = response["error"].get<std::string>();
+                }
+                else
+                {
+                    result.error_message = response["error"].dump();
+                }
+            }
+
+            const auto proof_hex = extract_proof_hex(result_node);
+            if (proof_hex.has_value())
+            {
+                std::string normalized_proof = *proof_hex;
+                if (normalized_proof.rfind("0x", 0) != 0 && normalized_proof.rfind("0X", 0) != 0)
+                {
+                    normalized_proof = "0x" + normalized_proof;
+                }
+                result.proof.proof_data = normalized_proof;
+            }
+
+            if (result_node.is_object() && result_node.contains("public_inputs") && result_node["public_inputs"].is_object())
+            {
+                for (const auto &[_, value] : result_node["public_inputs"].items())
+                {
+                    if (value.is_string())
+                    {
+                        result.proof.public_inputs.push_back(value.get<std::string>());
+                    }
+                }
+            }
+
+            if (result.proof.public_inputs.empty())
+            {
+                for (const auto &[_, value] : request.public_inputs)
+                {
+                    result.proof.public_inputs.push_back(value);
+                }
+            }
+
+            result.proof.verified = false;
+
+            if (!result.success && result.error_message.empty())
+            {
+                result.error_message = "Proof server returned an unsuccessful response";
+            }
+
+            if (result.success)
+            {
+                ProofPerformanceMonitor::record_generation_time(result.generation_time_ms);
             }
 
             return result;
         }
         catch (const std::exception &e)
         {
-            ProofGenResult result;
             result.success = false;
             result.error_message = std::string("Proof generation failed: ") + e.what();
             return result;
@@ -94,29 +384,129 @@ namespace midnight::phase4
 
     std::optional<ProofGenResult> ProofServerClient::get_proof_status(const std::string &request_id)
     {
-        // In production: Query Proof Server for status
-        // For now: Return mock status
+        if (request_id.empty())
+        {
+            return {};
+        }
 
-        ProofGenResult result;
-        result.success = true;
-        result.proof.proof_data = "0x" + std::string(256, 'p');
-        return result;
+        const NJson payload = {
+            {"request_id", request_id},
+        };
+
+        const std::vector<std::string> endpoints = {
+            "/proofs/status",
+            "/proof/status",
+            "/status",
+        };
+
+        for (const auto &endpoint : endpoints)
+        {
+            try
+            {
+                midnight::network::NetworkClient client(proof_server_url_, kProofServerTimeoutMs);
+                NJson response = client.post_json(endpoint, payload);
+
+                ProofGenResult result;
+                if (response.contains("success") && response["success"].is_boolean())
+                {
+                    result.success = response["success"].get<bool>();
+                }
+                else if (response.contains("status") && response["status"].is_string())
+                {
+                    const std::string status = response["status"].get<std::string>();
+                    result.success = (status == "success" || status == "completed" || status == "ready");
+                    if (!result.success)
+                    {
+                        result.error_message = status;
+                    }
+                }
+
+                if (response.contains("error") && response["error"].is_string())
+                {
+                    result.success = false;
+                    result.error_message = response["error"].get<std::string>();
+                }
+
+                const auto proof_hex = extract_proof_hex(response.contains("result") ? response["result"] : response);
+                if (proof_hex.has_value())
+                {
+                    result.proof.proof_data = *proof_hex;
+                    result.success = true;
+                }
+
+                return result;
+            }
+            catch (...)
+            {
+                // Try next known status endpoint.
+            }
+        }
+
+        return {};
     }
 
     bool ProofServerClient::cancel_proof_request(const std::string &request_id)
     {
-        // In production: Send cancellation request
-        return true;
+        if (request_id.empty())
+        {
+            return false;
+        }
+
+        const NJson payload = {
+            {"request_id", request_id},
+        };
+
+        const std::vector<std::string> endpoints = {
+            "/proofs/cancel",
+            "/proof/cancel",
+            "/cancel",
+        };
+
+        for (const auto &endpoint : endpoints)
+        {
+            try
+            {
+                midnight::network::NetworkClient client(proof_server_url_, kProofServerTimeoutMs);
+                NJson response = client.post_json(endpoint, payload);
+
+                if (response.contains("cancelled") && response["cancelled"].is_boolean())
+                {
+                    return response["cancelled"].get<bool>();
+                }
+                if (response.contains("success") && response["success"].is_boolean())
+                {
+                    return response["success"].get<bool>();
+                }
+                if (response.contains("status") && response["status"].is_string())
+                {
+                    const std::string status = response["status"].get<std::string>();
+                    if (status == "success" || status == "cancelled" || status == "ok")
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch (...)
+            {
+                // Try next known cancel endpoint.
+            }
+        }
+
+        return false;
     }
 
     Json::Value ProofServerClient::http_post(const std::string &endpoint, const Json::Value &payload)
     {
-        // In production: Make HTTP POST request
-        // For now: Return mock response
+        NJson request = jsoncpp_to_nlohmann(payload);
+        if (request.is_discarded())
+        {
+            throw std::runtime_error("Invalid JSON payload");
+        }
 
-        Json::Value response;
-        response["status"] = "success";
-        return response;
+        midnight::network::NetworkClient client(proof_server_url_, kProofServerTimeoutMs);
+        NJson response = client.post_json(endpoint.empty() ? "/" : endpoint, request);
+
+        return nlohmann_to_jsoncpp(response);
     }
 
     // ============================================================================

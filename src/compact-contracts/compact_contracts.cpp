@@ -3,10 +3,223 @@
  */
 
 #include "midnight/compact-contracts/compact_contracts.hpp"
+#include "midnight/network/network_client.hpp"
+#include <array>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <regex>
 #include <algorithm>
 #include <fstream>
+#include <sstream>
+#include <cctype>
+#include <ctime>
+
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
+
+namespace
+{
+    std::string quote_shell_arg(const std::string &value)
+    {
+#ifdef _WIN32
+        std::string escaped;
+        escaped.reserve(value.size() + 2);
+        escaped.push_back('"');
+        for (char ch : value)
+        {
+            if (ch == '"')
+            {
+                escaped += "\\\"";
+            }
+            else
+            {
+                escaped.push_back(ch);
+            }
+        }
+        escaped.push_back('"');
+        return escaped;
+#else
+        std::string escaped = "'";
+        for (char ch : value)
+        {
+            if (ch == '\'')
+            {
+                escaped += "'\\''";
+            }
+            else
+            {
+                escaped.push_back(ch);
+            }
+        }
+        escaped.push_back('\'');
+        return escaped;
+#endif
+    }
+
+    std::string run_command_capture(const std::string &command, int &exit_code)
+    {
+        std::string output;
+
+#ifdef _WIN32
+        FILE *pipe = _popen(command.c_str(), "r");
+#else
+        FILE *pipe = popen(command.c_str(), "r");
+#endif
+        if (pipe == nullptr)
+        {
+            exit_code = -1;
+            return output;
+        }
+
+        std::array<char, 512> buffer{};
+        while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr)
+        {
+            output += buffer.data();
+        }
+
+#ifdef _WIN32
+        exit_code = _pclose(pipe);
+#else
+        int status = pclose(pipe);
+        if (WIFEXITED(status))
+        {
+            exit_code = WEXITSTATUS(status);
+        }
+        else
+        {
+            exit_code = status;
+        }
+#endif
+
+        return output;
+    }
+
+    std::string extract_json_payload(const std::string &raw_output)
+    {
+        const auto first = raw_output.find('{');
+        const auto last = raw_output.rfind('}');
+        if (first == std::string::npos || last == std::string::npos || first > last)
+        {
+            return raw_output;
+        }
+        return raw_output.substr(first, last - first + 1);
+    }
+
+    std::string to_lower_copy(std::string value)
+    {
+        std::transform(
+            value.begin(),
+            value.end(),
+            value.begin(),
+            [](unsigned char ch)
+            { return static_cast<char>(std::tolower(ch)); });
+        return value;
+    }
+
+    std::string normalized_contract_key(std::string contract_name)
+    {
+        contract_name = to_lower_copy(contract_name);
+        contract_name.erase(
+            std::remove_if(
+                contract_name.begin(),
+                contract_name.end(),
+                [](unsigned char ch)
+                { return !std::isalnum(ch); }),
+            contract_name.end());
+        return contract_name;
+    }
+
+    Json::Value nlohmann_to_jsoncpp(const nlohmann::json &input)
+    {
+        Json::CharReaderBuilder builder;
+        Json::Value parsed;
+        std::string errors;
+        std::istringstream stream(input.dump());
+        if (!Json::parseFromStream(builder, stream, &parsed, &errors))
+        {
+            throw std::runtime_error("Failed to parse indexer response: " + errors);
+        }
+        return parsed;
+    }
+
+    bool is_hex_prefixed_string(const std::string &value, size_t min_hex_chars)
+    {
+        if (value.size() < (2 + min_hex_chars) || value.rfind("0x", 0) != 0)
+        {
+            return false;
+        }
+
+        for (size_t i = 2; i < value.size(); ++i)
+        {
+            if (!std::isxdigit(static_cast<unsigned char>(value[i])))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    std::string derive_indexer_url_from_rpc(const std::string &rpc_url)
+    {
+        if (rpc_url.find("preprod") != std::string::npos)
+        {
+            return "https://indexer.preprod.midnight.network/api/v3/graphql";
+        }
+        if (rpc_url.find("preview") != std::string::npos)
+        {
+            return "https://indexer.preview.midnight.network/api/v3/graphql";
+        }
+        if (rpc_url.find("127.0.0.1") != std::string::npos || rpc_url.find("localhost") != std::string::npos)
+        {
+            return "http://127.0.0.1:8088/api/v3/graphql";
+        }
+
+        return "";
+    }
+
+    std::string derive_network_from_rpc(const std::string &rpc_url)
+    {
+        const std::string normalized = to_lower_copy(rpc_url);
+        if (normalized.find("preprod") != std::string::npos)
+        {
+            return "preprod";
+        }
+        if (normalized.find("preview") != std::string::npos)
+        {
+            return "preview";
+        }
+        if (normalized.find("mainnet") != std::string::npos)
+        {
+            return "mainnet";
+        }
+        if (normalized.find("127.0.0.1") != std::string::npos || normalized.find("localhost") != std::string::npos)
+        {
+            return "undeployed";
+        }
+
+        return "undeployed";
+    }
+
+    std::optional<Json::Value> extract_contract_action(const Json::Value &response)
+    {
+        if (!response.isMember("data") || !response["data"].isObject())
+        {
+            return {};
+        }
+
+        const Json::Value &action = response["data"]["contractAction"];
+        if (action.isNull() || !action.isObject())
+        {
+            return {};
+        }
+
+        return action;
+    }
+}
 
 namespace midnight::phase2
 {
@@ -172,34 +385,36 @@ namespace midnight::phase2
     {
         try
         {
-            // GraphQL query for public state
+            if (!is_hex_prefixed_string(contract_address, 40))
+            {
+                return {};
+            }
+
             std::string query = R"(
             query {
-                contract(address: ")" +
-                                contract_address + R"(") {
-                    publicState {
-                        key: ")" +
-                                state_key + R"("
-                        value
-                    }
+                contractAction(address: ")" +
+                                contract_address + R"(", offset: { blockOffset: { height: 0 } }) {
+                    __typename
+                    address
+                    state
+                    zswapState
                 }
             }
         )";
 
             auto result = graphql_query(query);
-
-            if (result.isMember("data") && result["data"].isMember("contract"))
+            auto action = extract_contract_action(result);
+            if (!action)
             {
-                auto state = result["data"]["contract"]["publicState"];
-                if (!state.isNull())
-                {
-                    Json::Value value;
-                    value["value"] = state.get("value", Json::Value());
-                    return value;
-                }
+                return {};
             }
 
-            return {};
+            Json::Value value;
+            value["key"] = state_key;
+            value["value"] = action->get("state", Json::Value());
+            value["zswapState"] = action->get("zswapState", Json::Value());
+            value["actionType"] = action->get("__typename", "");
+            return value;
         }
         catch (const std::exception &e)
         {
@@ -213,22 +428,63 @@ namespace midnight::phase2
     {
         try
         {
+            if (!is_hex_prefixed_string(contract_address, 40))
+            {
+                return {};
+            }
+
             ContractState state;
             state.contract_address = contract_address;
-            state.block_height = 0; // Would get from indexer
+            state.block_height = 0;
 
-            // GraphQL query
             std::string query = R"(
             query {
-                contract(address: ")" +
-                                contract_address + R"(") {
-                    publicState
+                contractAction(address: ")" +
+                                contract_address + R"(", offset: { blockOffset: { height: 0 } }) {
+                    __typename
+                    address
+                    state
+                    zswapState
+                    transaction {
+                        hash
+                        block {
+                            height
+                            hash
+                            timestamp
+                        }
+                    }
                 }
             }
         )";
 
             auto result = graphql_query(query);
-            state.public_data = result;
+            auto action = extract_contract_action(result);
+            if (!action)
+            {
+                return {};
+            }
+
+            Json::Value public_data;
+            public_data["actionType"] = action->get("__typename", "");
+            public_data["address"] = action->get("address", "");
+            public_data["state"] = action->get("state", Json::Value());
+            public_data["zswapState"] = action->get("zswapState", Json::Value());
+
+            if ((*action).isMember("transaction") && (*action)["transaction"].isObject())
+            {
+                const Json::Value &tx = (*action)["transaction"];
+                public_data["transactionHash"] = tx.get("hash", "");
+
+                if (tx.isMember("block") && tx["block"].isObject())
+                {
+                    const Json::Value &block = tx["block"];
+                    state.block_height = block.get("height", 0).asUInt();
+                    public_data["blockHash"] = block.get("hash", "");
+                    public_data["timestamp"] = block.get("timestamp", 0).asUInt64();
+                }
+            }
+
+            state.public_data = public_data;
 
             return state;
         }
@@ -243,24 +499,8 @@ namespace midnight::phase2
     {
         try
         {
-            // GraphQL query for ABI
-            std::string query = R"(
-            query {
-                contract(address: ")" +
-                                contract_address + R"(") {
-                    abi
-                }
-            }
-        )";
-
-            auto result = graphql_query(query);
-
-            if (result.isMember("data") && result["data"].isMember("contract"))
-            {
-                auto abi_json = result["data"]["contract"].get("abi", "{}").asString();
-                return CompactLoader::load_abi(abi_json);
-            }
-
+            (void)contract_address;
+            // The v3 preprod indexer does not expose Compact ABI blobs directly.
             return {};
         }
         catch (const std::exception &e)
@@ -275,33 +515,59 @@ namespace midnight::phase2
     {
         try
         {
-            // GraphQL query for deployment info
+            if (!is_hex_prefixed_string(contract_address, 40))
+            {
+                return {};
+            }
+
             std::string query = R"(
             query {
-                deployment(contractAddress: ")" +
-                                contract_address + R"(") {
-                    deployer
-                    blockHeight
-                    transactionHash
-                    timestamp
+                contractAction(address: ")" +
+                                contract_address + R"(", offset: { blockOffset: { height: 0 } }) {
+                    __typename
+                    address
+                    transaction {
+                        hash
+                        block {
+                            height
+                            timestamp
+                        }
+                    }
                 }
             }
         )";
 
             auto result = graphql_query(query);
-
-            if (result.isMember("data") && result["data"].isMember("deployment"))
+            auto action = extract_contract_action(result);
+            if (!action)
             {
-                auto dep = result["data"]["deployment"];
-                DeploymentInfo info;
-                info.deployer_address = dep.get("deployer", "").asString();
-                info.block_height = dep.get("blockHeight", 0).asUInt();
-                info.transaction_hash = dep.get("transactionHash", "").asString();
-                info.deployment_timestamp = dep.get("timestamp", 0).asUInt64();
-                return info;
+                return {};
             }
 
-            return {};
+            const std::string action_type = action->get("__typename", "").asString();
+            if (action_type != "ContractDeploy")
+            {
+                return {};
+            }
+
+            if (!(*action).isMember("transaction") || !(*action)["transaction"].isObject())
+            {
+                return {};
+            }
+
+            const Json::Value &tx = (*action)["transaction"];
+            const Json::Value &block = tx.get("block", Json::Value());
+
+            DeploymentInfo info;
+            info.deployer_address = "";
+            info.block_height = block.get("height", 0).asUInt();
+            info.transaction_hash = tx.get("hash", "").asString();
+            info.deployment_timestamp = block.get("timestamp", 0).asUInt64();
+            if (info.transaction_hash.empty() || info.block_height == 0)
+            {
+                return {};
+            }
+            return info;
         }
         catch (const std::exception &e)
         {
@@ -312,12 +578,23 @@ namespace midnight::phase2
 
     Json::Value ContractQueryEngine::graphql_query(const std::string &query_str)
     {
-        // In production: Send HTTP POST to indexer_url_ with GraphQL query
-        // For now: Return mock response
+        midnight::network::NetworkClient client(indexer_url_, 10000);
 
-        Json::Value response;
-        response["data"]["contract"]["publicState"] = Json::Value();
-        return response;
+        nlohmann::json payload = {
+            {"query", query_str},
+        };
+
+        auto response = client.post_json("/", payload);
+        Json::Value parsed = nlohmann_to_jsoncpp(response);
+
+        if (parsed.isMember("errors") && parsed["errors"].isArray() && !parsed["errors"].empty())
+        {
+            Json::StreamWriterBuilder writer;
+            writer["indentation"] = "";
+            throw std::runtime_error("Indexer GraphQL returned errors: " + Json::writeString(writer, parsed["errors"]));
+        }
+
+        return parsed;
     }
 
     // ============================================================================
@@ -436,10 +713,339 @@ namespace midnight::phase2
     {
         try
         {
-            // In production: Submit deployment transaction via Node RPC
-            // For now: Return mock contract address
+            const auto read_string = [&](const std::initializer_list<const char *> &keys) -> std::string
+            {
+                if (!constructor_args.isObject())
+                {
+                    return "";
+                }
 
-            std::string contract_address = "0x" + std::string(40, 'a');
+                for (const auto *key : keys)
+                {
+                    if (!constructor_args.isMember(key))
+                    {
+                        continue;
+                    }
+
+                    const Json::Value &value = constructor_args[key];
+                    if (value.isString())
+                    {
+                        return value.asString();
+                    }
+                    if (value.isBool())
+                    {
+                        return value.asBool() ? "true" : "false";
+                    }
+                    if (value.isUInt64())
+                    {
+                        return std::to_string(value.asUInt64());
+                    }
+                    if (value.isInt64())
+                    {
+                        return std::to_string(static_cast<long long>(value.asInt64()));
+                    }
+                    if (value.isUInt())
+                    {
+                        return std::to_string(value.asUInt());
+                    }
+                    if (value.isInt())
+                    {
+                        return std::to_string(value.asInt());
+                    }
+                }
+
+                return "";
+            };
+
+            const auto read_uint = [&](const std::initializer_list<const char *> &keys, uint64_t fallback) -> uint64_t
+            {
+                if (!constructor_args.isObject())
+                {
+                    return fallback;
+                }
+
+                for (const auto *key : keys)
+                {
+                    if (!constructor_args.isMember(key))
+                    {
+                        continue;
+                    }
+
+                    const Json::Value &value = constructor_args[key];
+                    if (value.isUInt64())
+                    {
+                        return value.asUInt64();
+                    }
+                    if (value.isUInt())
+                    {
+                        return value.asUInt();
+                    }
+                    if (value.isInt64() && value.asInt64() >= 0)
+                    {
+                        return static_cast<uint64_t>(value.asInt64());
+                    }
+                    if (value.isInt() && value.asInt() >= 0)
+                    {
+                        return static_cast<uint64_t>(value.asInt());
+                    }
+                    if (value.isString())
+                    {
+                        try
+                        {
+                            return std::stoull(value.asString());
+                        }
+                        catch (...)
+                        {
+                            continue;
+                        }
+                    }
+                }
+
+                return fallback;
+            };
+
+            bool bridge_enabled = false;
+            if (constructor_args.isObject())
+            {
+                bridge_enabled = constructor_args.get("use_official_sdk_bridge", false).asBool();
+            }
+
+            const char *env_flag = std::getenv("MIDNIGHT_ENABLE_COMPACT_DEPLOY_BRIDGE");
+            const std::string env_value = env_flag == nullptr ? "" : to_lower_copy(env_flag);
+            const bool env_enabled = (env_value == "1" || env_value == "true" || env_value == "yes");
+
+            if (!bridge_enabled && !env_enabled)
+            {
+                return {};
+            }
+
+            std::string contract_name = compiled_contract.abi.contract_name;
+            if (contract_name.empty())
+            {
+                contract_name = read_string({"contract", "contract_name", "contractName"});
+            }
+
+            if (contract_name.empty())
+            {
+                contract_name = "FaucetAMM";
+            }
+
+            if (normalized_contract_key(contract_name).empty())
+            {
+                std::cerr << "Contract deploy bridge received an empty/invalid contract name" << std::endl;
+                return {};
+            }
+
+            std::string network = derive_network_from_rpc(rpc_url_);
+            if (constructor_args.isObject())
+            {
+                const std::string configured_network = read_string({"network", "network_id"});
+                if (!configured_network.empty())
+                {
+                    network = configured_network;
+                }
+            }
+
+            uint64_t fee_bps = 10;
+            if (constructor_args.isArray() && !constructor_args.empty())
+            {
+                const Json::Value &first = constructor_args[0];
+                if (first.isUInt64())
+                {
+                    fee_bps = first.asUInt64();
+                }
+                else if (first.isUInt())
+                {
+                    fee_bps = first.asUInt();
+                }
+                else if (first.isInt64() && first.asInt64() >= 0)
+                {
+                    fee_bps = static_cast<uint64_t>(first.asInt64());
+                }
+                else if (first.isInt() && first.asInt() >= 0)
+                {
+                    fee_bps = static_cast<uint64_t>(first.asInt());
+                }
+                else if (first.isString())
+                {
+                    try
+                    {
+                        fee_bps = std::stoull(first.asString());
+                    }
+                    catch (...)
+                    {
+                        // Keep default.
+                    }
+                }
+            }
+
+            fee_bps = read_uint({"fee_bps", "feeBps"}, fee_bps);
+
+            const uint64_t sync_timeout = read_uint({"sync_timeout", "syncTimeout"}, 120);
+            const uint64_t dust_wait = read_uint({"dust_wait", "dustWait"}, sync_timeout);
+            const uint64_t deploy_timeout = read_uint({"deploy_timeout", "deployTimeout"}, 300);
+            const uint64_t dust_utxo_limit = read_uint({"dust_utxo_limit", "dustUtxoLimit"}, 1);
+
+            std::string bridge_script = read_string({"bridge_script"});
+            if (bridge_script.empty())
+            {
+                bridge_script = "tools/official-deploy-contract.mjs";
+            }
+
+            const std::string seed_hex = read_string({"seed_hex", "seed", "wallet_seed_hex"});
+            const std::string initial_nonce_hex = read_string({"initial_nonce_hex", "initial_nonce"});
+            const std::string proof_server = read_string({"proof_server", "proofServer"});
+            std::string node_url = read_string({"node_url", "nodeUrl"});
+            const std::string indexer_url = read_string({"indexer_url", "indexerUrl"});
+            const std::string indexer_ws_url = read_string({"indexer_ws_url", "indexerWsUrl"});
+            const std::string contract_module = read_string({"contract_module", "contractModule"});
+            const std::string contract_export = read_string({"contract_export", "contractExport"});
+            const std::string private_state_store = read_string({"private_state_store", "privateStateStore"});
+            const std::string private_state_id = read_string({"private_state_id", "privateStateId"});
+            std::string constructor_args_json = read_string({"constructor_args_json", "constructorArgsJson"});
+            const std::string constructor_args_file = read_string({"constructor_args_file", "constructorArgsFile"});
+            const std::string zk_config_path = read_string({"zk_config_path", "zkConfigPath"});
+
+            if (constructor_args_json.empty() && constructor_args.isObject())
+            {
+                const Json::Value *constructor_args_value = nullptr;
+                if (constructor_args.isMember("constructor_args"))
+                {
+                    constructor_args_value = &constructor_args["constructor_args"];
+                }
+                else if (constructor_args.isMember("constructorArgs"))
+                {
+                    constructor_args_value = &constructor_args["constructorArgs"];
+                }
+
+                if (constructor_args_value != nullptr)
+                {
+                    Json::StreamWriterBuilder writer;
+                    writer["indentation"] = "";
+                    constructor_args_json = Json::writeString(writer, *constructor_args_value);
+                }
+            }
+
+            if (node_url.empty())
+            {
+                node_url = rpc_url_;
+            }
+
+            std::ostringstream command;
+            command << "node " << quote_shell_arg(bridge_script)
+                    << " --contract " << quote_shell_arg(contract_name)
+                    << " --network " << quote_shell_arg(network)
+                    << " --fee-bps " << fee_bps
+                    << " --sync-timeout " << sync_timeout
+                    << " --dust-wait " << dust_wait
+                    << " --deploy-timeout " << deploy_timeout
+                    << " --dust-utxo-limit " << dust_utxo_limit;
+
+            if (!seed_hex.empty())
+            {
+                command << " --seed " << quote_shell_arg(seed_hex);
+            }
+            if (!initial_nonce_hex.empty())
+            {
+                command << " --initial-nonce " << quote_shell_arg(initial_nonce_hex);
+            }
+            if (!proof_server.empty())
+            {
+                command << " --proof-server " << quote_shell_arg(proof_server);
+            }
+            if (!node_url.empty())
+            {
+                command << " --node-url " << quote_shell_arg(node_url);
+            }
+            if (!indexer_url.empty())
+            {
+                command << " --indexer-url " << quote_shell_arg(indexer_url);
+            }
+            if (!indexer_ws_url.empty())
+            {
+                command << " --indexer-ws-url " << quote_shell_arg(indexer_ws_url);
+            }
+            if (!contract_module.empty())
+            {
+                command << " --contract-module " << quote_shell_arg(contract_module);
+            }
+            if (!contract_export.empty())
+            {
+                command << " --contract-export " << quote_shell_arg(contract_export);
+            }
+            if (!private_state_store.empty())
+            {
+                command << " --private-state-store " << quote_shell_arg(private_state_store);
+            }
+            if (!private_state_id.empty())
+            {
+                command << " --private-state-id " << quote_shell_arg(private_state_id);
+            }
+            if (!constructor_args_json.empty())
+            {
+                command << " --constructor-args-json " << quote_shell_arg(constructor_args_json);
+            }
+            if (!constructor_args_file.empty())
+            {
+                command << " --constructor-args-file " << quote_shell_arg(constructor_args_file);
+            }
+            if (!zk_config_path.empty())
+            {
+                command << " --zk-config-path " << quote_shell_arg(zk_config_path);
+            }
+
+            command << " 2>&1";
+
+            int exit_code = 0;
+            const std::string raw_output = run_command_capture(command.str(), exit_code);
+            if (raw_output.empty())
+            {
+                std::cerr << "Deploy bridge produced no output" << std::endl;
+                return {};
+            }
+
+            Json::CharReaderBuilder reader_builder;
+            Json::Value root;
+            std::string parse_errors;
+            std::istringstream payload_stream(extract_json_payload(raw_output));
+            if (!Json::parseFromStream(reader_builder, payload_stream, &root, &parse_errors))
+            {
+                std::cerr << "Deploy bridge returned non-JSON output: " << parse_errors
+                          << ". Raw output: " << raw_output << std::endl;
+                return {};
+            }
+
+            const bool success = root.get("success", false).asBool();
+            if (!success)
+            {
+                std::string bridge_error = root.get("error", "Contract deploy bridge failed").asString();
+                if (bridge_error.empty())
+                {
+                    bridge_error = "Contract deploy bridge failed";
+                }
+                if (exit_code != 0)
+                {
+                    bridge_error += " (exit code " + std::to_string(exit_code) + ")";
+                }
+
+                std::cerr << bridge_error << std::endl;
+                return {};
+            }
+
+            std::string contract_address = root.get("contractAddress", "").asString();
+            if (contract_address.empty() &&
+                root.isMember("deployTxData") && root["deployTxData"].isObject() &&
+                root["deployTxData"].isMember("public") && root["deployTxData"]["public"].isObject())
+            {
+                contract_address = root["deployTxData"]["public"].get("contractAddress", "").asString();
+            }
+
+            if (contract_address.empty())
+            {
+                std::cerr << "Deploy bridge succeeded but no contractAddress was returned" << std::endl;
+                return {};
+            }
+
             return contract_address;
         }
         catch (const std::exception &e)
@@ -454,12 +1060,69 @@ namespace midnight::phase2
     {
         try
         {
-            // In production: Query Node RPC for deployment status
+            if (!is_hex_prefixed_string(tx_hash, 64))
+            {
+                return {};
+            }
+
+            const std::string indexer_url = derive_indexer_url_from_rpc(rpc_url_);
+            if (indexer_url.empty())
+            {
+                return {};
+            }
+
+            midnight::network::NetworkClient client(indexer_url, 10000);
+            const std::string query = R"(
+            query {
+                transactions(offset: { hash: ")" +
+                                      tx_hash + R"(" }) {
+                    hash
+                    block {
+                        height
+                    }
+                    contractActions {
+                        __typename
+                        address
+                    }
+                }
+            }
+        )";
+
+            nlohmann::json payload = {
+                {"query", query},
+            };
+
+            Json::Value response = nlohmann_to_jsoncpp(client.post_json("/", payload));
+            if (!response.isMember("data") || !response["data"].isMember("transactions") || !response["data"]["transactions"].isArray())
+            {
+                return {};
+            }
+
+            const Json::Value &txs = response["data"]["transactions"];
+            if (txs.empty())
+            {
+                return {};
+            }
+
+            const Json::Value &tx = txs[0];
             DeploymentStatus status;
             status.status = DeploymentStatus::Status::FINALIZED;
-            status.transaction_hash = tx_hash;
-            status.block_height = 5000;
-            status.contract_address = "0x" + std::string(40, 'a');
+            status.transaction_hash = tx.get("hash", "").asString();
+            if (tx.isMember("block") && tx["block"].isObject())
+            {
+                status.block_height = tx["block"].get("height", 0).asUInt();
+            }
+
+            if (tx.isMember("contractActions") && tx["contractActions"].isArray() && !tx["contractActions"].empty())
+            {
+                status.contract_address = tx["contractActions"][0].get("address", "").asString();
+            }
+
+            if (status.transaction_hash.empty())
+            {
+                return {};
+            }
+
             return status;
         }
         catch (const std::exception &e)

@@ -1,5 +1,6 @@
 #include "midnight/blockchain/official_sdk_bridge.hpp"
 
+#include <nlohmann/json.hpp>
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -103,149 +104,15 @@ namespace midnight::blockchain
             output[copy_len] = '\0';
         }
 
-        std::string unescape_json_string(const std::string &input)
+        std::string extract_json_payload(const std::string &raw_output)
         {
-            std::string out;
-            out.reserve(input.size());
-
-            bool escaping = false;
-            for (char ch : input)
+            const auto first = raw_output.find('{');
+            const auto last = raw_output.rfind('}');
+            if (first == std::string::npos || last == std::string::npos || first > last)
             {
-                if (!escaping)
-                {
-                    if (ch == '\\')
-                    {
-                        escaping = true;
-                    }
-                    else
-                    {
-                        out.push_back(ch);
-                    }
-                    continue;
-                }
-
-                switch (ch)
-                {
-                case '"':
-                    out.push_back('"');
-                    break;
-                case '\\':
-                    out.push_back('\\');
-                    break;
-                case '/':
-                    out.push_back('/');
-                    break;
-                case 'b':
-                    out.push_back('\b');
-                    break;
-                case 'f':
-                    out.push_back('\f');
-                    break;
-                case 'n':
-                    out.push_back('\n');
-                    break;
-                case 'r':
-                    out.push_back('\r');
-                    break;
-                case 't':
-                    out.push_back('\t');
-                    break;
-                default:
-                    out.push_back(ch);
-                    break;
-                }
-
-                escaping = false;
+                return raw_output;
             }
-
-            if (escaping)
-            {
-                out.push_back('\\');
-            }
-
-            return out;
-        }
-
-        bool extract_json_string_field(const std::string &json, const std::string &field, std::string &value)
-        {
-            const std::string key = "\"" + field + "\"";
-            size_t key_pos = json.find(key);
-            if (key_pos == std::string::npos)
-            {
-                return false;
-            }
-
-            size_t colon_pos = json.find(':', key_pos + key.size());
-            if (colon_pos == std::string::npos)
-            {
-                return false;
-            }
-
-            size_t first_quote = json.find('"', colon_pos + 1);
-            if (first_quote == std::string::npos)
-            {
-                return false;
-            }
-
-            std::string raw;
-            bool escaping = false;
-            for (size_t i = first_quote + 1; i < json.size(); ++i)
-            {
-                const char ch = json[i];
-                if (!escaping && ch == '"')
-                {
-                    value = unescape_json_string(raw);
-                    return true;
-                }
-
-                raw.push_back(ch);
-                if (!escaping && ch == '\\')
-                {
-                    escaping = true;
-                }
-                else
-                {
-                    escaping = false;
-                }
-            }
-
-            return false;
-        }
-
-        bool extract_json_bool_field(const std::string &json, const std::string &field, bool &value)
-        {
-            const std::string key = "\"" + field + "\"";
-            size_t key_pos = json.find(key);
-            if (key_pos == std::string::npos)
-            {
-                return false;
-            }
-
-            size_t colon_pos = json.find(':', key_pos + key.size());
-            if (colon_pos == std::string::npos)
-            {
-                return false;
-            }
-
-            size_t token_pos = colon_pos + 1;
-            while (token_pos < json.size() && std::isspace(static_cast<unsigned char>(json[token_pos])))
-            {
-                ++token_pos;
-            }
-
-            if (json.compare(token_pos, 4, "true") == 0)
-            {
-                value = true;
-                return true;
-            }
-
-            if (json.compare(token_pos, 5, "false") == 0)
-            {
-                value = false;
-                return true;
-            }
-
-            return false;
+            return raw_output.substr(first, last - first + 1);
         }
     } // namespace
 
@@ -292,46 +159,43 @@ namespace midnight::blockchain
             return result;
         }
 
-        bool success = false;
-        if (!extract_json_bool_field(raw_output, "success", success))
+        try
         {
-            result.error = "Official wallet bridge output missing success flag. Raw output: " + raw_output;
-            return result;
-        }
+            const std::string json_payload = extract_json_payload(raw_output);
+            auto j = nlohmann::json::parse(json_payload);
 
-        if (!success)
-        {
-            std::string message;
-            if (!extract_json_string_field(raw_output, "error", message))
+            result.success = j.value("success", false);
+            if (!result.success)
             {
-                message = "Official wallet bridge failed";
+                result.error = j.value("error", "Official wallet bridge failed");
+                if (exit_code != 0)
+                {
+                    result.error += " (exit code " + std::to_string(exit_code) + ")";
+                }
+                return result;
             }
 
-            std::ostringstream err;
-            err << message;
-            if (exit_code != 0)
+            result.unshielded_address = j.value("unshieldedAddress", "");
+            if (result.unshielded_address.empty())
             {
-                err << " (exit code " << exit_code << ")";
+                result.error = "Official wallet bridge did not return unshieldedAddress";
+                return result;
             }
-            result.error = err.str();
-            return result;
-        }
 
-        if (!extract_json_string_field(raw_output, "unshieldedAddress", result.unshielded_address))
+            result.shielded_address = j.value("shieldedAddress", "");
+            result.dust_address = j.value("dustAddress", "");
+            result.seed_hex = j.value("seedHex", "");
+            result.dust_registration_requested = j.value("dustRegistrationRequested", false);
+            result.dust_registration_attempted = j.value("dustRegistrationAttempted", false);
+            result.dust_registration_success = j.value("dustRegistrationSuccess", false);
+            result.dust_registration_message = j.value("dustRegistrationMessage", "");
+            result.dust_registration_txid = j.value("dustRegistrationTxId", "");
+        }
+        catch (const nlohmann::json::exception &e)
         {
-            result.error = "Official wallet bridge did not return unshieldedAddress";
-            return result;
+            result.error = "Failed to parse JSON response: " + std::string(e.what()) + ". Raw output: " + raw_output;
         }
 
-        extract_json_string_field(raw_output, "shieldedAddress", result.shielded_address);
-        extract_json_string_field(raw_output, "dustAddress", result.dust_address);
-        result.success = true;
-        extract_json_string_field(raw_output, "seedHex", result.seed_hex);
-        extract_json_bool_field(raw_output, "dustRegistrationRequested", result.dust_registration_requested);
-        extract_json_bool_field(raw_output, "dustRegistrationAttempted", result.dust_registration_attempted);
-        extract_json_bool_field(raw_output, "dustRegistrationSuccess", result.dust_registration_success);
-        extract_json_string_field(raw_output, "dustRegistrationMessage", result.dust_registration_message);
-        extract_json_string_field(raw_output, "dustRegistrationTxId", result.dust_registration_txid);
         return result;
     }
 
@@ -408,42 +272,39 @@ namespace midnight::blockchain
             return result;
         }
 
-        bool success = false;
-        if (!extract_json_bool_field(raw_output, "success", success))
+        try
         {
-            result.error = "Official transfer bridge output missing success flag. Raw output: " + raw_output;
-            return result;
+            const std::string json_payload = extract_json_payload(raw_output);
+            auto j = nlohmann::json::parse(json_payload);
+
+            result.success = j.value("success", false);
+
+            result.network = j.value("network", result.network);
+            result.source_address = j.value("sourceAddress", "");
+            result.destination_address = j.value("destinationAddress", result.destination_address);
+            result.amount = j.value("amount", result.amount);
+            result.synced = j.value("synced", false);
+            result.sync_error = j.value("syncError", "");
+            result.txid = j.value("txId", "");
+
+            result.unshielded_balance_before = j.value("unshieldedBalanceBefore", j.value("unshieldedBalance", ""));
+            result.dust_balance_before = j.value("dustBalanceBefore", j.value("dustBalance", ""));
+
+            result.error = j.value("error", "");
+
+            if (!result.success && result.error.empty())
+            {
+                result.error = "Official transfer bridge failed";
+            }
+            if (!result.success && exit_code != 0)
+            {
+                result.error += " (exit code " + std::to_string(exit_code) + ")";
+            }
         }
-
-        result.success = success;
-        extract_json_string_field(raw_output, "network", result.network);
-        extract_json_string_field(raw_output, "sourceAddress", result.source_address);
-        extract_json_string_field(raw_output, "destinationAddress", result.destination_address);
-        extract_json_string_field(raw_output, "amount", result.amount);
-        extract_json_bool_field(raw_output, "synced", result.synced);
-        extract_json_string_field(raw_output, "syncError", result.sync_error);
-        extract_json_string_field(raw_output, "txId", result.txid);
-
-        if (!extract_json_string_field(raw_output, "unshieldedBalanceBefore", result.unshielded_balance_before))
+        catch (const nlohmann::json::exception &e)
         {
-            extract_json_string_field(raw_output, "unshieldedBalance", result.unshielded_balance_before);
-        }
-
-        if (!extract_json_string_field(raw_output, "dustBalanceBefore", result.dust_balance_before))
-        {
-            extract_json_string_field(raw_output, "dustBalance", result.dust_balance_before);
-        }
-
-        extract_json_string_field(raw_output, "error", result.error);
-
-        if (!result.success && result.error.empty())
-        {
-            result.error = "Official transfer bridge failed";
-        }
-
-        if (!result.success && exit_code != 0)
-        {
-            result.error += " (exit code " + std::to_string(exit_code) + ")";
+            result.error = "Failed to parse JSON response: " + std::string(e.what()) + ". Raw output: " + raw_output;
+            result.success = false;
         }
 
         return result;

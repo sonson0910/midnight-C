@@ -118,7 +118,23 @@ namespace midnight::blockchain
             return out;
         }
 
-        bool hex_to_bytes32(const std::string &hex_input, std::array<uint8_t, 32> &out)
+        int hex_nibble(char c)
+        {
+            if (c >= '0' && c <= '9')
+            {
+                return c - '0';
+            }
+
+            const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (lower >= 'a' && lower <= 'f')
+            {
+                return 10 + (lower - 'a');
+            }
+
+            return -1;
+        }
+
+        bool hex_to_fixed_bytes(const std::string &hex_input, uint8_t *out, size_t out_size)
         {
             std::string hex = hex_input;
             if (hex.rfind("0x", 0) == 0 || hex.rfind("0X", 0) == 0)
@@ -126,37 +142,29 @@ namespace midnight::blockchain
                 hex = hex.substr(2);
             }
 
-            if (hex.size() < 64)
+            if (hex.size() != (out_size * 2))
             {
                 return false;
             }
 
-            auto nibble = [](char c) -> int
+            for (size_t i = 0; i < out_size; ++i)
             {
-                if (c >= '0' && c <= '9')
-                {
-                    return c - '0';
-                }
-                const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                if (lower >= 'a' && lower <= 'f')
-                {
-                    return 10 + (lower - 'a');
-                }
-                return -1;
-            };
-
-            for (size_t i = 0; i < out.size(); ++i)
-            {
-                const int hi = nibble(hex[i * 2]);
-                const int lo = nibble(hex[i * 2 + 1]);
+                const int hi = hex_nibble(hex[i * 2]);
+                const int lo = hex_nibble(hex[i * 2 + 1]);
                 if (hi < 0 || lo < 0)
                 {
                     return false;
                 }
+
                 out[i] = static_cast<uint8_t>((hi << 4) | lo);
             }
 
             return true;
+        }
+
+        bool hex_to_bytes32(const std::string &hex_input, std::array<uint8_t, 32> &out)
+        {
+            return hex_to_fixed_bytes(hex_input, out.data(), out.size());
         }
 
         bool has_supported_hrp(const std::string &hrp)
@@ -396,28 +404,12 @@ namespace midnight::blockchain
             midnight::crypto::Ed25519Signer::initialize();
 
             // Parse private key from hex string
-            if (private_key.length() < 128)
+            midnight::crypto::Ed25519Signer::PrivateKey priv_key_bytes{};
+            if (!hex_to_fixed_bytes(private_key, priv_key_bytes.data(), priv_key_bytes.size()))
             {
-                result.error_message = "Private key must be at least 128 hex characters (64 bytes)";
+                result.error_message = "Private key must be exactly 128 hex characters (64 bytes), optional 0x prefix";
                 midnight::g_logger->error(result.error_message);
                 return result;
-            }
-
-            // Convert hex private key to binary
-            midnight::crypto::Ed25519Signer::PrivateKey priv_key_bytes;
-            for (size_t i = 0; i < 64; ++i)
-            {
-                std::string byte_hex = private_key.substr(i * 2, 2);
-                try
-                {
-                    priv_key_bytes[i] = static_cast<uint8_t>(std::stoul(byte_hex, nullptr, 16));
-                }
-                catch (...)
-                {
-                    result.error_message = "Invalid private key hex format";
-                    midnight::g_logger->error(result.error_message);
-                    return result;
-                }
             }
 
             // Sign the transaction (transaction_hex is treated as the message)

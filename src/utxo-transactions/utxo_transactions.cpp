@@ -24,20 +24,9 @@ namespace midnight::phase3
     // ============================================================================
 
     UtxoSetManager::UtxoSetManager(const std::string &indexer_graphql_url,
-                                   const std::string &node_rpc_url,
-                                   DataSourceMode mode)
-        : indexer_url_(indexer_graphql_url), rpc_url_(node_rpc_url), data_source_mode_(mode)
+                                   const std::string &node_rpc_url)
+        : indexer_url_(indexer_graphql_url), rpc_url_(node_rpc_url)
     {
-    }
-
-    void UtxoSetManager::set_data_source_mode(DataSourceMode mode)
-    {
-        data_source_mode_ = mode;
-    }
-
-    DataSourceMode UtxoSetManager::get_data_source_mode() const
-    {
-        return data_source_mode_;
     }
 
     std::optional<std::vector<Utxo>> UtxoSetManager::query_unspent_utxos(const std::string &address)
@@ -171,17 +160,9 @@ namespace midnight::phase3
 
     Json::Value UtxoSetManager::graphql_query(const std::string &query)
     {
-        if (data_source_mode_ == DataSourceMode::MOCK)
-        {
-            Json::Value response;
-            response["data"]["utxoSet"] = Json::Value(Json::arrayValue);
-            return response;
-        }
-
         midnight::network::NetworkClient client(indexer_url_, kIndexerRpcTimeoutMs);
         nlohmann::json payload = {
-            {"query", query}
-        };
+            {"query", query}};
 
         auto raw_response = client.post_json("/", payload);
         auto raw_string = raw_response.dump();
