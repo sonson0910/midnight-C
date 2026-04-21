@@ -1,0 +1,9 @@
+jsoncpp_readerwriter 0 0
+jsoncpp_readerwriter_json_checker 0 0
+jsoncpp_test 0 0
+core_tests 0 0
+---
+jsoncpp_readerwriter
+jsoncpp_readerwriter_json_checker
+jsoncpp_test
+core_tests

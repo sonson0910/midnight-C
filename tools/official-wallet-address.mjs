@@ -146,6 +146,32 @@ function parseArgs(argv) {
   return opts;
 }
 
+function resolveSdkNodeModulesRoot(repoRoot) {
+  const configuredNodeModules = process.env.MIDNIGHT_SDK_NODE_MODULES;
+  const candidates = [];
+
+  if (typeof configuredNodeModules === 'string' && configuredNodeModules.trim()) {
+    candidates.push(path.resolve(configuredNodeModules.trim()));
+  }
+
+  candidates.push(path.join(repoRoot, 'node_modules'));
+  candidates.push(path.join(repoRoot, 'midnight-research', 'node_modules'));
+
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) {
+      continue;
+    }
+
+    if (fs.existsSync(path.join(candidate, '@midnight-ntwrk'))) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    'Official SDK dependencies not found. Set MIDNIGHT_SDK_NODE_MODULES to a node_modules directory containing @midnight-ntwrk packages.',
+  );
+}
+
 function normalizeSeedHex(seedHex) {
   const raw = seedHex.startsWith('0x') || seedHex.startsWith('0X')
     ? seedHex.slice(2)
@@ -736,11 +762,7 @@ async function main() {
   const thisFile = fileURLToPath(import.meta.url);
   const thisDir = path.dirname(thisFile);
   const repoRoot = path.resolve(thisDir, '..');
-  const nodeModulesRoot = path.join(repoRoot, 'midnight-research', 'node_modules');
-
-  if (!fs.existsSync(nodeModulesRoot)) {
-    throw new Error('Official SDK dependencies not found. Run: cd midnight-research && npm install');
-  }
+  const nodeModulesRoot = resolveSdkNodeModulesRoot(repoRoot);
 
   const modules = await loadOfficialModules(nodeModulesRoot);
 

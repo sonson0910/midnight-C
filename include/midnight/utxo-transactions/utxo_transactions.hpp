@@ -18,8 +18,10 @@
 #include <optional>
 #include <json/json.h>
 #include <cstdint>
+#include <utility>
+#include "midnight/core/config.hpp"
 
-namespace midnight::phase3
+namespace midnight::utxo_transactions
 {
 
     /**
@@ -52,6 +54,16 @@ namespace midnight::phase3
     };
 
     /**
+     * Typed witness container for signatures, proof references, and metadata.
+     */
+    struct WitnessBundle
+    {
+        std::vector<std::string> signatures;
+        std::vector<std::string> proof_references;
+        std::map<std::string, std::string> metadata;
+    };
+
+    /**
      * Transaction Structure
      */
     struct Transaction
@@ -75,6 +87,9 @@ namespace midnight::phase3
 
         // Signature
         std::string signature; // sr25519 signature
+
+        // Typed witness data (preferred over legacy flat fields)
+        WitnessBundle witness_bundle;
 
         // Public metadata (not encrypted)
         uint64_t nonce = 0;
@@ -114,6 +129,92 @@ namespace midnight::phase3
     };
 
     /**
+     * Fee model knobs used by transaction building and UTXO selection heuristics.
+     */
+    struct FeeModelConfig
+    {
+        bool use_protocol_min_fee = true;
+
+        uint32_t base_tx_size_bytes = 64;
+        uint32_t bytes_per_input = 96;
+        uint32_t bytes_per_output = 80;
+        uint32_t bytes_per_proof = 128;
+
+        uint64_t base_dust_per_output = 1000;
+        uint64_t witness_dust_per_output = 500;
+        uint64_t commitment_bytes_per_output = 128;
+
+        // 0 means "derive from protocol params".
+        uint64_t estimated_dust_per_utxo = 0;
+        size_t default_proof_size = 128;
+    };
+
+    /**
+     * Typed context for transaction building and fee estimation.
+     */
+    struct TransactionBuilderContext
+    {
+        midnight::ProtocolParams protocol_params{};
+        uint64_t chain_tip_height = 0;
+        std::string chain_tip_hash;
+        FeeModelConfig fee_model{};
+    };
+
+    /**
+     * Indexer data provider abstraction (GraphQL-oriented).
+     */
+    class IIndexerProvider
+    {
+    public:
+        virtual ~IIndexerProvider() = default;
+        virtual Json::Value execute_query(const std::string &query) = 0;
+    };
+
+    /**
+     * Node RPC provider abstraction.
+     */
+    class INodeProvider
+    {
+    public:
+        virtual ~INodeProvider() = default;
+        virtual std::optional<midnight::ProtocolParams> get_protocol_params() = 0;
+        virtual std::optional<std::pair<uint64_t, std::string>> get_chain_tip() = 0;
+    };
+
+    /**
+     * Default GraphQL indexer provider.
+     */
+    class GraphqlIndexerProvider : public IIndexerProvider
+    {
+    public:
+        explicit GraphqlIndexerProvider(const std::string &indexer_graphql_url,
+                                        uint32_t timeout_ms = 8000);
+
+        Json::Value execute_query(const std::string &query) override;
+
+    private:
+        std::string indexer_url_;
+        uint32_t timeout_ms_;
+    };
+
+    /**
+     * Default Midnight node RPC provider.
+     */
+    class MidnightNodeProvider : public INodeProvider
+    {
+    public:
+        explicit MidnightNodeProvider(const std::string &node_rpc_url,
+                                      uint32_t timeout_ms = 5000);
+
+        std::optional<midnight::ProtocolParams> get_protocol_params() override;
+        std::optional<std::pair<uint64_t, std::string>> get_chain_tip() override;
+
+    private:
+        std::string node_rpc_url_;
+        uint32_t timeout_ms_;
+    };
+
+    /**
      * UTXO Set Manager
      * Queries and manages UTXOs from the blockchain
      */
@@ -127,6 +228,12 @@ namespace midnight::phase3
          */
         UtxoSetManager(const std::string &indexer_graphql_url,
                        const std::string &node_rpc_url);
+
+        /**
+         * Constructor with explicit provider interfaces.
+         */
+        UtxoSetManager(std::shared_ptr<IIndexerProvider> indexer_provider,
+                       std::shared_ptr<INodeProvider> node_provider);
 
         /**
          * Query UTXOs for an address
@@ -155,14 +262,16 @@ namespace midnight::phase3
          */
         std::optional<AccountBalance> sync_account(const std::string &address);
 
+        /**
+         * Build a typed transaction context from node provider data.
+         */
+        std::optional<TransactionBuilderContext> create_builder_context() const;
+
     private:
         std::string indexer_url_;
         std::string rpc_url_;
-
-        /**
-         * GraphQL query
-         */
-        Json::Value graphql_query(const std::string &query);
+        std::shared_ptr<IIndexerProvider> indexer_provider_;
+        std::shared_ptr<INodeProvider> node_provider_;
     };
 
     /**
@@ -179,6 +288,21 @@ namespace midnight::phase3
         TransactionBuilder();
 
         /**
+         * Constructor with typed context (protocol params + chain tip + fee model)
+         */
+        explicit TransactionBuilder(const TransactionBuilderContext &context);
+
+        /**
+         * Replace current builder context
+         */
+        void set_context(const TransactionBuilderContext &context);
+
+        /**
+         * Access current builder context
+         */
+        const TransactionBuilderContext &get_context() const;
+
+        /**
          * Add input to transaction
          */
         void add_input(const UtxoInput &input);
@@ -187,6 +311,26 @@ namespace midnight::phase3
          * Add output to transaction
          */
         void add_output(const UtxoOutput &output);
+
+        /**
+         * Set full typed witness bundle.
+         */
+        void set_witness_bundle(const WitnessBundle &witness_bundle);
+
+        /**
+         * Append a signature to witness bundle.
+         */
+        void add_signature(const std::string &signature);
+
+        /**
+         * Append a proof reference to witness bundle.
+         */
+        void add_proof_reference(const std::string &proof_reference);
+
+        /**
+         * Set witness metadata key/value.
+         */
+        void set_witness_metadata(const std::string &key, const std::string &value);
 
         /**
          * Set fees (in DUST)
@@ -210,6 +354,8 @@ namespace midnight::phase3
 
     private:
         Transaction tx_;
+        TransactionBuilderContext context_;
+        bool fees_manually_set_ = false;
 
         /**
          * Compute blake2_256 hash of transaction
@@ -233,6 +379,16 @@ namespace midnight::phase3
             uint64_t output_dust,
             size_t output_count,
             bool has_witnesses);
+
+        /**
+         * Calculate DUST requirement using typed context.
+         */
+        static uint64_t calculate_dust_fee(
+            uint64_t input_dust,
+            uint64_t output_dust,
+            size_t output_count,
+            bool has_witnesses,
+            const TransactionBuilderContext &context);
 
         /**
          * Check if transaction is valid per DUST accounting
@@ -314,10 +470,26 @@ namespace midnight::phase3
             bool needs_witnesses);
 
         /**
+         * Select UTXOs with explicit fee context.
+         */
+        static std::optional<std::vector<Utxo>> select_utxos(
+            const std::vector<Utxo> &available,
+            uint32_t output_count,
+            bool needs_witnesses,
+            const TransactionBuilderContext &context);
+
+        /**
          * Calculate total DUST available in UTXO set
          * Note: We can only estimate since amounts are encrypted
          */
         static uint64_t estimate_dust_available(const std::vector<Utxo> &utxos);
+
+        /**
+         * Estimate DUST with typed context.
+         */
+        static uint64_t estimate_dust_available(
+            const std::vector<Utxo> &utxos,
+            const TransactionBuilderContext &context);
     };
 
     /**
@@ -335,9 +507,30 @@ namespace midnight::phase3
                                      size_t proof_size);
 
         /**
+         * Estimate fee with protocol-aware typed context.
+         */
+        static uint64_t estimate_fee(uint32_t input_count,
+                                     uint32_t output_count,
+                                     size_t proof_size,
+                                     const TransactionBuilderContext &context);
+
+        /**
+         * Estimate serialized transaction size in bytes.
+         */
+        static uint32_t estimate_tx_size_bytes(uint32_t input_count,
+                                               uint32_t output_count,
+                                               size_t proof_size,
+                                               const TransactionBuilderContext &context);
+
+        /**
          * Get current fee rate (DUST per byte)
          */
         static double get_current_fee_rate();
+
+        /**
+         * Get current fee rate from context.
+         */
+        static double get_current_fee_rate(const TransactionBuilderContext &context);
     };
 
-} // namespace midnight::phase3
+} // namespace midnight::utxo_transactions

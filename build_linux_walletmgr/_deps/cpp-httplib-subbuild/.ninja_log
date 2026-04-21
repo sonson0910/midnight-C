@@ -1,0 +1,21 @@
+# ninja log v7
+2	23	1776665664773159000	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-mkdir	4d3048a985478e8c
+2	23	1776665664773159000	/media/son/Projects1/venera/midnight/night_fund/build_linux_walletmgr/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-mkdir	4d3048a985478e8c
+24	2384	1776665667134490500	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-download	db8bcc00067a5271
+24	2384	1776665667134490500	/media/son/Projects1/venera/midnight/night_fund/build_linux_walletmgr/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-download	db8bcc00067a5271
+2384	2396	1776665667146457500	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-update	63a2c018e4eb5e4a
+2384	2396	1776665667146457500	/media/son/Projects1/venera/midnight/night_fund/build_linux_walletmgr/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-update	63a2c018e4eb5e4a
+2396	2410	1776665667159667300	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-patch	b1ad0d036e657163
+2396	2410	1776665667159667300	/media/son/Projects1/venera/midnight/night_fund/build_linux_walletmgr/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-patch	b1ad0d036e657163
+2410	2420	1776665667170690500	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-configure	2dd27479dfed92cf
+2410	2420	1776665667170690500	/media/son/Projects1/venera/midnight/night_fund/build_linux_walletmgr/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-configure	2dd27479dfed92cf
+2421	2432	1776665667182517900	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-build	8648d3ecece0d5ba
+2421	2432	1776665667182517900	/media/son/Projects1/venera/midnight/night_fund/build_linux_walletmgr/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-build	8648d3ecece0d5ba
+2432	2444	1776665667194608900	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-install	23d626eaaecce399
+2432	2444	1776665667194608900	/media/son/Projects1/venera/midnight/night_fund/build_linux_walletmgr/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-install	23d626eaaecce399
+2445	2463	1776665667212792400	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-test	f435167a94c9b659
+2445	2463	1776665667212792400	/media/son/Projects1/venera/midnight/night_fund/build_linux_walletmgr/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-test	f435167a94c9b659
+2463	2486	1776665667235828700	CMakeFiles/cpp-httplib-populate-complete	4993b85a0474c6a9
+2463	2486	1776665667235828700	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-done	4993b85a0474c6a9
+2463	2486	1776665667235828700	/media/son/Projects1/venera/midnight/night_fund/build_linux_walletmgr/_deps/cpp-httplib-subbuild/CMakeFiles/cpp-httplib-populate-complete	4993b85a0474c6a9
+2463	2486	1776665667235828700	/media/son/Projects1/venera/midnight/night_fund/build_linux_walletmgr/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-done	4993b85a0474c6a9

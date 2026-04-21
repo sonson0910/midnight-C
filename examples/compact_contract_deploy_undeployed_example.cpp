@@ -4,8 +4,8 @@
 #include <iostream>
 #include <string>
 
-using midnight::phase2::CompiledContract;
-using midnight::phase2::ContractDeployer;
+using midnight::compact_contracts::CompiledContract;
+using midnight::compact_contracts::ContractDeployer;
 
 namespace
 {
@@ -19,7 +19,11 @@ namespace
                   << "Notes:\n"
                   << "  - This example uses the official JS deploy bridge for FaucetAMM on undeployed.\n"
                   << "  - Ensure midnight-research dependencies are installed and node is available.\n"
-                  << "  - Wallet must have NIGHT and DUST for deployment fees.\n";
+                  << "  - Wallet must have NIGHT and DUST for deployment fees.\n"
+                  << "  - For better security in real usage, prefer wallet alias flow:\n"
+                  << "      export MIDNIGHT_WALLET_STORE_PASSPHRASE='your-strong-passphrase'\n"
+                  << "      ./bin/official_sdk_bridge_example wallet-add <alias> <seed_hex> undeployed\n"
+                  << "      ./bin/official_sdk_bridge_example deploy-wallet undeployed <alias> FaucetAMM\n";
     }
 }
 

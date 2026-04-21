@@ -17,7 +17,7 @@
 #include <json/json.h>
 #include <cstdint>
 
-namespace midnight::phase4
+namespace midnight::zk_proofs
 {
 
     /**
@@ -364,4 +364,4 @@ namespace midnight::phase4
         static std::vector<uint64_t> verification_times_;
     };
 
-} // namespace midnight::phase4
+} // namespace midnight::zk_proofs

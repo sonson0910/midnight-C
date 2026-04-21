@@ -1,71 +1,82 @@
 # Midnight SDK - Architecture Documentation
 
-## Tổng Quan Kiến Trúc
+## Architecture Overview
 
-Midnight SDK được thiết kế theo kiến trúc modular, cho phép các developers có thể sử dụng chỉ những thành phần họ cần.
+Midnight SDK is designed with a modular architecture, allowing developers to use only the components they need.
 
-## Lớp Tầng
+## Layers
 
-### 1. **Core Layer** (Lớp Cốt Lõi)
+### 1. **Core Layer**
+
 - Configuration Management
 - Logging System
 - Session Management
 - Base Utilities
 
-### 2. **Protocol Layer** (Lớp Giao Thức)
+### 2. **Protocol Layer**
+
 - MQTT Protocol
 - CoAP Protocol
 - HTTP/HTTPS
 - WebSocket
 
-### 3. **Blockchain Layer** (Lớp Blockchain)
+### 3. **Blockchain Layer**
+
 - Chain Management
 - Block Management
 - Transaction Management
 - Wallet Management
 - Cardano Adapter
 
-### 4. **Application Layer** (Lớp Ứng Dụng)
+### 4. **Application Layer**
+
 - User Applications
 - Services
 - Business Logic
 
-## Thiết Kế Mẫu
+## Design Patterns
 
 ### Pattern 1: Singleton
+
 - Global Logger instance
 - Global Config instance
-- Chain Manager (có thể singleton)
+- Chain Manager (can be singleton)
 
 ### Pattern 2: Factory
+
 - Protocol client creation
 - Block creation
 
 ### Pattern 3: Observer
+
 - Message callbacks (MQTT, WebSocket)
 - Event handlers
 
-## Tiếp mục phát triển hạn tiếp theo
+## Next Development Milestones
 
 ### Phase 1: Foundation (Current)
-- [x] Cấu trúc dự án
+
+- [x] Project structure
 - [x] Header files
 - [x] Stub implementations
 - [ ] Unit tests
 
 ### Phase 2: Core Implementation
+
 - [ ] MQTT protocol full implementation
 - [ ] CoAP protocol full implementation
 - [ ] HTTP client implementation
 - [ ] WebSocket implementation
 
 ### Phase 3: Blockchain Features
+
 - [ ] Complete block validation
 - [ ] Transaction hashing (SHA256)
 - [ ] Wallet private key management
 - [ ] Cardano integration
 
 ### Phase 4: Advanced Features
+
 - [ ] Encryption/Decryption
 - [ ] IoT device authentication
 - [ ] Blockchain smart contracts
@@ -74,10 +85,12 @@ Midnight SDK được thiết kế theo kiến trúc modular, cho phép các dev
 ## Dependencies
 
 ### Required
+
 - C++20 compiler
 - CMake 3.20+
 
 ### Optional
+
 - OpenSSL (for HTTPS)
 - libmosquitto or paho-mqtt (for MQTT)
 - libcoap (for CoAP)
@@ -86,7 +99,7 @@ Midnight SDK được thiết kế theo kiến trúc modular, cho phép các dev
 
 ## File Structure Convention
 
-```
+```text
 midnight/
 ├── include/midnight/
 │   ├── <module>/
@@ -114,16 +127,19 @@ midnight/
 ## Build Configuration
 
 ### Default Configuration
+
 ```bash
 cmake -DCMAKE_BUILD_TYPE=Release ..
 ```
 
 ### Debug Configuration
+
 ```bash
 cmake -DCMAKE_BUILD_TYPE=Debug ..
 ```
 
 ### Custom Installation
+
 ```bash
 cmake -DCMAKE_INSTALL_PREFIX=/custom/path ..
 ```

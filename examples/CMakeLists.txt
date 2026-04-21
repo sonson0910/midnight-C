@@ -49,3 +49,7 @@ target_include_directories(compact_contract_deploy_undeployed_example PRIVATE ${
 add_executable(compact_contract_deploy_custom_example compact_contract_deploy_custom_example.cpp)
 target_link_libraries(compact_contract_deploy_custom_example PRIVATE midnight-core)
 target_include_directories(compact_contract_deploy_custom_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(vesting_contract_deploy_example vesting_contract_deploy_example.cpp)
+target_link_libraries(vesting_contract_deploy_example PRIVATE midnight-core)
+target_include_directories(vesting_contract_deploy_example PRIVATE ${CMAKE_SOURCE_DIR}/include)

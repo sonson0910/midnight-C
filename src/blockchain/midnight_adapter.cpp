@@ -3,6 +3,7 @@
 #include "midnight/core/logger.hpp"
 #include "midnight/network/midnight_node_rpc.hpp"
 #include "midnight/crypto/ed25519_signer.hpp"
+#include <nlohmann/json.hpp>
 #include <sstream>
 #include <iomanip>
 #include <cstdlib>
@@ -242,6 +243,68 @@ namespace midnight::blockchain
             values.insert(values.end(), data.begin(), data.end());
             return bech32_polymod(values) == kBech32mConst;
         }
+
+        std::string strip_hex_prefix(std::string value)
+        {
+            if (value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0)
+            {
+                return value.substr(2);
+            }
+            return value;
+        }
+
+        std::string extract_submission_payload(const std::string &signed_tx)
+        {
+            const auto first_non_ws = signed_tx.find_first_not_of(" \t\r\n");
+            if (first_non_ws == std::string::npos || signed_tx[first_non_ws] != '{')
+            {
+                return signed_tx;
+            }
+
+            try
+            {
+                auto envelope = nlohmann::json::parse(signed_tx);
+                if (!envelope.is_object())
+                {
+                    return signed_tx;
+                }
+
+                if (envelope.contains("signedPayload") && envelope["signedPayload"].is_string())
+                {
+                    const std::string payload = envelope["signedPayload"].get<std::string>();
+                    if (!payload.empty())
+                    {
+                        return payload;
+                    }
+                }
+
+                if (envelope.contains("payload") && envelope["payload"].is_string())
+                {
+                    const std::string payload = envelope["payload"].get<std::string>();
+                    if (!payload.empty())
+                    {
+                        return payload;
+                    }
+                }
+
+                if (envelope.contains("transaction") && envelope["transaction"].is_string() &&
+                    envelope.contains("signature") && envelope["signature"].is_string())
+                {
+                    const std::string tx = envelope["transaction"].get<std::string>();
+                    const std::string sig = strip_hex_prefix(envelope["signature"].get<std::string>());
+                    if (!tx.empty() && !sig.empty())
+                    {
+                        return tx + sig;
+                    }
+                }
+            }
+            catch (...)
+            {
+                return signed_tx;
+            }
+
+            return signed_tx;
+        }
     } // namespace
 
     MidnightBlockchain::MidnightBlockchain() : connected_(false) {}
@@ -419,10 +482,21 @@ namespace midnight::blockchain
 
             // Convert signature to hex string
             std::string signature_hex = midnight::crypto::Ed25519Signer::signature_to_hex(signature);
+            const auto public_key = midnight::crypto::Ed25519Signer::extract_public_key(priv_key_bytes);
 
-            // Construct signed transaction: transaction + witness/signature
+            const std::string signed_payload = transaction_hex + signature_hex;
+            nlohmann::json envelope = {
+                {"format", "midnight-signed-v1"},
+                {"algorithm", "ed25519"},
+                {"transaction", transaction_hex},
+                {"signature", "0x" + signature_hex},
+                {"publicKey", "0x" + midnight::crypto::Ed25519Signer::public_key_to_hex(public_key)},
+                {"signedPayload", signed_payload},
+            };
+
+            // Construct structured output while keeping canonical payload available for submission.
             result.success = true;
-            result.result = transaction_hex + signature_hex; // Concatenate tx and signature
+            result.result = envelope.dump();
 
             midnight::g_logger->info("Transaction signed successfully");
             midnight::g_logger->debug("Signature length: " + std::to_string(signature_hex.length()) + " hex chars");
@@ -455,11 +529,12 @@ namespace midnight::blockchain
         }
 
         midnight::g_logger->info("Submitting transaction to Midnight network");
+        const std::string submission_payload = extract_submission_payload(signed_tx);
 
         try
         {
             // Submit via RPC node
-            std::string tx_id = rpc_->submit_transaction(signed_tx);
+            std::string tx_id = rpc_->submit_transaction(submission_payload);
 
             result.success = true;
             result.result = tx_id;

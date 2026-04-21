@@ -136,7 +136,7 @@ namespace
     }
 }
 
-namespace midnight::phase4
+namespace midnight::zk_proofs
 {
 
     // ============================================================================
@@ -801,4 +801,4 @@ namespace midnight::phase4
         return stats;
     }
 
-} // namespace midnight::phase4
+} // namespace midnight::zk_proofs

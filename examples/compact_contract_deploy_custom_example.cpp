@@ -6,8 +6,8 @@
 #include <sstream>
 #include <string>
 
-using midnight::phase2::CompiledContract;
-using midnight::phase2::ContractDeployer;
+using midnight::compact_contracts::CompiledContract;
+using midnight::compact_contracts::ContractDeployer;
 
 namespace
 {
@@ -65,7 +65,12 @@ namespace
             << "  " << program << " --contract FaucetAMM "
             << "--contract-module @midnight-ntwrk/counter-contract "
             << "--contract-export FaucetAMM "
-            << "--zk-config-path midnight-research/node_modules/@midnight-ntwrk/counter-contract/dist/managed/FaucetAMM\n";
+            << "--zk-config-path midnight-research/node_modules/@midnight-ntwrk/counter-contract/dist/managed/FaucetAMM\n\n"
+            << "Security note:\n"
+            << "  - This example accepts seed input for flexibility.\n"
+            << "  - In production/shared machines, prefer wallet alias flow via\n"
+            << "    official_sdk_bridge_example wallet-add/deploy-wallet to avoid\n"
+            << "    exposing seed in process arguments.\n";
     }
 
     bool parse_u64(const std::string &flag, const std::string &value, uint64_t &out)

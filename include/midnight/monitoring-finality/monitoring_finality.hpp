@@ -24,7 +24,7 @@
 #include <atomic>
 #include <mutex>
 
-namespace midnight::phase6
+namespace midnight::monitoring_finality
 {
 
     /**
@@ -444,4 +444,4 @@ namespace midnight::phase6
         std::thread reorg_thread_;
     };
 
-} // namespace midnight::phase6
+} // namespace midnight::monitoring_finality

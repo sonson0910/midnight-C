@@ -196,7 +196,7 @@ namespace
     }
 }
 
-namespace midnight::phase6
+namespace midnight::monitoring_finality
 {
 
     // ============================================================================
@@ -1064,4 +1064,4 @@ namespace midnight::phase6
         finality_monitor_.monitor_finalization(callback);
     }
 
-} // namespace midnight::phase6
+} // namespace midnight::monitoring_finality

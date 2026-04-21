@@ -3,9 +3,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Buffer } from 'node:buffer';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { inspect } from 'node:util';
 
 const DEFAULT_NETWORK = 'undeployed';
 const DEFAULT_CONTRACT = 'FaucetAMM';
@@ -67,6 +68,7 @@ function printHelp() {
     '  --contract-export <id> Export name from contract module (default: --contract)',
     '  --network <id>         Network ID: preprod|preview|mainnet|undeployed (default: undeployed)',
     '  --seed <hex>           Optional wallet seed (32-byte hex, optional 0x)',
+    '  --seed-file <path>     Read wallet seed hex from file (preferred over --seed in shared systems)',
     '  --fee-bps <int>        FaucetAMM fee in basis points (default: 10)',
     '  --initial-nonce <hex>  Optional 32-byte constructor nonce (hex, optional 0x)',
     '  --proof-server <url>   Override proof server URL',
@@ -99,6 +101,7 @@ function parseArgs(argv) {
     contractExport: '',
     network: DEFAULT_NETWORK,
     seedHex: '',
+    seedFile: '',
     feeBps: 10,
     initialNonceHex: '',
     proofServer: '',
@@ -162,6 +165,14 @@ function parseArgs(argv) {
         throw new Error('--seed requires a value');
       }
       opts.seedHex = argv[++i];
+      continue;
+    }
+
+    if (arg === '--seed-file') {
+      if (i + 1 >= argv.length) {
+        throw new Error('--seed-file requires a value');
+      }
+      opts.seedFile = argv[++i];
       continue;
     }
 
@@ -289,6 +300,34 @@ function parseArgs(argv) {
   }
 
   return opts;
+}
+
+function resolveSdkNodeModulesRoot(repoRoot) {
+  const configuredNodeModules = process.env.MIDNIGHT_SDK_NODE_MODULES;
+  const candidates = [];
+
+  if (typeof configuredNodeModules === 'string' && configuredNodeModules.trim()) {
+    candidates.push(path.resolve(configuredNodeModules.trim()));
+  }
+
+  candidates.push(path.join(repoRoot, '.cache', 'sdkv7', 'node_modules'));
+  candidates.push(path.join(repoRoot, '.cache', 'sdk4', 'node_modules'));
+  candidates.push(path.join(repoRoot, 'node_modules'));
+  candidates.push(path.join(repoRoot, 'midnight-research', 'node_modules'));
+
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) {
+      continue;
+    }
+
+    if (fs.existsSync(path.join(candidate, '@midnight-ntwrk'))) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    'Official SDK dependencies not found. Set MIDNIGHT_SDK_NODE_MODULES to a node_modules directory containing @midnight-ntwrk packages.',
+  );
 }
 
 function reviveTypedArgValue(value) {
@@ -486,6 +525,24 @@ function normalizeHex(value, expectedBytes, label) {
   return raw.toLowerCase();
 }
 
+function readSeedHexFromFile(seedFilePath) {
+  const resolvedPath = path.resolve(seedFilePath);
+
+  let content;
+  try {
+    content = fs.readFileSync(resolvedPath, 'utf8');
+  } catch (error) {
+    throw new Error(`Unable to read seed file at ${resolvedPath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const trimmed = String(content).trim();
+  if (!trimmed) {
+    throw new Error(`Seed file is empty: ${resolvedPath}`);
+  }
+
+  return trimmed;
+}
+
 function validateInteger(name, value, min, max) {
   if (!Number.isInteger(value) || value < min || value > max) {
     throw new Error(`${name} must be an integer in range [${min}, ${max}]`);
@@ -576,6 +633,50 @@ function withTimeout(promise, ms, message) {
   return Promise.race([promise, timeout(ms, message)]);
 }
 
+function asBigIntOrNull(value) {
+  if (typeof value === 'bigint') {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) {
+    return BigInt(value);
+  }
+  if (typeof value === 'string' && /^-?[0-9]+$/.test(value.trim())) {
+    return BigInt(value.trim());
+  }
+  return null;
+}
+
+function getAvailableUnshieldedCoinsSafe(state) {
+  if (Array.isArray(state?.unshielded?.availableCoins)) {
+    return state.unshielded.availableCoins;
+  }
+
+  if (Array.isArray(state?.unshielded?.state?.availableUtxos)) {
+    return state.unshielded.state.availableUtxos;
+  }
+
+  try {
+    const getAvailableCoins = state?.unshielded?.capabilities?.coinsAndBalances?.getAvailableCoins;
+    if (typeof getAvailableCoins === 'function') {
+      const available = getAvailableCoins(state?.unshielded?.state ?? state?.unshielded ?? state);
+      if (Array.isArray(available)) {
+        return available;
+      }
+    }
+  } catch {
+    // Ignore capability-shape mismatches across SDK versions.
+  }
+
+  return [];
+}
+
+function getCoinMetaSafe(coin) {
+  if (coin && typeof coin === 'object' && coin.meta && typeof coin.meta === 'object') {
+    return coin.meta;
+  }
+  return {};
+}
+
 function waitForState(observable, predicate, timeoutMs, timeoutMessage) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -629,15 +730,17 @@ function waitForState(observable, predicate, timeoutMs, timeoutMessage) {
 
 function getDustBalanceSafe(state) {
   try {
-    const value = state?.dust?.walletBalance?.(new Date());
-    if (typeof value === 'bigint') {
-      return value;
+    const dustState = state?.dust;
+    if (!dustState || typeof dustState !== 'object') {
+      return 0n;
     }
-    if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) {
-      return BigInt(value);
+
+    if (typeof dustState.walletBalance === 'function') {
+      return asBigIntOrNull(dustState.walletBalance(new Date())) ?? 0n;
     }
-    if (typeof value === 'string' && /^-?[0-9]+$/.test(value)) {
-      return BigInt(value);
+
+    if (typeof dustState.balance === 'function') {
+      return asBigIntOrNull(dustState.balance(new Date())) ?? 0n;
     }
   } catch {
     return 0n;
@@ -667,7 +770,16 @@ function getUnshieldedBalanceSafe(state, modules) {
 function getSourceAddressSafe(unshieldedKeystore) {
   try {
     if (unshieldedKeystore && typeof unshieldedKeystore.getBech32Address === 'function') {
-      return unshieldedKeystore.getBech32Address();
+      const value = unshieldedKeystore.getBech32Address();
+      if (typeof value === 'string') {
+        return value;
+      }
+      if (value && typeof value.toString === 'function') {
+        const rendered = value.toString();
+        if (typeof rendered === 'string' && rendered !== '[object Object]') {
+          return rendered;
+        }
+      }
     }
   } catch {
     return '';
@@ -709,6 +821,16 @@ function normalizeTxId(value) {
     }
   }
   return '';
+}
+
+function normalizeKeyHex(value) {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  if (value.startsWith('0x') || value.startsWith('0X')) {
+    return value.slice(2);
+  }
+  return value;
 }
 
 function signTransactionIntents(tx, signFn, proofMarker, modules) {
@@ -759,13 +881,22 @@ async function createWalletAndMidnightProvider(ctx, modules) {
     'Timed out waiting for wallet synced state',
   );
 
+  const coinPublicKey = synced?.shielded?.coinPublicKey;
+  const encryptionPublicKey = synced?.shielded?.encryptionPublicKey;
+  const coinHex = typeof coinPublicKey?.toHexString === 'function'
+    ? normalizeKeyHex(coinPublicKey.toHexString())
+    : '';
+  const encHex = typeof encryptionPublicKey?.toHexString === 'function'
+    ? normalizeKeyHex(encryptionPublicKey.toHexString())
+    : '';
+
   return {
     getCoinPublicKey() {
-      return synced.shielded.coinPublicKey.toHexString();
+      return coinHex;
     },
 
     getEncryptionPublicKey() {
-      return synced.shielded.encryptionPublicKey.toHexString();
+      return encHex;
     },
 
     async balanceTx(tx, ttl) {
@@ -817,11 +948,9 @@ async function ensureDustAvailable(wallet, unshieldedKeystore, modules, dustWait
     };
   }
 
-  const availableCoins = Array.isArray(state?.unshielded?.availableCoins)
-    ? state.unshielded.availableCoins
-    : [];
+  const availableCoins = getAvailableUnshieldedCoinsSafe(state);
 
-  const unregistered = availableCoins.filter((coin) => coin?.meta?.registeredForDustGeneration !== true);
+  const unregistered = availableCoins.filter((coin) => getCoinMetaSafe(coin).registeredForDustGeneration !== true);
   const batch = unregistered.slice(0, Math.max(1, dustUtxoLimit));
 
   if (batch.length > 0) {
@@ -855,6 +984,26 @@ async function ensureDustAvailable(wallet, unshieldedKeystore, modules, dustWait
 async function loadModules(nodeModulesRoot) {
   const resolve = (...parts) => pathToFileURL(path.join(nodeModulesRoot, ...parts)).href;
 
+  const dustWalletPackageJson = path.join(
+    nodeModulesRoot,
+    '@midnight-ntwrk',
+    'wallet-sdk-dust-wallet',
+    'package.json',
+  );
+
+  let ledgerPackageName = 'ledger-v8';
+  try {
+    const dustWalletPkg = JSON.parse(fs.readFileSync(dustWalletPackageJson, 'utf8'));
+    if (dustWalletPkg?.dependencies?.['@midnight-ntwrk/ledger-v7']) {
+      ledgerPackageName = 'ledger-v7';
+    } else if (dustWalletPkg?.dependencies?.['@midnight-ntwrk/ledger-v8']) {
+      ledgerPackageName = 'ledger-v8';
+    }
+  } catch {
+    const hasLedgerV8 = fs.existsSync(path.join(nodeModulesRoot, '@midnight-ntwrk', 'ledger-v8'));
+    ledgerPackageName = hasLedgerV8 ? 'ledger-v8' : 'ledger-v7';
+  }
+
   const [
     networkMod,
     hdMod,
@@ -878,7 +1027,7 @@ async function loadModules(nodeModulesRoot) {
     import(resolve('@midnight-ntwrk', 'wallet-sdk-facade', 'dist', 'index.js')),
     import(resolve('@midnight-ntwrk', 'wallet-sdk-shielded', 'dist', 'index.js')),
     import(resolve('@midnight-ntwrk', 'wallet-sdk-dust-wallet', 'dist', 'index.js')),
-    import(resolve('@midnight-ntwrk', 'ledger-v8', 'midnight_ledger_wasm_fs.js')),
+    import(resolve('@midnight-ntwrk', ledgerPackageName, 'midnight_ledger_wasm_fs.js')),
     import(resolve('ws', 'wrapper.mjs')),
     import(resolve('undici', 'index.js')),
     import(resolve('@midnight-ntwrk', 'compact-js', 'dist', 'esm', 'index.js')),
@@ -903,6 +1052,7 @@ async function loadModules(nodeModulesRoot) {
     ShieldedWallet: shieldedMod.ShieldedWallet,
     DustWallet: dustMod.DustWallet,
     ledger: ledgerMod,
+    ledgerPackageName,
     WebSocket: wsMod.WebSocket,
     Agent: undiciMod.Agent,
     setGlobalDispatcher: undiciMod.setGlobalDispatcher,
@@ -913,6 +1063,60 @@ async function loadModules(nodeModulesRoot) {
     NodeZkConfigProvider: zkMod.NodeZkConfigProvider,
     levelPrivateStateProvider: levelMod.levelPrivateStateProvider,
   };
+}
+
+function hasExcessiveCharRepetition(value, maxRunLength = 3) {
+  if (typeof value !== 'string' || value.length === 0) {
+    return false;
+  }
+
+  let runLength = 1;
+  for (let i = 1; i < value.length; i += 1) {
+    if (value[i] === value[i - 1]) {
+      runLength += 1;
+      if (runLength > maxRunLength) {
+        return true;
+      }
+    } else {
+      runLength = 1;
+    }
+  }
+
+  return false;
+}
+
+function buildDefaultPrivateStoragePassword(seedHex, networkId, storeName) {
+  const digest = createHash('sha256')
+    .update(`${seedHex}:${networkId}:${storeName}`)
+    .digest('hex')
+    .slice(0, 24);
+
+  let password = 'MdN!';
+  for (let i = 0; i < digest.length; i += 1) {
+    password += `${digest[i]}${i % 2 === 0 ? 'G' : 'h'}`;
+  }
+
+  return password;
+}
+
+function resolvePrivateStoragePassword(seedHex, networkId, storeName) {
+  const fromEnv = process.env.MIDNIGHT_PRIVATE_STATE_PASSWORD
+    || process.env.MIDNIGHT_PRIVATE_STORAGE_PASSWORD
+    || '';
+
+  if (fromEnv) {
+    if (fromEnv.length < 16) {
+      throw new Error('MIDNIGHT_PRIVATE_STATE_PASSWORD must be at least 16 characters');
+    }
+    if (hasExcessiveCharRepetition(fromEnv)) {
+      throw new Error(
+        'MIDNIGHT_PRIVATE_STATE_PASSWORD contains repeated character runs longer than 3',
+      );
+    }
+    return fromEnv;
+  }
+
+  return buildDefaultPrivateStoragePassword(seedHex, networkId, storeName);
 }
 
 function emitResultAndExit(payload, exitCode) {
@@ -940,6 +1144,10 @@ async function main() {
   validateInteger('deploy-timeout', opts.deployTimeoutSeconds, 10, 7200);
   validateInteger('dust-utxo-limit', opts.dustUtxoLimit, 1, 1000);
 
+  if (opts.seedHex && opts.seedFile) {
+    throw new Error('Use either --seed or --seed-file, not both');
+  }
+
   if (opts.dustWaitSeconds !== null) {
     validateInteger('dust-wait', opts.dustWaitSeconds, 10, 7200);
   }
@@ -947,11 +1155,7 @@ async function main() {
   const thisFile = fileURLToPath(import.meta.url);
   const thisDir = path.dirname(thisFile);
   const repoRoot = path.resolve(thisDir, '..');
-  const nodeModulesRoot = path.join(repoRoot, 'midnight-research', 'node_modules');
-
-  if (!fs.existsSync(nodeModulesRoot)) {
-    throw new Error('Official SDK dependencies not found. Run: cd midnight-research && npm install');
-  }
+  const nodeModulesRoot = resolveSdkNodeModulesRoot(repoRoot);
 
   const modules = await loadModules(nodeModulesRoot);
 
@@ -982,8 +1186,12 @@ async function main() {
     throw new Error('Missing endpoint configuration. Provide --indexer-url/--indexer-ws-url/--node-url/--proof-server');
   }
 
-  const seedHex = opts.seedHex
-    ? normalizeHex(opts.seedHex, 32, 'seed')
+  const rawSeedHex = opts.seedFile
+    ? readSeedHexFromFile(opts.seedFile)
+    : opts.seedHex;
+
+  const seedHex = rawSeedHex
+    ? normalizeHex(rawSeedHex, 32, 'seed')
     : Buffer.from(modules.generateRandomSeed()).toString('hex');
 
   const constructorNonce = opts.initialNonceHex
@@ -1045,7 +1253,22 @@ async function main() {
     modules.ledger.LedgerParameters.initialParameters().dust,
   );
 
-  const wallet = new modules.WalletFacade(shieldedWallet, unshieldedWallet, dustWallet);
+  const wallet = typeof modules.WalletFacade.init === 'function'
+    ? await modules.WalletFacade.init({
+      configuration: {
+        networkId,
+        indexerClientConnection: {
+          indexerHttpUrl: endpoints.indexerUrl,
+          indexerWsUrl: endpoints.indexerWsUrl,
+        },
+        relayURL: new URL(endpoints.nodeUrl.replace(/^http/, 'ws')),
+        provingServerUrl: new URL(endpoints.proofServer),
+      },
+      shielded: () => shieldedWallet,
+      unshielded: () => unshieldedWallet,
+      dust: () => dustWallet,
+    })
+    : new modules.WalletFacade(shieldedWallet, unshieldedWallet, dustWallet);
 
   const syncTimeoutMs = opts.syncTimeoutSeconds * 1000;
   const dustWaitSeconds = opts.dustWaitSeconds === null ? opts.syncTimeoutSeconds : opts.dustWaitSeconds;
@@ -1111,9 +1334,18 @@ async function main() {
     );
 
     const zkConfigProvider = new modules.NodeZkConfigProvider(zkConfigPath);
+    const privateStoragePassword = resolvePrivateStoragePassword(
+      seedHex,
+      networkId,
+      contractProfile.privateStateStoreName,
+    );
+    const privateStorageAccountId = getSourceAddressSafe(unshieldedKeystore);
+
     const providers = {
       privateStateProvider: modules.levelPrivateStateProvider({
+        accountId: privateStorageAccountId,
         privateStateStoreName: contractProfile.privateStateStoreName,
+        privateStoragePasswordProvider: async () => privateStoragePassword,
         walletProvider: walletAndMidnightProvider,
       }),
       publicDataProvider: modules.indexerPublicDataProvider(endpoints.indexerUrl, endpoints.indexerWsUrl),
@@ -1177,6 +1409,21 @@ async function main() {
     resultCode = 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error && typeof error.stack === 'string' ? error.stack : '';
+    const symbolEntries = error && typeof error === 'object'
+      ? Object.getOwnPropertySymbols(error).map((sym) => {
+        let value = '';
+        try {
+          value = inspect(error[sym], { depth: 6, breakLength: 120 });
+        } catch {
+          value = '<uninspectable>';
+        }
+        return { symbol: String(sym), value };
+      })
+      : [];
+    const errorDetails = error && typeof error === 'object'
+      ? inspect(error, { depth: 6, breakLength: 120 })
+      : '';
     const fallbackState = state;
 
     resultPayload = {
@@ -1199,6 +1446,9 @@ async function main() {
       },
       endpoints,
       error: message,
+      errorStack: stack,
+      errorDetails,
+      errorSymbolDetails: symbolEntries,
     };
     resultCode = 1;
   } finally {

@@ -8,8 +8,9 @@
 4. [Phase 4A: ZK Proof Types](#phase-4a-zk-proof-types)
 5. [Phase 4B: Private State Management](#phase-4b-private-state-management)
 6. [Phase 4C: Resilience](#phase-4c-resilience)
-7. [Phase 4D: Ledger State Sync](#phase-4d-ledger-state-sync)
+7. [Phase 4D: Ledger State Sync](#phase-4d-ledger-state-synchronization)
 8. [Phase 4E: Deployment Utilities](#phase-4e-deployment-utilities)
+9. [Phase 5: Official SDK Bridge (No Mock Transfer)](#phase-5-official-sdk-bridge-no-mock-transfer)
 
 ---
 
@@ -779,6 +780,192 @@ struct SystemHealth {
 
 ---
 
+## Phase 5: Official SDK Bridge (No Mock Transfer)
+
+### Core C++ APIs
+
+```cpp
+midnight::blockchain::OfficialWalletStateResult query_official_wallet_state(
+    const std::string& seed_hex,
+    const std::string& network = "preprod",
+    const std::string& proof_server = "",
+    const std::string& node_url = "",
+    const std::string& indexer_url = "",
+    const std::string& indexer_ws_url = "",
+    uint32_t sync_timeout_seconds = 120,
+    const std::string& bridge_script = "tools/official-transfer-night.mjs");
+
+midnight::blockchain::OfficialTransferResult transfer_official_night(
+    const std::string& seed_hex,
+    const std::string& to_address,
+    const std::string& amount,
+    const std::string& network = "preprod",
+    const std::string& proof_server = "",
+    uint32_t sync_timeout_seconds = 120,
+    const std::string& bridge_script = "tools/official-transfer-night.mjs");
+
+bool register_wallet_seed_hex(
+    const std::string& wallet_alias,
+    const std::string& seed_hex,
+    const std::string& network = "",
+    const std::string& wallet_store_dir = "",
+    std::string* error = nullptr);
+
+midnight::blockchain::OfficialTransferResult transfer_official_night_with_wallet(
+    const std::string& wallet_alias,
+    const std::string& to_address,
+    const std::string& amount,
+    const std::string& network = "preprod",
+    const std::string& proof_server = "",
+    uint32_t sync_timeout_seconds = 120,
+    const std::string& wallet_store_dir = "",
+    const std::string& bridge_script = "tools/official-transfer-night.mjs");
+
+midnight::blockchain::OfficialWalletStateResult query_official_wallet_state_with_wallet(
+    const std::string& wallet_alias,
+    const std::string& network = "preprod",
+    const std::string& proof_server = "",
+    const std::string& node_url = "",
+    const std::string& indexer_url = "",
+    const std::string& indexer_ws_url = "",
+    uint32_t sync_timeout_seconds = 120,
+    const std::string& wallet_store_dir = "",
+    const std::string& bridge_script = "tools/official-transfer-night.mjs");
+
+midnight::blockchain::OfficialContractDeployResult deploy_official_compact_contract_with_wallet(
+    const std::string& wallet_alias,
+    const std::string& contract = "FaucetAMM",
+    const std::string& network = "undeployed",
+    uint64_t fee_bps = 10,
+    const std::string& initial_nonce_hex = "",
+    const std::string& proof_server = "",
+    const std::string& node_url = "",
+    const std::string& indexer_url = "",
+    const std::string& indexer_ws_url = "",
+    uint32_t sync_timeout_seconds = 120,
+    uint32_t dust_wait_seconds = 120,
+    uint32_t deploy_timeout_seconds = 300,
+    uint32_t dust_utxo_limit = 1,
+    const std::string& contract_module = "",
+    const std::string& contract_export = "",
+    const std::string& private_state_store = "",
+    const std::string& private_state_id = "",
+    const std::string& constructor_args_json = "",
+    const std::string& constructor_args_file = "",
+    const std::string& zk_config_path = "",
+    const std::string& wallet_store_dir = "",
+    const std::string& bridge_script = "tools/official-deploy-contract.mjs");
+```
+
+`tools/official-transfer-night.mjs` and `tools/official-deploy-contract.mjs` now support `--seed-file <path>` in addition to `--seed <hex>`. The C++ bridge uses a short-lived temp seed file by default for transfer/state/indexer/deploy commands so the raw seed no longer appears directly in process arguments.
+
+Wallet alias storage is encrypted at rest (AES-256-GCM) and requires:
+
+- `MIDNIGHT_WALLET_STORE_PASSPHRASE` set to at least 16 characters before `register_wallet_seed_hex` (or `wallet-add`) and before any alias-based read/use.
+- OpenSSL crypto support enabled in the C++ build.
+
+### Required Runtime Dependencies (Real Network Path)
+
+- Node.js and npm are required by the official bridge scripts.
+- The transfer bridge dynamically imports these packages:
+  - `@midnight-ntwrk/midnight-js-network-id`
+  - `@midnight-ntwrk/wallet-sdk-hd`
+  - `@midnight-ntwrk/wallet-sdk-unshielded-wallet`
+  - `@midnight-ntwrk/wallet-sdk-address-format`
+  - `@midnight-ntwrk/wallet-sdk-facade`
+  - `@midnight-ntwrk/wallet-sdk-shielded`
+  - `@midnight-ntwrk/wallet-sdk-dust-wallet`
+  - `@midnight-ntwrk/ledger-v8`
+  - `undici`
+  - `ws`
+- Module resolution order in `tools/official-transfer-night.mjs`:
+  1. `MIDNIGHT_SDK_NODE_MODULES` (if set)
+  2. `./node_modules`
+  3. `./midnight-research/node_modules` (legacy fallback)
+- C++ dependencies (`nlohmann_json`, `fmt`, `jsoncpp`, `cpp-httplib`) are auto-resolved by CMake (`find_package` + `FetchContent` fallback).
+
+### C++ NIGHT Transfer Example (No Mock)
+
+```cpp
+#include <iostream>
+#include <string>
+
+#include "midnight/blockchain/official_sdk_bridge.hpp"
+
+int main() {
+    const std::string network = "undeployed";
+    const std::string wallet_alias = "ops_wallet";
+    const std::string seed_hex = "<64-hex-seed>";
+    const std::string to_address = "<mn_addr_destination>";
+    const std::string amount = "1000000000000000000"; // smallest units
+    const uint32_t timeout_s = 120;
+
+    // Required for encrypted wallet alias storage.
+    // export MIDNIGHT_WALLET_STORE_PASSPHRASE='your-strong-passphrase'
+
+    std::string register_error;
+    if (!midnight::blockchain::register_wallet_seed_hex(wallet_alias, seed_hex, network, "", &register_error)) {
+        std::cerr << "Wallet registration failed: " << register_error << '\n';
+        return 1;
+    }
+
+    const auto state = midnight::blockchain::query_official_wallet_state_with_wallet(
+        wallet_alias,
+        network,
+        "",
+        "",
+        "",
+        "",
+        timeout_s,
+        "",
+        "tools/official-transfer-night.mjs");
+
+    if (!state.success) {
+        std::cerr << "Wallet state query failed: " << state.error << '\n';
+        return 2;
+    }
+
+    if (state.likely_dust_designation_lock || state.likely_pending_utxo_lock) {
+        std::cerr << "Wallet appears locked by pending dust/UTXO state. Wait and retry.\n";
+        return 3;
+    }
+
+    const auto tx = midnight::blockchain::transfer_official_night_with_wallet(
+        wallet_alias,
+        to_address,
+        amount,
+        network,
+        "",
+        timeout_s,
+        "",
+        "tools/official-transfer-night.mjs");
+
+    if (!tx.success) {
+        std::cerr << "Transfer failed: " << tx.error << '\n';
+        return 4;
+    }
+
+    std::cout << "Transfer success\n";
+    std::cout << "Source: " << tx.source_address << '\n';
+    std::cout << "Destination: " << tx.destination_address << '\n';
+    std::cout << "Amount: " << tx.amount << '\n';
+    std::cout << "TxId: " << tx.txid << '\n';
+    return 0;
+}
+```
+
+### Build and Run
+
+```bash
+cmake --build .cmake-build/manual --target official_sdk_bridge_example -j
+export MIDNIGHT_WALLET_STORE_PASSPHRASE='your-strong-passphrase'
+./.cmake-build/manual/bin/official_sdk_bridge_example wallet-add ops_wallet <seed_hex> undeployed
+./.cmake-build/manual/bin/official_sdk_bridge_example transfer-wallet undeployed ops_wallet <mn_addr...> 1000000000000000000
+./.cmake-build/manual/bin/official_sdk_bridge_example deploy-wallet undeployed ops_wallet FaucetAMM
+```
+
+---
+
 ## Complete Usage Example
 
 ```cpp
@@ -840,7 +1027,7 @@ int main() {
 **Total API Surface**: 100+ classes and functions
 
 | Phase | Domain | Classes | Methods |
-|-------|--------|---------|---------|
+| ----- | ------ | ------- | ------- |
 | 1 | RPC Architecture | 3 | 20+ |
 | 2 | HTTPS Transport | 3 | 15+ |
 | 3 | Cryptography | 3 | 18+ |

@@ -14,11 +14,13 @@ function printHelp() {
     'Midnight Official NIGHT Transfer',
     '',
     'Usage:',
-    '  node tools/official-transfer-night.mjs --seed <hex> --to <mn_addr...> --amount <units> [options]',
+    '  node tools/official-transfer-night.mjs --seed <hex>|--seed-file <path> --to <mn_addr...> --amount <units> [options]',
+    '  node tools/official-transfer-night.mjs --seed <hex>|--seed-file <path> --state-only [options]',
     '',
     'Options:',
     '  --network <id>        Network ID: preprod|preview|mainnet|undeployed (default: preview)',
-    '  --seed <hex>          Required 32-byte source seed hex (64 hex chars, optional 0x prefix)',
+    '  --seed <hex>          32-byte source seed hex (64 hex chars, optional 0x prefix)',
+    '  --seed-file <path>    Read source seed hex from file (preferred over --seed in shared systems)',
     '  --to <address>        Required destination unshielded address',
     '  --amount <units>      Required amount in smallest units (positive integer)',
     '  --proof-server <url>  Override proof server URL (default by network)',
@@ -34,6 +36,7 @@ function printHelp() {
     '  --dust-utxo-limit <n> Max unregistered NIGHT UTXOs to auto-register per tx (default: 1)',
     '  --dust-deregister-retries <n> Retry auto-deregistration when submit fails (default: 3)',
     '  --allow-self-transfer Allow source==destination transfer (default: blocked)',
+    '  --state-only          Emit wallet state snapshot only (no transfer submission)',
     '  --no-auto-register-dust Disable automatic DUST registration before transfer',
     '  --help                Show this help',
   ];
@@ -44,6 +47,7 @@ function parseArgs(argv) {
   const opts = {
     network: DEFAULT_NETWORK,
     seedHex: '',
+    seedFile: '',
     toAddress: '',
     amount: '',
     proofServer: '',
@@ -59,6 +63,7 @@ function parseArgs(argv) {
     dustUtxoLimit: 1,
     dustDeregisterRetries: 3,
     allowSelfTransfer: false,
+    stateOnly: false,
     autoRegisterDust: true,
     help: false,
   };
@@ -84,6 +89,14 @@ function parseArgs(argv) {
         throw new Error('--seed requires a value');
       }
       opts.seedHex = argv[++i];
+      continue;
+    }
+
+    if (arg === '--seed-file') {
+      if (i + 1 >= argv.length) {
+        throw new Error('--seed-file requires a value');
+      }
+      opts.seedFile = argv[++i];
       continue;
     }
 
@@ -206,10 +219,41 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === '--state-only') {
+      opts.stateOnly = true;
+      continue;
+    }
+
     throw new Error(`Unknown argument: ${arg}`);
   }
 
   return opts;
+}
+
+function resolveSdkNodeModulesRoot(repoRoot) {
+  const configuredNodeModules = process.env.MIDNIGHT_SDK_NODE_MODULES;
+  const candidates = [];
+
+  if (typeof configuredNodeModules === 'string' && configuredNodeModules.trim()) {
+    candidates.push(path.resolve(configuredNodeModules.trim()));
+  }
+
+  candidates.push(path.join(repoRoot, 'node_modules'));
+  candidates.push(path.join(repoRoot, 'midnight-research', 'node_modules'));
+
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) {
+      continue;
+    }
+
+    if (fs.existsSync(path.join(candidate, '@midnight-ntwrk'))) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    'Official SDK dependencies not found. Set MIDNIGHT_SDK_NODE_MODULES to a node_modules directory containing @midnight-ntwrk packages.',
+  );
 }
 
 function normalizeSeedHex(seedHex) {
@@ -222,6 +266,24 @@ function normalizeSeedHex(seedHex) {
   }
 
   return raw.toLowerCase();
+}
+
+function readSeedHexFromFile(seedFilePath) {
+  const resolvedPath = path.resolve(seedFilePath);
+
+  let fileContent;
+  try {
+    fileContent = fs.readFileSync(resolvedPath, 'utf8');
+  } catch (error) {
+    throw new Error(`Unable to read seed file at ${resolvedPath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const trimmed = String(fileContent).trim();
+  if (!trimmed) {
+    throw new Error(`Seed file is empty: ${resolvedPath}`);
+  }
+
+  return trimmed;
 }
 
 function parseAmount(amount) {
@@ -1302,15 +1364,19 @@ async function main() {
     throw new Error(`Unsupported network: ${opts.network}`);
   }
 
-  if (!opts.seedHex) {
-    throw new Error('--seed is required');
+  if (!opts.seedHex && !opts.seedFile) {
+    throw new Error('--seed or --seed-file is required');
   }
 
-  if (!opts.toAddress) {
+  if (opts.seedHex && opts.seedFile) {
+    throw new Error('Provide either --seed or --seed-file, not both');
+  }
+
+  if (!opts.stateOnly && !opts.toAddress) {
     throw new Error('--to is required');
   }
 
-  if (!opts.amount) {
+  if (!opts.stateOnly && !opts.amount) {
     throw new Error('--amount is required');
   }
 
@@ -1329,8 +1395,14 @@ async function main() {
     throw new Error('dust-deregister-retries must be an integer in range [0, 10]');
   }
 
-  const normalizedSeed = normalizeSeedHex(opts.seedHex);
-  const amount = parseAmount(opts.amount);
+  const rawSeedHex = opts.seedFile
+    ? readSeedHexFromFile(opts.seedFile)
+    : opts.seedHex;
+
+  const normalizedSeed = normalizeSeedHex(rawSeedHex);
+  const amount = opts.stateOnly
+    ? (opts.amount ? parseAmount(opts.amount) : 0n)
+    : parseAmount(opts.amount);
 
   const thisFile = fileURLToPath(import.meta.url);
   const thisDir = path.dirname(thisFile);
@@ -1338,11 +1410,7 @@ async function main() {
   const stateCachePath = opts.useStateCache
     ? (opts.stateCache || getDefaultStateCachePath(repoRoot, opts.network, normalizedSeed))
     : '';
-  const nodeModulesRoot = path.join(repoRoot, 'midnight-research', 'node_modules');
-
-  if (!fs.existsSync(nodeModulesRoot)) {
-    throw new Error('Official SDK dependencies not found. Run: cd midnight-research && npm install');
-  }
+  const nodeModulesRoot = resolveSdkNodeModulesRoot(repoRoot);
 
   const modules = await loadOfficialModules(nodeModulesRoot);
 
@@ -1651,6 +1719,49 @@ async function main() {
           stage: 'syncCheck',
         },
         8,
+      );
+      return;
+    }
+
+    if (opts.stateOnly) {
+      await emitTransferResult(
+        {
+          success: true,
+          source: 'official-midnight-sdk',
+          network: networkId,
+          sourceAddress,
+          destinationAddress: '',
+          amount: amount.toString(),
+          synced,
+          syncError,
+          syncDiagnostics: metrics.syncDiagnostics,
+          unshieldedBalance: metrics.unshieldedBalance.toString(),
+          pendingUnshieldedBalance: metrics.pendingUnshieldedBalance.toString(),
+          dustBalance: metrics.dustBalance.toString(),
+          dustBalanceError: metrics.dustBalanceError,
+          dustAvailableCoins: metrics.dustAvailableCoins,
+          dustPendingCoins: metrics.dustPendingCoins,
+          dustPendingBalance: metrics.dustPendingBalance.toString(),
+          availableUtxoCount: metrics.availableUtxoCount,
+          registeredUtxoCount: metrics.registeredUtxoCount,
+          pendingUtxoCount: metrics.pendingUtxoCount,
+          unregisteredUtxoCount: metrics.unregisteredUtxoCount,
+          spendableUnregisteredUtxoCount: metrics.spendableUnregisteredUtxoCount,
+          likelyDustDesignationLock: isLikelyDustDesignationLock(metrics),
+          likelyPendingUtxoLock: isLikelyPendingUtxoLock(metrics),
+          dustGracePeriodSeconds: metrics.dustGracePeriodSeconds,
+          estimatedDustEligibleAt: metrics.dustEstimate.estimatedDustEligibleAt,
+          estimatedDustWaitSeconds: metrics.dustEstimate.estimatedDustWaitSeconds,
+          dustWaitTimeoutSeconds: dustWaitSeconds,
+          dustWaitError,
+          settleWaitTimeoutSeconds: settleWaitSeconds,
+          settleWaitError,
+          dustAutoRegistration,
+          dustAutoDeregistration,
+          txId: '',
+          stage: 'stateSnapshot',
+        },
+        0,
       );
       return;
     }

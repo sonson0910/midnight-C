@@ -1,0 +1,83 @@
+pragma language_version >= 0.20;
+
+import CompactStandardLibrary;
+
+// Basic vesting state.
+export ledger admin: UserAddress;
+export ledger beneficiary: UserAddress;
+export ledger startTs: Uint<64>;
+export ledger cliffTs: Uint<64>;
+export ledger durationSecs: Uint<64>;
+export ledger totalAmount: Uint<128>;
+export ledger releasedAmount: Uint<128>;
+export ledger revoked: Boolean;
+
+constructor(
+    b: UserAddress,
+    s: Uint<64>,
+    c: Uint<64>,
+    d: Uint<64>,
+    t: Uint<128>
+) {
+    assert(d > 0, "Duration must be > 0");
+    assert(c >= s, "Cliff before start");
+
+    admin = disclose(b);
+    beneficiary = disclose(b);
+    startTs = disclose(s);
+    cliffTs = disclose(c);
+    durationSecs = disclose(d);
+    totalAmount = disclose(t);
+    releasedAmount = 0;
+    revoked = false;
+}
+
+circuit vestingEndTs(): Uint<64> {
+    return (startTs + durationSecs) as Uint<64>;
+}
+
+circuit vestedInternal(nowTs: Uint<64>): Uint<128> {
+    if (nowTs < cliffTs) {
+        return 0;
+    }
+
+    // Compile-safe baseline schedule:
+    // funds unlock only after full vesting duration has elapsed.
+    if (nowTs < vestingEndTs()) {
+        return 0;
+    }
+
+    return totalAmount;
+}
+
+circuit releasableInternal(nowTs: Uint<64>): Uint<128> {
+    const vested = vestedInternal(nowTs);
+    if (vested <= releasedAmount) {
+        return 0;
+    }
+
+    return vested - releasedAmount;
+}
+
+export circuit vestedAmount(nowTs: Uint<64>): Uint<128> {
+    return vestedInternal(disclose(nowTs));
+}
+
+export circuit releasableAmount(nowTs: Uint<64>): Uint<128> {
+    return releasableInternal(disclose(nowTs));
+}
+
+export circuit claim(nowTs: Uint<64>, amount: Uint<128>, caller: UserAddress): [] {
+    assert(revoked == false, "Vesting revoked");
+    assert(disclose(caller) == beneficiary, "Only beneficiary can claim");
+
+    const releasable = releasableInternal(disclose(nowTs));
+    assert(disclose(amount) <= releasable, "Amount exceeds releasable");
+
+    releasedAmount = (releasedAmount + disclose(amount)) as Uint<128>;
+}
+
+export circuit revoke(caller: UserAddress): [] {
+    assert(disclose(caller) == admin, "Only admin can revoke");
+    revoked = true;
+}

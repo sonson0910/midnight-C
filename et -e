@@ -1,0 +1,17 @@
+examples/compact_contract_deploy_custom_example.cpp
+examples/compact_contract_deploy_undeployed_example.cpp
+include/midnight/compact-contracts/compact_contracts.hpp
+include/midnight/monitoring-finality/monitoring_finality.hpp
+include/midnight/signing-submission/signing_submission.hpp
+include/midnight/utxo-transactions/utxo_transactions.hpp
+include/midnight/zk-proofs/zk_proofs.hpp
+src/compact-contracts/compact_contracts.cpp
+src/monitoring-finality/monitoring_finality.cpp
+src/signing-submission/signing_submission.cpp
+src/utxo-transactions/utxo_transactions.cpp
+src/zk-proofs/zk_proofs.cpp
+tests/compact-contracts_test.cpp
+tests/monitoring-finality_test.cpp
+tests/signing-submission_test.cpp
+tests/utxo-transactions_test.cpp
+tests/zk-proofs_test.cpp

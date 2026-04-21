@@ -1,5 +1,5 @@
 /**
- * Phase 4 Unit Tests: ZK Proofs
+ * ZK Proofs Unit Tests
  * Tests for zk-SNARK generation, verification, and proof handling
  *
  * 20 planned tests:
@@ -30,13 +30,13 @@
 #include <thread>
 #include <chrono>
 
-using namespace midnight::phase4;
+using namespace midnight::zk_proofs;
 
 // ============================================================================
 // Test Fixture
 // ============================================================================
 
-class Phase4ZkProofsTest : public ::testing::Test
+class ZkProofsTest : public ::testing::Test
 {
 protected:
     std::string proof_server_url = "https://proof.preprod.midnight.network";
@@ -58,7 +58,7 @@ protected:
 // Test 1: Connect to Proof Server
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, Connect_ProofServer_Success)
+TEST_F(ZkProofsTest, Connect_ProofServer_Success)
 {
     ProofServerClient client(proof_server_url);
 
@@ -78,7 +78,7 @@ TEST_F(Phase4ZkProofsTest, Connect_ProofServer_Success)
 // Test 2: Proof Server Health Check
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, IsHealthy_ConnectedServer_ReturnsTrue)
+TEST_F(ZkProofsTest, IsHealthy_ConnectedServer_ReturnsTrue)
 {
     ProofServerClient client(proof_server_url);
     bool connected = client.connect();
@@ -88,7 +88,7 @@ TEST_F(Phase4ZkProofsTest, IsHealthy_ConnectedServer_ReturnsTrue)
     EXPECT_EQ(healthy, connected);
 }
 
-TEST_F(Phase4ZkProofsTest, IsHealthy_DisconnectedServer_ReturnsFalse)
+TEST_F(ZkProofsTest, IsHealthy_DisconnectedServer_ReturnsFalse)
 {
     ProofServerClient client(proof_server_url);
 
@@ -101,7 +101,7 @@ TEST_F(Phase4ZkProofsTest, IsHealthy_DisconnectedServer_ReturnsFalse)
 // Test 3: Request Proof Generation
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, RequestProof_ValidRequest_GeneratesProof)
+TEST_F(ZkProofsTest, RequestProof_ValidRequest_GeneratesProof)
 {
     ProofServerClient client(proof_server_url);
     (void)client.connect();
@@ -128,7 +128,7 @@ TEST_F(Phase4ZkProofsTest, RequestProof_ValidRequest_GeneratesProof)
 // Test 4: Get Proof Status
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, GetProofStatus_ValidRequestId_ReturnsStatus)
+TEST_F(ZkProofsTest, GetProofStatus_ValidRequestId_ReturnsStatus)
 {
     ProofServerClient client(proof_server_url);
     (void)client.connect();
@@ -145,7 +145,7 @@ TEST_F(Phase4ZkProofsTest, GetProofStatus_ValidRequestId_ReturnsStatus)
 // Test 5: Cancel Proof Request
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, CancelProofRequest_ActiveRequest_Cancels)
+TEST_F(ZkProofsTest, CancelProofRequest_ActiveRequest_Cancels)
 {
     ProofServerClient client(proof_server_url);
     (void)client.connect();
@@ -162,7 +162,7 @@ TEST_F(Phase4ZkProofsTest, CancelProofRequest_ActiveRequest_Cancels)
 // Test 6: Verify Single Proof
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, VerifyProof_ValidProof_ReturnsTrue)
+TEST_F(ZkProofsTest, VerifyProof_ValidProof_ReturnsTrue)
 {
     ZkCircuit circuit = create_test_circuit();
     ProofVerifier verifier(circuit);
@@ -177,7 +177,7 @@ TEST_F(Phase4ZkProofsTest, VerifyProof_ValidProof_ReturnsTrue)
     EXPECT_TRUE(verified);
 }
 
-TEST_F(Phase4ZkProofsTest, VerifyProof_InvalidProofSize_ReturnsFalse)
+TEST_F(ZkProofsTest, VerifyProof_InvalidProofSize_ReturnsFalse)
 {
     ZkCircuit circuit = create_test_circuit();
     ProofVerifier verifier(circuit);
@@ -195,7 +195,7 @@ TEST_F(Phase4ZkProofsTest, VerifyProof_InvalidProofSize_ReturnsFalse)
 // Test 7: Verify Batch Proofs
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, VerifyBatch_MultipleProofs_VerifiesAll)
+TEST_F(ZkProofsTest, VerifyBatch_MultipleProofs_VerifiesAll)
 {
     ZkCircuit circuit = create_test_circuit();
     ProofVerifier verifier(circuit);
@@ -218,7 +218,7 @@ TEST_F(Phase4ZkProofsTest, VerifyBatch_MultipleProofs_VerifiesAll)
 // Test 8: Verify with Invalid Circuit ID
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, VerifyProof_WrongCircuit_ReturnsFalse)
+TEST_F(ZkProofsTest, VerifyProof_WrongCircuit_ReturnsFalse)
 {
     ZkCircuit circuit = create_test_circuit();
     ProofVerifier verifier(circuit);
@@ -236,14 +236,14 @@ TEST_F(Phase4ZkProofsTest, VerifyProof_WrongCircuit_ReturnsFalse)
 // Test 9: Pedersen Commitment
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, PedersenCommit_ValidInputs_ReturnsCommitment)
+TEST_F(ZkProofsTest, PedersenCommit_ValidInputs_ReturnsCommitment)
 {
     std::string commitment = CommitmentGenerator::pedersen_commit("value123", "random456");
 
     EXPECT_EQ(commitment.size(), 66); // "0x" + 64 hex chars
 }
 
-TEST_F(Phase4ZkProofsTest, PedersenCommit_EmptyInputs_ReturnsEmpty)
+TEST_F(ZkProofsTest, PedersenCommit_EmptyInputs_ReturnsEmpty)
 {
     std::string commitment = CommitmentGenerator::pedersen_commit("", "");
 
@@ -254,7 +254,7 @@ TEST_F(Phase4ZkProofsTest, PedersenCommit_EmptyInputs_ReturnsEmpty)
 // Test 10: Poseidon Commitment
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, PoseidonCommit_ValidInput_ReturnsCommitment)
+TEST_F(ZkProofsTest, PoseidonCommit_ValidInput_ReturnsCommitment)
 {
     std::string commitment = CommitmentGenerator::poseidon_commit("value123");
 
@@ -265,7 +265,7 @@ TEST_F(Phase4ZkProofsTest, PoseidonCommit_ValidInput_ReturnsCommitment)
 // Test 11: Batch Commitments
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, BatchCommit_MultipleValues_ReturnsCommitments)
+TEST_F(ZkProofsTest, BatchCommit_MultipleValues_ReturnsCommitments)
 {
     std::map<std::string, std::string> values;
     values["voter_secret"] = "0xsecret1";
@@ -285,7 +285,7 @@ TEST_F(Phase4ZkProofsTest, BatchCommit_MultipleValues_ReturnsCommitments)
 // Test 12: Verify Commitment Opening
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, VerifyOpening_CorrectOpening_ReturnsTrue)
+TEST_F(ZkProofsTest, VerifyOpening_CorrectOpening_ReturnsTrue)
 {
     std::string commitment = CommitmentGenerator::pedersen_commit("value123", "random456");
 
@@ -298,7 +298,7 @@ TEST_F(Phase4ZkProofsTest, VerifyOpening_CorrectOpening_ReturnsTrue)
 // Test 13: Add Private Inputs
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, AddPrivateInput_ValidInput_AddsToWitness)
+TEST_F(ZkProofsTest, AddPrivateInput_ValidInput_AddsToWitness)
 {
     ZkCircuit circuit = create_test_circuit();
     WitnessBuilder builder(circuit);
@@ -316,7 +316,7 @@ TEST_F(Phase4ZkProofsTest, AddPrivateInput_ValidInput_AddsToWitness)
 // Test 14: Add Public Inputs
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, AddPublicInput_ValidInput_AddsToWitness)
+TEST_F(ZkProofsTest, AddPublicInput_ValidInput_AddsToWitness)
 {
     ZkCircuit circuit = create_test_circuit();
     WitnessBuilder builder(circuit);
@@ -334,7 +334,7 @@ TEST_F(Phase4ZkProofsTest, AddPublicInput_ValidInput_AddsToWitness)
 // Test 15: Build Witness
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, BuildWitness_CompleteWitness_GeneratesCommitments)
+TEST_F(ZkProofsTest, BuildWitness_CompleteWitness_GeneratesCommitments)
 {
     ZkCircuit circuit = create_test_circuit();
     WitnessBuilder builder(circuit);
@@ -353,7 +353,7 @@ TEST_F(Phase4ZkProofsTest, BuildWitness_CompleteWitness_GeneratesCommitments)
 // Test 16: Cache Proof
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, CacheProof_ValidProof_CachesProof)
+TEST_F(ZkProofsTest, CacheProof_ValidProof_CachesProof)
 {
     ZkProof proof;
     proof.proof_data = "0x" + std::string(256, 'p');
@@ -372,7 +372,7 @@ TEST_F(Phase4ZkProofsTest, CacheProof_ValidProof_CachesProof)
 // Test 17: Retrieve Cached Proof
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, GetCachedProof_ExistingProof_ReturnsProof)
+TEST_F(ZkProofsTest, GetCachedProof_ExistingProof_ReturnsProof)
 {
     ZkProof original_proof;
     original_proof.proof_data = "0x" + std::string(256, 'p');
@@ -389,7 +389,7 @@ TEST_F(Phase4ZkProofsTest, GetCachedProof_ExistingProof_ReturnsProof)
     ProofCache::clear();
 }
 
-TEST_F(Phase4ZkProofsTest, GetCachedProof_NonexistentProof_ReturnsEmpty)
+TEST_F(ZkProofsTest, GetCachedProof_NonexistentProof_ReturnsEmpty)
 {
     auto cached_proof = ProofCache::get_cached_proof("nonexistent", {});
 
@@ -400,7 +400,7 @@ TEST_F(Phase4ZkProofsTest, GetCachedProof_NonexistentProof_ReturnsEmpty)
 // Test 18: Proof Cache Clear
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, ClearCache_CachedProofs_ClearsAll)
+TEST_F(ZkProofsTest, ClearCache_CachedProofs_ClearsAll)
 {
     ZkProof proof;
     proof.proof_data = "0x" + std::string(256, 'p');
@@ -419,7 +419,7 @@ TEST_F(Phase4ZkProofsTest, ClearCache_CachedProofs_ClearsAll)
 // Test 19: Record Performance Metrics
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, RecordPerformance_GenerationTime_RecordsMetric)
+TEST_F(ZkProofsTest, RecordPerformance_GenerationTime_RecordsMetric)
 {
     ProofPerformanceMonitor::record_generation_time(150);
     ProofPerformanceMonitor::record_generation_time(200);
@@ -436,7 +436,7 @@ TEST_F(Phase4ZkProofsTest, RecordPerformance_GenerationTime_RecordsMetric)
 // Test 20: Get Performance Statistics
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, GetStats_MultipleMetrics_ReturnsStats)
+TEST_F(ZkProofsTest, GetStats_MultipleMetrics_ReturnsStats)
 {
     auto before = ProofPerformanceMonitor::get_stats();
 
@@ -456,7 +456,7 @@ TEST_F(Phase4ZkProofsTest, GetStats_MultipleMetrics_ReturnsStats)
 // Integration Test: Full Proof Workflow
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, Integration_FullProofWorkflow_Success)
+TEST_F(ZkProofsTest, Integration_FullProofWorkflow_Success)
 {
     // 1. Connect to Proof Server
     ProofServerClient client(proof_server_url);
@@ -505,7 +505,7 @@ TEST_F(Phase4ZkProofsTest, Integration_FullProofWorkflow_Success)
 // Edge Cases
 // ============================================================================
 
-TEST_F(Phase4ZkProofsTest, BuildWitness_NoInputs_ReturnsFalse)
+TEST_F(ZkProofsTest, BuildWitness_NoInputs_ReturnsFalse)
 {
     ZkCircuit circuit = create_test_circuit();
     WitnessBuilder builder(circuit);
@@ -516,7 +516,7 @@ TEST_F(Phase4ZkProofsTest, BuildWitness_NoInputs_ReturnsFalse)
     EXPECT_FALSE(witness.has_value());
 }
 
-TEST_F(Phase4ZkProofsTest, VerifyBatch_EmptyProofs_ReturnsFalse)
+TEST_F(ZkProofsTest, VerifyBatch_EmptyProofs_ReturnsFalse)
 {
     ZkCircuit circuit = create_test_circuit();
     ProofVerifier verifier(circuit);

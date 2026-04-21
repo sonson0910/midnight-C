@@ -19,7 +19,7 @@
 #include <json/json.h>
 #include <cstdint>
 
-namespace midnight::phase2
+namespace midnight::compact_contracts
 {
 
     /**
@@ -341,4 +341,4 @@ namespace midnight::phase2
         CompactAbi contract_abi_;
     };
 
-} // namespace midnight::phase2
+} // namespace midnight::compact_contracts

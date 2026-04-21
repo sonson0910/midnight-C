@@ -1,5 +1,5 @@
 /**
- * Phase 2 Unit Tests: Compact Contracts
+ * Compact Contracts Unit Tests
  * Tests for Compact language contract parsing, loading, and interaction
  *
  * 12 planned tests:
@@ -20,13 +20,13 @@
 #include <gtest/gtest.h>
 #include "midnight/compact-contracts/compact_contracts.hpp"
 
-using namespace midnight::phase2;
+using namespace midnight::compact_contracts;
 
 // ============================================================================
 // Test Fixture
 // ============================================================================
 
-class Phase2CompactContractsTest : public ::testing::Test
+class CompactContractsTest : public ::testing::Test
 {
 protected:
     // Sample ABI JSON
@@ -76,7 +76,7 @@ protected:
 // Test 1: Load ABI from JSON
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, LoadAbi_ValidJson_ParsesSuccessfully)
+TEST_F(CompactContractsTest, LoadAbi_ValidJson_ParsesSuccessfully)
 {
     auto abi = CompactLoader::load_abi(sample_abi_json);
 
@@ -89,7 +89,7 @@ TEST_F(Phase2CompactContractsTest, LoadAbi_ValidJson_ParsesSuccessfully)
 // Test 2: Validate ABI Format
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, ValidateAbi_ValidAbi_ReturnsTrue)
+TEST_F(CompactContractsTest, ValidateAbi_ValidAbi_ReturnsTrue)
 {
     auto abi = CompactLoader::load_abi(sample_abi_json);
     ASSERT_TRUE(abi.has_value());
@@ -99,7 +99,7 @@ TEST_F(Phase2CompactContractsTest, ValidateAbi_ValidAbi_ReturnsTrue)
     EXPECT_TRUE(valid);
 }
 
-TEST_F(Phase2CompactContractsTest, ValidateAbi_EmptyAbi_ReturnsFalse)
+TEST_F(CompactContractsTest, ValidateAbi_EmptyAbi_ReturnsFalse)
 {
     CompactAbi empty_abi;
 
@@ -112,7 +112,7 @@ TEST_F(Phase2CompactContractsTest, ValidateAbi_EmptyAbi_ReturnsFalse)
 // Test 3: Load Compiled Contract
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, LoadCompiled_FileExists_LoadsContract)
+TEST_F(CompactContractsTest, LoadCompiled_FileExists_LoadsContract)
 {
     // This test would require actual files
     // Skipping for now, but structure is tested
@@ -131,7 +131,7 @@ TEST_F(Phase2CompactContractsTest, LoadCompiled_FileExists_LoadsContract)
 // Test 4: Query Public State
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, QueryPublicState_ValidContract_ReturnsState)
+TEST_F(CompactContractsTest, QueryPublicState_ValidContract_ReturnsState)
 {
     ContractQueryEngine engine(indexer_url);
 
@@ -149,7 +149,7 @@ TEST_F(Phase2CompactContractsTest, QueryPublicState_ValidContract_ReturnsState)
 // Test 5: Query All Public State
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, QueryAllPublicState_ValidContract_ReturnsAllState)
+TEST_F(CompactContractsTest, QueryAllPublicState_ValidContract_ReturnsAllState)
 {
     ContractQueryEngine engine(indexer_url);
 
@@ -163,7 +163,7 @@ TEST_F(Phase2CompactContractsTest, QueryAllPublicState_ValidContract_ReturnsAllS
 // Test 6: Query Contract ABI
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, QueryContractAbi_ValidContract_ReturnsAbi)
+TEST_F(CompactContractsTest, QueryContractAbi_ValidContract_ReturnsAbi)
 {
     ContractQueryEngine engine(indexer_url);
 
@@ -177,7 +177,7 @@ TEST_F(Phase2CompactContractsTest, QueryContractAbi_ValidContract_ReturnsAbi)
 // Test 7: Query Deployment Info
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, QueryDeploymentInfo_ValidContract_ReturnsInfo)
+TEST_F(CompactContractsTest, QueryDeploymentInfo_ValidContract_ReturnsInfo)
 {
     ContractQueryEngine engine(indexer_url);
 
@@ -191,7 +191,7 @@ TEST_F(Phase2CompactContractsTest, QueryDeploymentInfo_ValidContract_ReturnsInfo
 // Test 8: Build Contract Call
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, BuildCall_ValidFunction_EncodesCall)
+TEST_F(CompactContractsTest, BuildCall_ValidFunction_EncodesCall)
 {
     auto abi = CompactLoader::load_abi(sample_abi_json);
     ASSERT_TRUE(abi.has_value());
@@ -212,7 +212,7 @@ TEST_F(Phase2CompactContractsTest, BuildCall_ValidFunction_EncodesCall)
 // Test 9: Validate Contract Call
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, ValidateCall_AllArgsProvided_ReturnsTrue)
+TEST_F(CompactContractsTest, ValidateCall_AllArgsProvided_ReturnsTrue)
 {
     auto abi = CompactLoader::load_abi(sample_abi_json);
     ASSERT_TRUE(abi.has_value());
@@ -228,7 +228,7 @@ TEST_F(Phase2CompactContractsTest, ValidateCall_AllArgsProvided_ReturnsTrue)
     EXPECT_TRUE(valid);
 }
 
-TEST_F(Phase2CompactContractsTest, ValidateCall_MissingArgs_ReturnsFalse)
+TEST_F(CompactContractsTest, ValidateCall_MissingArgs_ReturnsFalse)
 {
     auto abi = CompactLoader::load_abi(sample_abi_json);
     ASSERT_TRUE(abi.has_value());
@@ -248,7 +248,7 @@ TEST_F(Phase2CompactContractsTest, ValidateCall_MissingArgs_ReturnsFalse)
 // Test 10: Estimate Gas/Weight
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, EstimateWeight_MutableFunction_ReturnsWeight)
+TEST_F(CompactContractsTest, EstimateWeight_MutableFunction_ReturnsWeight)
 {
     auto abi = CompactLoader::load_abi(sample_abi_json);
     ASSERT_TRUE(abi.has_value());
@@ -260,7 +260,7 @@ TEST_F(Phase2CompactContractsTest, EstimateWeight_MutableFunction_ReturnsWeight)
     EXPECT_EQ(weight, 2000); // From ABI
 }
 
-TEST_F(Phase2CompactContractsTest, EstimateWeight_ReadFunction_ReturnLowerWeight)
+TEST_F(CompactContractsTest, EstimateWeight_ReadFunction_ReturnLowerWeight)
 {
     auto abi = CompactLoader::load_abi(sample_abi_json);
     ASSERT_TRUE(abi.has_value());
@@ -276,7 +276,7 @@ TEST_F(Phase2CompactContractsTest, EstimateWeight_ReadFunction_ReturnLowerWeight
 // Test 11: Deploy Contract
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, DeployContract_ValidContract_ReturnsAddress)
+TEST_F(CompactContractsTest, DeployContract_ValidContract_ReturnsAddress)
 {
     ContractDeployer deployer(node_rpc_url);
 
@@ -295,7 +295,7 @@ TEST_F(Phase2CompactContractsTest, DeployContract_ValidContract_ReturnsAddress)
 // Test 12: Get Deployment Status
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, GetDeploymentStatus_ValidTx_ReturnsStatus)
+TEST_F(CompactContractsTest, GetDeploymentStatus_ValidTx_ReturnsStatus)
 {
     ContractDeployer deployer(node_rpc_url);
 
@@ -309,7 +309,7 @@ TEST_F(Phase2CompactContractsTest, GetDeploymentStatus_ValidTx_ReturnsStatus)
 // Test 13: Build Witness Context
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, BuildWitness_PrivateData_GeneratesCommitments)
+TEST_F(CompactContractsTest, BuildWitness_PrivateData_GeneratesCommitments)
 {
     auto abi = CompactLoader::load_abi(sample_abi_json);
     ASSERT_TRUE(abi.has_value());
@@ -334,7 +334,7 @@ TEST_F(Phase2CompactContractsTest, BuildWitness_PrivateData_GeneratesCommitments
 // Test 14: Check Witness Requirement
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, RequiresWitness_PrivateFunction_ReturnsTrue)
+TEST_F(CompactContractsTest, RequiresWitness_PrivateFunction_ReturnsTrue)
 {
     auto abi = CompactLoader::load_abi(sample_abi_json);
     ASSERT_TRUE(abi.has_value());
@@ -346,7 +346,7 @@ TEST_F(Phase2CompactContractsTest, RequiresWitness_PrivateFunction_ReturnsTrue)
     EXPECT_TRUE(witness_required);
 }
 
-TEST_F(Phase2CompactContractsTest, RequiresWitness_PublicFunction_ReturnsFalse)
+TEST_F(CompactContractsTest, RequiresWitness_PublicFunction_ReturnsFalse)
 {
     auto abi = CompactLoader::load_abi(sample_abi_json);
     ASSERT_TRUE(abi.has_value());
@@ -362,7 +362,7 @@ TEST_F(Phase2CompactContractsTest, RequiresWitness_PublicFunction_ReturnsFalse)
 // Integration Test: Full Contract Interaction
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, Integration_LoadAndInteractContract_Success)
+TEST_F(CompactContractsTest, Integration_LoadAndInteractContract_Success)
 {
     // 1. Load ABI
     auto abi = CompactLoader::load_abi(sample_abi_json);
@@ -401,14 +401,14 @@ TEST_F(Phase2CompactContractsTest, Integration_LoadAndInteractContract_Success)
 // Edge Cases
 // ============================================================================
 
-TEST_F(Phase2CompactContractsTest, LoadAbi_InvalidJson_ReturnsEmpty)
+TEST_F(CompactContractsTest, LoadAbi_InvalidJson_ReturnsEmpty)
 {
     auto abi = CompactLoader::load_abi("invalid json {");
 
     EXPECT_FALSE(abi.has_value());
 }
 
-TEST_F(Phase2CompactContractsTest, BuildCall_InvalidFunction_ReturnsEmpty)
+TEST_F(CompactContractsTest, BuildCall_InvalidFunction_ReturnsEmpty)
 {
     auto abi = CompactLoader::load_abi(sample_abi_json);
     ASSERT_TRUE(abi.has_value());

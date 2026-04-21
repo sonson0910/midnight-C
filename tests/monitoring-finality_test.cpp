@@ -1,5 +1,5 @@
 /**
- * Phase 6: Monitoring & Finality Tests
+ * Monitoring & Finality Tests
  *
  * 18+ tests covering all monitoring functionality:
  * - BlockMonitor (3 tests)
@@ -16,7 +16,7 @@
 #include <chrono>
 #include <thread>
 
-using namespace midnight::phase6;
+using namespace midnight::monitoring_finality;
 
 // ============================================================================
 // BlockMonitor Tests

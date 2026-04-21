@@ -1,52 +1,55 @@
-# Midnight SDK - C++ IoT & Blockchain Infrastructure Library
+# Midnight SDK - IoT & Blockchain C++ Infrastructure Library
 
-**Midnight** là một thư viện C++20 toàn diện được xây dựng để hỗ trợ hạ tầng IoT kết hợp với blockchain Midnight.
+**Midnight** is a comprehensive C++20 library built to support IoT infrastructure integrated with the Midnight blockchain.
 
-## Tính Năng Chính
+## Key Features
 
-### 1. **Hỗ Trợ Giao Thức Đa Nền Tảng**
-- **MQTT**: Giao tiếp nhẹ nhàng cho thiết bị IoT
-- **CoAP**: Constrained Application Protocol cho thiết bị tài nguyên hạn chế
-- **HTTP/HTTPS**: Giao tiếp RESTful tiêu chuẩn
-- **WebSocket**: Kết nối hai chiều thời gian thực
+### 1. **Cross-Platform Protocol Support**
 
-### 2. **Hỗ Trợ Blockchain Midnight**
-- Quản lý chuỗi khối Midnight
-- Quản lý ví tiền điện tử với HD key derivation
-- Xây dựng và ký giao dịch
-- Quản lý UTXO và multi-assets
-- Tích hợp phân tán và on-chain operations
+- **MQTT**: Lightweight communication for IoT devices
+- **CoAP**: CoAP protocol for resource-constrained devices
+- **HTTP/HTTPS**: Standard RESTful communication
+- **WebSocket**: Real-time bidirectional connections
 
-### 3. **Quản Lý Phiên & Cấu Hình**
-- Session manager cho IoT devices
-- Cấu hình linh hoạt
-- Logger tích hợp
+### 2. **Midnight Blockchain Support**
 
-## Cấu Trúc Dự Án
+- Midnight chain management
+- Cryptocurrency wallet management with HD key derivation
+- Transaction building and signing
+- UTXO and multi-asset management
+- Distributed integration and on-chain operations
 
-```
+### 3. **Session & Configuration Management**
+
+- Session management for IoT devices
+- Flexible configuration
+- Integrated logging
+
+## Project Structure
+
+```text
 midnight/
-├── CMakeLists.txt           # Cấu hình CMake chính
+├── CMakeLists.txt           # Main CMake configuration
 ├── include/midnight/
-│   ├── core/               # Thành phần cốt lõi
-│   ├── protocols/          # Các giao thức (MQTT, CoAP, HTTP, WebSocket)
+│   ├── core/               # Core components
+│   ├── protocols/          # Protocols (MQTT, CoAP, HTTP, WebSocket)
 │   ├── blockchain/         # Midnight blockchain SDK
-│   └── session/            # Quản lý phiên
-├── src/                    # Triển khai source
-├── examples/               # Ví dụ sử dụng (MQTT, Blockchain, HTTP)
-├── tests/                  # Kiểm thử
-├── docs/                   # Tài liệu
-├── README.md               # Tài liệu này
-└── MIDNIGHT_BLOCKCHAIN.md  # Hướng dẫn blockchain
+│   └── session/            # Session management
+├── src/                    # Source implementations
+├── examples/               # Usage examples (MQTT, Blockchain, HTTP)
+├── tests/                  # Tests
+├── docs/                   # Documentation
+├── README.md               # This document
+└── MIDNIGHT_BLOCKCHAIN.md  # Blockchain guide
 ```
 
-## Yêu Cầu
+## Requirements
 
-- C++20 compatible compiler (gcc 11+, clang 12+, MSVC 2019+)
+- C++20-compatible compiler (gcc 11+, clang 12+, MSVC 2019+)
 - CMake 3.20+
-- Optional Dependencies:
+- Optional dependencies:
   - nlohmann_json (JSON support)
-  - fmt library (formatted output)
+  - fmt (output formatting)
 
 ## Build Project
 
@@ -71,10 +74,10 @@ cmake --build . --config Release
 cmake --install .
 ```
 
-## Chạy Examples
+## Run Examples
 
 ```bash
-# Compile examples
+# Build examples
 cmake --build . --target midnight-examples
 
 # MQTT example
@@ -86,26 +89,29 @@ cmake --build . --target midnight-examples
 # HTTP example
 ./bin/http_example
 
-# Kiểm tra tương thích/giao tiếp với Midnight Preprod
-# Trả về exit code 0 khi đủ điều kiện READY cho production
+# Official SDK bridge example (address/transfer/state/indexer/deploy)
+./bin/official_sdk_bridge_example --help
+
+# Connectivity and compatibility check with Midnight Preprod
+# Returns exit code 0 when READY for production
 ./bin/http_connectivity_test
 
-# Deploy FaucetAMM lên mạng undeployed (qua official JS bridge)
-# Yêu cầu: đã cài dependencies ở midnight-research và ví có NIGHT + DUST
+# Deploy FaucetAMM to undeployed network (via official JS bridge)
+# Requirement: dependencies installed in midnight-research and wallet has NIGHT + DUST
 MIDNIGHT_DEPLOY_SEED_HEX=<seed_hex_32_bytes> \
     ./bin/compact_contract_deploy_undeployed_example
 
-# Deploy contract custom (ngoài FaucetAMM) qua bridge
-# Cấu hình trong constructor_args của ContractDeployer:
+# Deploy a custom contract (outside FaucetAMM) via bridge
+# ContractDeployer constructor_args configuration:
 #   use_official_sdk_bridge=true
 #   contract=<ContractName>
-#   contract_module=<path hoặc package specifier tới JS module export contract>
-#   contract_export=<tên export trong module>
-#   zk_config_path=<đường dẫn assets managed của contract>
-#   private_state_id=<id private state>
-#   constructor_args_json=<JSON args constructor, hỗ trợ typed bigint/bytes>
+#   contract_module=<path or package specifier to JS contract export module>
+#   contract_export=<export name in module>
+#   zk_config_path=<path to managed assets for the contract>
+#   private_state_id=<private state id>
+#   constructor_args_json=<constructor args JSON, supports typed bigint/bytes>
 
-# Chạy example C++ cho custom deploy trực tiếp
+# Run C++ example for direct custom deploy
 ./bin/compact_contract_deploy_custom_example \
     --contract FaucetAMM \
     --contract-module @midnight-ntwrk/counter-contract \
@@ -113,7 +119,162 @@ MIDNIGHT_DEPLOY_SEED_HEX=<seed_hex_32_bytes> \
     --zk-config-path midnight-research/node_modules/@midnight-ntwrk/counter-contract/dist/managed/FaucetAMM
 ```
 
-## Chạy Tests
+## Official SDK Bridge (Recommended for Real-World Flows)
+
+### Preparation
+
+```bash
+# Install dependencies for the official JS bridge
+cd midnight-research && npm install
+
+# Return to project root
+cd ..
+
+# Required when using wallet alias (seed is encrypted at rest)
+export MIDNIGHT_WALLET_STORE_PASSPHRASE="your-strong-passphrase-16+-chars"
+
+# Optional: customize wallet alias storage directory
+# export MIDNIGHT_WALLET_STORE_DIR=/path/to/wallet-store
+```
+
+### Quick usage with C++ binary
+
+```bash
+# 1) Register alias once (seed will be encrypted when stored)
+./bin/official_sdk_bridge_example wallet-add mywallet <seed_hex> preprod
+
+# 2) Transfer NIGHT using alias (without passing seed on command line)
+./bin/official_sdk_bridge_example transfer-wallet preprod mywallet <to_address> <amount>
+
+# 3) Query wallet snapshot using alias
+./bin/official_sdk_bridge_example state-wallet preprod mywallet
+
+# 4) Query indexer diagnostics using alias
+./bin/official_sdk_bridge_example indexer-wallet preprod mywallet
+
+# 5) Deploy contract using alias
+./bin/official_sdk_bridge_example deploy-wallet undeployed mywallet FaucetAMM
+```
+
+### Call JS bridge directly (supports --seed-file)
+
+```bash
+# Deploy (recommended: use --seed-file instead of --seed)
+node tools/official-deploy-contract.mjs \
+  --network undeployed \
+  --contract FaucetAMM \
+  --seed-file /path/to/seed.txt
+
+# Transfer
+node tools/official-transfer-night.mjs \
+  --network preprod \
+  --seed-file /path/to/seed.txt \
+  --to <to_address> \
+  --amount <amount>
+```
+
+## C++ Examples (Wallet Alias + Transfer/Deploy)
+
+### 1) Register alias + transfer NIGHT
+
+```cpp
+#include "midnight/blockchain/official_sdk_bridge.hpp"
+#include <iostream>
+
+int main() {
+    std::string error;
+    const bool saved = midnight::blockchain::register_wallet_seed_hex(
+        "mywallet",
+        "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+        "preprod",
+        "",
+        &error);
+
+    if (!saved) {
+        std::cerr << "Wallet alias registration failed: " << error << std::endl;
+        return 1;
+    }
+
+    const auto tx = midnight::blockchain::transfer_official_night_with_wallet(
+        "mywallet",
+        "mn_addr_destination_here",
+        "1",
+        "preprod");
+
+    if (!tx.success) {
+        std::cerr << "NIGHT transfer failed: " << tx.error << std::endl;
+        return 1;
+    }
+
+    std::cout << "txid=" << tx.txid << std::endl;
+    return 0;
+}
+```
+
+### 2) Deploy contract with wallet alias
+
+```cpp
+#include "midnight/blockchain/official_sdk_bridge.hpp"
+#include <iostream>
+
+int main() {
+    const auto deploy = midnight::blockchain::deploy_official_compact_contract_with_wallet(
+        "mywallet",
+        "FaucetAMM",
+        "undeployed",
+        10);
+
+    if (!deploy.success) {
+        std::cerr << "Deployment failed: " << deploy.error << std::endl;
+        return 1;
+    }
+
+    std::cout << "contract=" << deploy.contract_address << " txid=" << deploy.txid << std::endl;
+    return 0;
+}
+```
+
+### 3) Query state + indexer diagnostics with wallet alias
+
+```cpp
+#include "midnight/blockchain/official_sdk_bridge.hpp"
+#include <iostream>
+
+int main() {
+    const auto state = midnight::blockchain::query_official_wallet_state_with_wallet(
+        "mywallet",
+        "preprod");
+
+    if (!state.success) {
+        std::cerr << "State query failed: " << state.error << std::endl;
+        return 1;
+    }
+
+    std::cout << "address=" << state.source_address
+              << " balance=" << state.unshielded_balance << std::endl;
+
+    const auto idx = midnight::blockchain::query_official_indexer_sync_status_with_wallet(
+        "mywallet",
+        "preprod");
+
+    if (!idx.success) {
+        std::cerr << "Indexer diagnostics query failed: " << idx.error << std::endl;
+        return 1;
+    }
+
+    std::cout << "facade_synced=" << (idx.facade_is_synced ? "true" : "false")
+              << " all_connected=" << (idx.all_connected ? "true" : "false") << std::endl;
+    return 0;
+}
+```
+
+Security notes:
+
+- Do not use `--seed` and `--seed-file` together.
+- For alias flow, `MIDNIGHT_WALLET_STORE_PASSPHRASE` is required (>= 16 chars).
+- Prefer `transfer-wallet` / `deploy-wallet` to avoid exposing seed in process args.
+
+## Run Tests
 
 ```bash
 # Build tests
@@ -130,7 +291,7 @@ ctest --output-on-failure
 ```cpp
 #include "midnight/blockchain/midnight_adapter.hpp"
 
-// Setup protocol parameters
+// Configure protocol parameters
 midnight::blockchain::ProtocolParams params;
 params.min_fee_a = 44;
 params.min_fee_b = 155381;
@@ -156,7 +317,7 @@ std::string address = wallet.get_address();
 
 ```cpp
 std::vector<midnight::blockchain::UTXO> utxos;
-// Populate UTXOs...
+// Fill UTXO data...
 
 auto result = blockchain.build_transaction(
     utxos,
@@ -179,16 +340,16 @@ if (submitted.success) {
 }
 ```
 
-## Mục Tiêu Phát Triển
+## Development Goals
 
-- ✅ Thiết lập cấu trúc dự án
+- ✅ Project structure setup
 - ✅ Core components (Config, Logger, SessionManager)
 - ✅ Protocol clients (MQTT, CoAP, HTTP, WebSocket)
 - ✅ Blockchain components (Transaction, Wallet, MidnightBlockchain)
-- ⏳ Triển khai đầy đủ các giao thức với thư viện thư ba
-- ⏳ Thêm mã hóa và các tính năng bảo mật
-- ⏳ Hỗ trợ multi-sig transactions
-- ⏳ On-chain smart contract interop
+- ⏳ Complete protocol implementations with third-party libraries
+- ⏳ Add encryption and security features
+- ⏳ Support multi-sig transactions
+- ⏳ On-chain smart contract interactions
 
 ## Documentation
 
@@ -196,12 +357,12 @@ if (submitted.success) {
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System architecture
 - [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) - Getting started guide
 
-## Giấy Phép
+## License
 
 Apache License 2.0
 
-## Liên Hệ
+## Contact
 
-**Dự án**: Midnight SDK - Blockchain-enabled IoT Infrastructure
+**Project**: Midnight SDK - Blockchain-integrated IoT infrastructure
 
-**Repository**: https://github.com/sonson0910/midnight-C
+**Repository**: [https://github.com/sonson0910/midnight-C](https://github.com/sonson0910/midnight-C)

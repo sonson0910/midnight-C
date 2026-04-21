@@ -1,53 +1,54 @@
 # Midnight SDK - Getting Started Guide
 
-## Cài Đặt & Thiết Lập
+## Installation & Setup
 
-### Yêu Cầu Hệ Thống
+### System Requirements
+
 - Windows 10+ / Linux / macOS
 - C++20 compatible compiler (gcc 10+, clang 10+, MSVC 2019+)
 - CMake 3.20+
 - Git (recommended)
 
-### Bước 1: Clone/Setup Project
+### Step 1: Clone/Setup Project
 
 ```bash
 cd d:\venera\midnight
 ```
 
-### Bước 2: Tạo Build Directory
+### Step 2: Create Build Directory
 
 ```bash
 mkdir build
 cd build
 ```
 
-### Bước 3: Configure CMake
+### Step 3: Configure CMake
 
 ```bash
-# Trên Windows
+# On Windows
 cmake -G "Visual Studio 16 2019" -DCMAKE_BUILD_TYPE=Release ..
 
-# Trên Linux/macOS
+# On Linux/macOS
 cmake -DCMAKE_BUILD_TYPE=Release ..
 ```
 
-### Bước 4: Build Project
+### Step 4: Build Project
 
 ```bash
-# Trên Windows
+# On Windows
 cmake --build . --config Release
 
-# Trên Linux/macOS
+# On Linux/macOS
 make -j4
 ```
 
-### Bước 5: Cài Đặt
+### Step 5: Install
 
 ```bash
 cmake --install . --prefix ./install
 ```
 
-## Sử Dụng Thư Viện
+## Using the Library
 
 ### Include Headers
 
@@ -59,7 +60,7 @@ cmake --install . --prefix ./install
 
 ### Linking
 
-Khi linking project của bạn:
+When linking your project:
 
 ```cmake
 find_package(midnight REQUIRED)
@@ -68,7 +69,7 @@ target_link_libraries(your_project midnight-core)
 
 ## Quick Start Examples
 
-### 1. Khởi Tạo Logger
+### 1. Initialize Logger
 
 ```cpp
 #include "midnight/core/logger.hpp"
@@ -79,7 +80,7 @@ int main() {
 }
 ```
 
-### 2. Sử Dụng Config
+### 2. Use Config
 
 ```cpp
 #include "midnight/core/config.hpp"
@@ -88,7 +89,7 @@ midnight::g_config->set("device_id", "sensor_001");
 std::string device_id = midnight::g_config->get("device_id");
 ```
 
-### 3. Quản Lý Session
+### 3. Manage Session
 
 ```cpp
 #include "midnight/session/session_manager.hpp"
@@ -131,6 +132,7 @@ std::string address = wallet.get_address();
 ### Build Issues
 
 **Problem**: CMake not found
+
 ```bash
 # Install CMake
 # Windows: Download from cmake.org
@@ -139,6 +141,7 @@ std::string address = wallet.get_address();
 ```
 
 **Problem**: C++20 compiler error
+
 ```bash
 # Update compiler
 # Windows: Update Visual Studio
@@ -149,6 +152,7 @@ std::string address = wallet.get_address();
 ### Runtime Issues
 
 **Problem**: Logger not output
+
 ```cpp
 // Ensure logger is initialized
 if (midnight::g_logger) {
@@ -157,6 +161,7 @@ if (midnight::g_logger) {
 ```
 
 **Problem**: Connection refused (MQTT)
+
 ```cpp
 // Check broker address and port
 // Verify network connectivity

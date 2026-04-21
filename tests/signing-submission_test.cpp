@@ -1,5 +1,5 @@
 /**
- * Phase 5 Unit Tests: Signing & Submission
+ * Signing & Submission Unit Tests
  * Tests for sr25519/ed25519 signing and transaction submission
  *
  * 15 planned tests:
@@ -25,13 +25,13 @@
 #include <thread>
 #include <chrono>
 
-using namespace midnight::phase5;
+using namespace midnight::signing_submission;
 
 // ============================================================================
 // Test Fixture
 // ============================================================================
 
-class Phase5SigningSubmissionTest : public ::testing::Test
+class SigningSubmissionTest : public ::testing::Test
 {
 protected:
     std::string node_rpc_url = "wss://rpc.preprod.midnight.network";
@@ -48,7 +48,7 @@ protected:
 // Test 1: Generate sr25519 Key
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, GenerateSR25519_NoArgs_ReturnsKeypair)
+TEST_F(SigningSubmissionTest, GenerateSR25519_NoArgs_ReturnsKeypair)
 {
     auto keypair = KeyManager::generate_sr25519_key();
 
@@ -62,7 +62,7 @@ TEST_F(Phase5SigningSubmissionTest, GenerateSR25519_NoArgs_ReturnsKeypair)
 // Test 2: Generate ed25519 Key
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, GenerateED25519_NoArgs_ReturnsKeypair)
+TEST_F(SigningSubmissionTest, GenerateED25519_NoArgs_ReturnsKeypair)
 {
     auto keypair = KeyManager::generate_ed25519_key();
 
@@ -76,7 +76,7 @@ TEST_F(Phase5SigningSubmissionTest, GenerateED25519_NoArgs_ReturnsKeypair)
 // Test 3: Generate ECDSA Key
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, GenerateECDSA_NoArgs_ReturnsKeypair)
+TEST_F(SigningSubmissionTest, GenerateECDSA_NoArgs_ReturnsKeypair)
 {
     auto keypair = KeyManager::generate_ecdsa_key();
 
@@ -89,7 +89,7 @@ TEST_F(Phase5SigningSubmissionTest, GenerateECDSA_NoArgs_ReturnsKeypair)
 // Test 4: Load Key From File
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, LoadKey_ValidFile_ReturnsKeypair)
+TEST_F(SigningSubmissionTest, LoadKey_ValidFile_ReturnsKeypair)
 {
     auto keypair = KeyManager::load_key(test_file_path, test_password);
 
@@ -100,7 +100,7 @@ TEST_F(Phase5SigningSubmissionTest, LoadKey_ValidFile_ReturnsKeypair)
 // Test 5: Save Key to File
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, SaveKey_ValidKeypair_SavesSuccessfully)
+TEST_F(SigningSubmissionTest, SaveKey_ValidKeypair_SavesSuccessfully)
 {
     auto keypair = KeyManager::generate_sr25519_key();
     ASSERT_TRUE(keypair.has_value());
@@ -114,7 +114,7 @@ TEST_F(Phase5SigningSubmissionTest, SaveKey_ValidKeypair_SavesSuccessfully)
 // Test 6: Derive Address From Keypair
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, DeriveAddress_SR25519Key_ReturnsAddress)
+TEST_F(SigningSubmissionTest, DeriveAddress_SR25519Key_ReturnsAddress)
 {
     auto keypair = KeyManager::generate_sr25519_key();
     ASSERT_TRUE(keypair.has_value());
@@ -125,7 +125,7 @@ TEST_F(Phase5SigningSubmissionTest, DeriveAddress_SR25519Key_ReturnsAddress)
     EXPECT_EQ(address[0], '5'); // SR25519 address starts with 5
 }
 
-TEST_F(Phase5SigningSubmissionTest, DeriveAddress_ED25519Key_ReturnsAddress)
+TEST_F(SigningSubmissionTest, DeriveAddress_ED25519Key_ReturnsAddress)
 {
     auto keypair = KeyManager::generate_ed25519_key();
     ASSERT_TRUE(keypair.has_value());
@@ -140,7 +140,7 @@ TEST_F(Phase5SigningSubmissionTest, DeriveAddress_ED25519Key_ReturnsAddress)
 // Test 7: Sign Transaction with sr25519
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, SignTransaction_ValidTx_ReturnsSignature)
+TEST_F(SigningSubmissionTest, SignTransaction_ValidTx_ReturnsSignature)
 {
     auto keypair = KeyManager::generate_sr25519_key();
     ASSERT_TRUE(keypair.has_value());
@@ -158,7 +158,7 @@ TEST_F(Phase5SigningSubmissionTest, SignTransaction_ValidTx_ReturnsSignature)
 // Test 8: Verify Transaction Signature
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, VerifySignature_CorrectSignature_ReturnsTrue)
+TEST_F(SigningSubmissionTest, VerifySignature_CorrectSignature_ReturnsTrue)
 {
     auto keypair = KeyManager::generate_sr25519_key();
     ASSERT_TRUE(keypair.has_value());
@@ -176,7 +176,7 @@ TEST_F(Phase5SigningSubmissionTest, VerifySignature_CorrectSignature_ReturnsTrue
 // Test 9: Create Finality Vote with ed25519
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, CreateVote_ValidVote_CreatesSignedVote)
+TEST_F(SigningSubmissionTest, CreateVote_ValidVote_CreatesSignedVote)
 {
     auto keypair = KeyManager::generate_ed25519_key();
     ASSERT_TRUE(keypair.has_value());
@@ -194,7 +194,7 @@ TEST_F(Phase5SigningSubmissionTest, CreateVote_ValidVote_CreatesSignedVote)
 // Test 10: Verify Finality Vote
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, VerifyVote_ValidVote_ReturnsTrue)
+TEST_F(SigningSubmissionTest, VerifyVote_ValidVote_ReturnsTrue)
 {
     auto keypair = KeyManager::generate_ed25519_key();
     ASSERT_TRUE(keypair.has_value());
@@ -211,13 +211,13 @@ TEST_F(Phase5SigningSubmissionTest, VerifyVote_ValidVote_ReturnsTrue)
 // Test 11: Submit Transaction
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, Submit_ValidSignedTx_ReturnsSubmissionResult)
+TEST_F(SigningSubmissionTest, Submit_ValidSignedTx_ReturnsSubmissionResult)
 {
     TransactionSubmitter submitter(node_rpc_url);
 
     SignedTransaction signed_tx;
     signed_tx.transaction_hash = "0x" + std::string(64, 't');
-    signed_tx.signature = "0x" + std::string(128, 's');
+    signed_tx.signature = "0x" + std::string(128, 'a');
     signed_tx.signer_address = "5test123";
     signed_tx.nonce = 1;
 
@@ -228,13 +228,13 @@ TEST_F(Phase5SigningSubmissionTest, Submit_ValidSignedTx_ReturnsSubmissionResult
     EXPECT_FALSE(result.error_message.empty());
 }
 
-TEST_F(Phase5SigningSubmissionTest, Submit_MockTransport_AlwaysReturnsSubmitted)
+TEST_F(SigningSubmissionTest, Submit_MockTransport_AlwaysReturnsSubmitted)
 {
     TransactionSubmitter submitter(node_rpc_url, SubmissionTransportMode::MOCK);
 
     SignedTransaction signed_tx;
     signed_tx.transaction_hash = "0x" + std::string(64, 'm');
-    signed_tx.signature = "0x" + std::string(128, 's');
+    signed_tx.signature = "0x" + std::string(128, 'a');
     signed_tx.signer_address = "5mock";
     signed_tx.nonce = 7;
 
@@ -243,13 +243,13 @@ TEST_F(Phase5SigningSubmissionTest, Submit_MockTransport_AlwaysReturnsSubmitted)
     EXPECT_EQ(result.status, SubmissionStatus::SUBMITTED);
 }
 
-TEST_F(Phase5SigningSubmissionTest, Submit_RealTransportBadEndpoint_ReturnsFailed)
+TEST_F(SigningSubmissionTest, Submit_RealTransportBadEndpoint_ReturnsFailed)
 {
     TransactionSubmitter submitter("invalid-url", SubmissionTransportMode::REAL_RPC);
 
     SignedTransaction signed_tx;
     signed_tx.transaction_hash = "0x" + std::string(64, 'r');
-    signed_tx.signature = "0x" + std::string(128, 's');
+    signed_tx.signature = "0x" + std::string(128, 'a');
     signed_tx.signer_address = "5real";
     signed_tx.nonce = 8;
 
@@ -263,13 +263,13 @@ TEST_F(Phase5SigningSubmissionTest, Submit_RealTransportBadEndpoint_ReturnsFaile
 // Test 12: Get Submission Status
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, GetSubmissionStatus_SubmittedTx_ReturnsStatus)
+TEST_F(SigningSubmissionTest, GetSubmissionStatus_SubmittedTx_ReturnsStatus)
 {
     TransactionSubmitter submitter(node_rpc_url);
 
     SignedTransaction signed_tx;
     signed_tx.transaction_hash = "0x" + std::string(64, 't');
-    signed_tx.signature = "0x" + std::string(128, 's');
+    signed_tx.signature = "0x" + std::string(128, 'a');
 
     auto submit_result = submitter.submit(signed_tx);
     auto status_result = submitter.get_submission_status("0x" + std::string(64, 't'));
@@ -279,11 +279,28 @@ TEST_F(Phase5SigningSubmissionTest, GetSubmissionStatus_SubmittedTx_ReturnsStatu
     EXPECT_EQ(status_result.status, SubmissionStatus::CREATED);
 }
 
+TEST_F(SigningSubmissionTest, GetSubmissionStatus_MockSubmittedTx_ReturnsSubmitted)
+{
+    TransactionSubmitter submitter(node_rpc_url, SubmissionTransportMode::MOCK);
+
+    SignedTransaction signed_tx;
+    signed_tx.transaction_hash = "0x" + std::string(64, 'm');
+    signed_tx.signed_data = create_mock_transaction();
+    signed_tx.signature = "0x" + std::string(128, 'a');
+
+    auto submit_result = submitter.submit(signed_tx);
+    ASSERT_EQ(submit_result.status, SubmissionStatus::SUBMITTED);
+
+    auto status_result = submitter.get_submission_status(signed_tx.transaction_hash);
+    EXPECT_EQ(status_result.status, SubmissionStatus::SUBMITTED);
+    EXPECT_EQ(status_result.transaction_hash, signed_tx.transaction_hash);
+}
+
 // ============================================================================
 // Test 13: Monitor Mempool
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, MonitorMempool_ValidMonitoring_MonitorsMempool)
+TEST_F(SigningSubmissionTest, MonitorMempool_ValidMonitoring_MonitorsMempool)
 {
     MempoolMonitor monitor(node_rpc_url);
 
@@ -302,7 +319,7 @@ TEST_F(Phase5SigningSubmissionTest, MonitorMempool_ValidMonitoring_MonitorsMempo
 // Test 14: Batch Sign Transactions
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, BatchSign_MultipleTransactions_SignsAll)
+TEST_F(SigningSubmissionTest, BatchSign_MultipleTransactions_SignsAll)
 {
     auto keypair = KeyManager::generate_sr25519_key();
     ASSERT_TRUE(keypair.has_value());
@@ -332,10 +349,10 @@ TEST_F(Phase5SigningSubmissionTest, BatchSign_MultipleTransactions_SignsAll)
 // Test 15: Recover Signer from Signature
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, RecoverSigner_ValidSignature_RecoversSigner)
+TEST_F(SigningSubmissionTest, RecoverSigner_ValidSignature_RecoversSigner)
 {
     auto tx_data = create_mock_transaction();
-    std::string signature = "0x" + std::string(128, 's');
+    std::string signature = "0x" + std::string(128, 'a');
 
     auto signer = SignatureVerifier::recover_signer(tx_data, signature);
 
@@ -347,7 +364,7 @@ TEST_F(Phase5SigningSubmissionTest, RecoverSigner_ValidSignature_RecoversSigner)
 // Additional Tests
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, GetSignerAddress_ValidKeypair_ReturnsAddress)
+TEST_F(SigningSubmissionTest, GetSignerAddress_ValidKeypair_ReturnsAddress)
 {
     auto keypair = KeyManager::generate_sr25519_key();
     ASSERT_TRUE(keypair.has_value());
@@ -358,7 +375,7 @@ TEST_F(Phase5SigningSubmissionTest, GetSignerAddress_ValidKeypair_ReturnsAddress
     EXPECT_FALSE(address.empty());
 }
 
-TEST_F(Phase5SigningSubmissionTest, GetMempoolSize_ConnectedNode_ReturnsSize)
+TEST_F(SigningSubmissionTest, GetMempoolSize_ConnectedNode_ReturnsSize)
 {
     MempoolMonitor monitor(node_rpc_url);
 
@@ -367,7 +384,7 @@ TEST_F(Phase5SigningSubmissionTest, GetMempoolSize_ConnectedNode_ReturnsSize)
     EXPECT_GE(size, 0);
 }
 
-TEST_F(Phase5SigningSubmissionTest, EstimateFeeInclusion_HighFee_FastInclusion)
+TEST_F(SigningSubmissionTest, EstimateFeeInclusion_HighFee_FastInclusion)
 {
     MempoolMonitor monitor(node_rpc_url);
 
@@ -377,7 +394,7 @@ TEST_F(Phase5SigningSubmissionTest, EstimateFeeInclusion_HighFee_FastInclusion)
     EXPECT_LT(blocks_high, blocks_low);
 }
 
-TEST_F(Phase5SigningSubmissionTest, ImportFromSeed_ValidSeed_ReturnsKeypair)
+TEST_F(SigningSubmissionTest, ImportFromSeed_ValidSeed_ReturnsKeypair)
 {
     std::string seed = "legal winner thank year wave sausage worth useful legal winner thank yellow";
 
@@ -387,7 +404,7 @@ TEST_F(Phase5SigningSubmissionTest, ImportFromSeed_ValidSeed_ReturnsKeypair)
     EXPECT_FALSE(keypair->private_key.empty());
 }
 
-TEST_F(Phase5SigningSubmissionTest, SubmitBatch_MultipleTransactions_SubmitsAll)
+TEST_F(SigningSubmissionTest, SubmitBatch_MultipleTransactions_SubmitsAll)
 {
     TransactionSubmitter submitter(node_rpc_url);
 
@@ -396,7 +413,7 @@ TEST_F(Phase5SigningSubmissionTest, SubmitBatch_MultipleTransactions_SubmitsAll)
     {
         SignedTransaction tx;
         tx.transaction_hash = "0x" + std::string(60, 't') + std::to_string(i);
-        tx.signature = "0x" + std::string(128, 's');
+        tx.signature = "0x" + std::string(128, 'a');
         batch.push_back(tx);
     }
 
@@ -414,7 +431,7 @@ TEST_F(Phase5SigningSubmissionTest, SubmitBatch_MultipleTransactions_SubmitsAll)
 // Integration Test: Full Signing and Submission Workflow
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, Integration_FullSigningWorkflow_Success)
+TEST_F(SigningSubmissionTest, Integration_FullSigningWorkflow_Success)
 {
     // 1. Generate keypair
     auto keypair = KeyManager::generate_sr25519_key();
@@ -444,18 +461,22 @@ TEST_F(Phase5SigningSubmissionTest, Integration_FullSigningWorkflow_Success)
     signed_tx.nonce = 1;
 
     // 7. Submit
-    TransactionSubmitter submitter(node_rpc_url);
+    TransactionSubmitter submitter(node_rpc_url, SubmissionTransportMode::MOCK);
+    signed_tx.signed_data = tx_data;
     auto result = submitter.submit(signed_tx);
 
-    // Integration uses placeholder payloads and should fail cleanly on real RPC.
-    EXPECT_EQ(result.status, SubmissionStatus::FAILED);
+    EXPECT_EQ(result.status, SubmissionStatus::SUBMITTED);
+    EXPECT_EQ(result.transaction_hash, signed_tx.transaction_hash);
+
+    auto cached_status = submitter.get_submission_status(signed_tx.transaction_hash);
+    EXPECT_EQ(cached_status.status, SubmissionStatus::SUBMITTED);
 }
 
 // ============================================================================
 // Edge Cases
 // ============================================================================
 
-TEST_F(Phase5SigningSubmissionTest, VerifySignature_EmptySignature_ReturnsFalse)
+TEST_F(SigningSubmissionTest, VerifySignature_EmptySignature_ReturnsFalse)
 {
     auto keypair = KeyManager::generate_sr25519_key();
     ASSERT_TRUE(keypair.has_value());
@@ -468,7 +489,7 @@ TEST_F(Phase5SigningSubmissionTest, VerifySignature_EmptySignature_ReturnsFalse)
     EXPECT_FALSE(verified);
 }
 
-TEST_F(Phase5SigningSubmissionTest, BatchSigner_ClearBatch_EmptiesBatch)
+TEST_F(SigningSubmissionTest, BatchSigner_ClearBatch_EmptiesBatch)
 {
     BatchSigner batch;
     batch.add_transaction(create_mock_transaction());

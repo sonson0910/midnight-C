@@ -221,7 +221,7 @@ namespace
     }
 }
 
-namespace midnight::phase2
+namespace midnight::compact_contracts
 {
 
     // ============================================================================
@@ -1186,4 +1186,4 @@ namespace midnight::phase2
         return commitments;
     }
 
-} // namespace midnight::phase2
+} // namespace midnight::compact_contracts
