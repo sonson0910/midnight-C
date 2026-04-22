@@ -43,6 +43,67 @@ midnight/
 └── MIDNIGHT_BLOCKCHAIN.md  # Blockchain guide
 ```
 
+## Quick Start
+
+### Install
+
+```bash
+# Clone the repository
+git clone https://github.com/Venera-labs/midnight_C.git
+cd midnight_C
+
+# Build
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_BLOCKCHAIN=ON ..
+cmake --build . --config Release
+```
+
+### Create a Wallet
+
+```cpp
+#include "midnight/blockchain/wallet.hpp"
+#include <iostream>
+
+int main() {
+    // Create a wallet from mnemonic
+    midnight::blockchain::Wallet wallet;
+    wallet.create_from_mnemonic("your mnemonic words here...", "");
+
+    // Get wallet address
+    std::string address = wallet.get_address();
+    std::cout << "Address: " << address << std::endl;
+
+    // Connect to Midnight network and query balance
+    midnight::blockchain::MidnightBlockchain blockchain;
+    blockchain.initialize("preprod", {});
+    blockchain.connect("https://rpc.preprod.midnight.network");
+
+    return 0;
+}
+```
+
+### Transfer NIGHT (via wallet alias)
+
+```cpp
+#include "midnight/blockchain/official_sdk_bridge.hpp"
+#include <iostream>
+
+int main() {
+    // Register wallet alias once
+    midnight::blockchain::register_wallet_seed_hex(
+        "mywallet", "<seed_hex_32_bytes>", "preprod");
+
+    // Transfer NIGHT using alias
+    const auto tx = midnight::blockchain::transfer_official_night_with_wallet(
+        "mywallet", "<to_address>", "1", "preprod");
+
+    if (tx.success)
+        std::cout << "txid=" << tx.txid << std::endl;
+
+    return 0;
+}
+```
+
 ## Requirements
 
 - C++20-compatible compiler (gcc 11+, clang 12+, MSVC 2019+)
@@ -282,62 +343,6 @@ cmake --build . --target midnight-tests
 
 # Run tests
 ctest --output-on-failure
-```
-
-## Quick Start - Blockchain
-
-### 1. Initialize Blockchain
-
-```cpp
-#include "midnight/blockchain/midnight_adapter.hpp"
-
-// Configure protocol parameters
-midnight::blockchain::ProtocolParams params;
-params.min_fee_a = 44;
-params.min_fee_b = 155381;
-
-// Create blockchain manager
-midnight::blockchain::MidnightBlockchain blockchain;
-blockchain.initialize("preprod", params);
-blockchain.connect("https://rpc.preprod.midnight.network");
-```
-
-### 2. Create Wallet
-
-```cpp
-#include "midnight/blockchain/wallet.hpp"
-
-midnight::blockchain::Wallet wallet;
-wallet.create_from_mnemonic("mnemonic words here...", "");
-
-std::string address = wallet.get_address();
-```
-
-### 3. Build Transaction
-
-```cpp
-std::vector<midnight::blockchain::UTXO> utxos;
-// Fill UTXO data...
-
-auto result = blockchain.build_transaction(
-    utxos,
-    {{"recipient_address", 2000000}},
-    address  // change address
-);
-```
-
-### 4. Sign & Submit
-
-```cpp
-auto signed = blockchain.sign_transaction(
-    result.result,
-    private_key_hex
-);
-
-auto submitted = blockchain.submit_transaction(signed.result);
-if (submitted.success) {
-    std::cout << "TX ID: " << submitted.result << std::endl;
-}
 ```
 
 ## Development Goals
