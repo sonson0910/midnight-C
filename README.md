@@ -104,9 +104,9 @@ int main() {
 }
 ```
 
-## Module Quick Start (Bài 2–6)
+## Module Quick Start (2–6)
 
-### Bài 2 — Network & RPC
+### 2 — Network & RPC
 
 Switch between networks, query the chain, submit and confirm transactions.
 
@@ -137,7 +137,7 @@ Auto-retry behaviour is configured via `midnight::network::RetryConfig` (exponen
 
 ---
 
-### Bài 3 — IoT Protocols (MQTT · CoAP · HTTP · WebSocket)
+### 3 — IoT Protocols (MQTT · CoAP · HTTP · WebSocket)
 
 All four protocol clients live in `midnight::protocols`.
 
@@ -179,7 +179,7 @@ ws.send(R"({"jsonrpc":"2.0","method":"chain_subscribeNewHead",
 
 ---
 
-### Bài 4 — ZK Proofs
+### 4 — ZK Proofs
 
 Generate proofs via the local Proof Server, isolate private witnesses, and embed the proof in a transaction.
 
@@ -223,7 +223,7 @@ if (result.success) {
 
 ---
 
-### Bài 5 — State & Compact Contracts
+### 5 — State & Compact Contracts
 
 Deploy Compact contracts, sync on-chain ledger state, and manage off-chain private state.
 
@@ -254,7 +254,7 @@ sync.trigger_full_sync();          // pull latest state snapshot
 
 ---
 
-### Bài 6 — Monitoring & GRANDPA Finality
+### 6 — Monitoring & GRANDPA Finality
 
 Subscribe to new blocks, detect reorgs, track a transaction from mempool to finality, and await GRANDPA confirmation.
 
