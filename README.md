@@ -104,6 +104,199 @@ int main() {
 }
 ```
 
+## Module Quick Start (Bài 2–6)
+
+### Bài 2 — Network & RPC
+
+Switch between networks, query the chain, submit and confirm transactions.
+
+```cpp
+#include "midnight/network/midnight_node_rpc.hpp"
+#include "midnight/network/network_config.hpp"
+
+// Pick a network: DEVNET | TESTNET | MAINNET
+auto endpoint = midnight::network::NetworkConfig::get_rpc_endpoint(
+    midnight::network::NetworkConfig::Network::TESTNET);
+
+midnight::network::MidnightNodeRPC rpc(endpoint, /*timeout_ms=*/5000);
+
+if (rpc.is_ready()) {
+    auto [height, hash] = rpc.get_chain_tip();
+    std::cout << "tip: " << height << " " << hash << "\n";
+
+    // Broadcast a signed tx (CBOR hex)
+    std::string tx_id = rpc.submit_transaction(tx_hex);
+
+    // Block until confirmed (max 10 blocks, ~60 s)
+    bool ok = rpc.wait_for_confirmation(tx_id, 10);
+    std::cout << (ok ? "confirmed" : "timeout") << "\n";
+}
+```
+
+Auto-retry behaviour is configured via `midnight::network::RetryConfig` (exponential backoff, up to 3 retries by default).
+
+---
+
+### Bài 3 — IoT Protocols (MQTT · CoAP · HTTP · WebSocket)
+
+All four protocol clients live in `midnight::protocols`.
+
+```cpp
+// ── MQTT (lightweight IoT messaging) ──────────────────────────
+#include "midnight/protocols/mqtt/mqtt_client.hpp"
+midnight::protocols::mqtt::MqttClient mqtt;
+mqtt.connect("mqtt://broker.example.com", 1883);
+mqtt.publish("midnight/sensor/data", R"({"temp":22.5})", /*qos=*/1);
+mqtt.subscribe("midnight/cmd/#", [](const std::string& topic,
+                                    const std::string& payload) {
+    // handle incoming command
+});
+
+// ── CoAP (low-power sensors) ──────────────────────────────────
+#include "midnight/protocols/coap/coap_client.hpp"
+midnight::protocols::coap::CoapClient coap;
+std::string body = coap.send_request(
+    "coap://sensor.local/state",
+    midnight::protocols::coap::RequestMethod::GET);
+
+// ── HTTP (standard REST / indexer) ───────────────────────────
+#include "midnight/protocols/http/http_client.hpp"
+midnight::protocols::http::HttpClient http;
+auto resp = http.get("https://indexer.preprod.midnight.network/api/v3/graphql");
+
+// ── WebSocket (real-time block subscription) ─────────────────
+#include "midnight/protocols/websocket/ws_client.hpp"
+midnight::protocols::websocket::WebSocketClient ws;
+ws.set_message_handler([](const std::string& msg) {
+    std::cout << "frame: " << msg << "\n";
+});
+ws.connect("wss://rpc.preprod.midnight.network");
+ws.send(R"({"jsonrpc":"2.0","method":"chain_subscribeNewHead",
+            "params":[],"id":1})");
+```
+
+> **Note**: The `midnight::protocols` API surface is fully defined; underlying I/O integration (paho-mqtt, libcoap, etc.) is plugged in separately.
+
+---
+
+### Bài 4 — ZK Proofs
+
+Generate proofs via the local Proof Server, isolate private witnesses, and embed the proof in a transaction.
+
+```cpp
+#include "midnight/zk/proof_server_client.hpp"
+#include "midnight/zk/proof_server_resilient_client.hpp"
+#include "midnight/zk/proof_types.hpp"
+
+// --- Base client (proof server at localhost:6300 by default) ---
+midnight::zk::ProofServerClient::Config cfg;   // host=localhost, port=6300
+auto base = std::make_shared<midnight::zk::ProofServerClient>(cfg);
+base->connect();
+
+// --- Resilient wrapper: circuit breaker + exponential backoff ---
+midnight::zk::ResilienceConfig res;
+res.max_retries        = 3;
+res.failure_threshold  = 5;   // open circuit after 5 failures
+midnight::zk::ProofServerResilientClient client(base, res);
+
+// --- Public inputs (appear on-chain) ---
+midnight::zk::PublicInputs inputs;
+inputs.add_input("recipient", "0xaabbccdd...");
+
+// --- Witness output (private — never leaves the prover) ---
+midnight::zk::WitnessOutput witness;
+witness.witness_name  = "localSecretKey";
+witness.output_bytes  = { /* 32 secret bytes */ };
+
+// --- Generate proof (auto-retries if server crashes mid-process) ---
+auto result = client.generate_proof_resilient(
+    "transfer",          // circuit name
+    circuit_bytes,       // compiled .zkir data
+    inputs,
+    witness);
+
+if (result.success) {
+    std::string proof_hex = result.proof.to_hex();
+    // include proof_hex in your transaction payload
+}
+```
+
+---
+
+### Bài 5 — State & Compact Contracts
+
+Deploy Compact contracts, sync on-chain ledger state, and manage off-chain private state.
+
+```cpp
+#include "midnight/compact-contracts/compact_contracts.hpp"
+#include "midnight/zk/ledger_state_sync.hpp"
+
+// --- Deploy a Compact contract ---
+midnight::compact_contracts::ContractDeployer deployer(node_rpc_url);
+auto deployed = deployer.deploy_contract(
+    "FaucetAMM", compiled_contract, constructor_args);
+
+if (deployed.success)
+    std::cout << "contract=" << deployed.contract_address << "\n";
+
+// --- Interact with a deployed contract ---
+midnight::compact_contracts::ContractInteractor interactor(
+    node_rpc_url, deployed.contract_address);
+auto call_result = interactor.call_function("increment", call_args);
+
+// --- Ledger state sync (on-chain + off-chain private state) ---
+midnight::zk::LedgerStateSyncManager sync(
+    "https://rpc.preprod.midnight.network",
+    std::chrono::seconds(6));
+sync.start_monitoring();
+sync.trigger_full_sync();          // pull latest state snapshot
+```
+
+---
+
+### Bài 6 — Monitoring & GRANDPA Finality
+
+Subscribe to new blocks, detect reorgs, track a transaction from mempool to finality, and await GRANDPA confirmation.
+
+```cpp
+#include "midnight/monitoring-finality/monitoring_finality.hpp"
+
+const std::string rpc     = "https://rpc.preprod.midnight.network";
+const std::string indexer = "https://indexer.preprod.midnight.network/api/v3/graphql";
+
+// --- Subscribe to new blocks (polls every ~4–6 s) ---
+midnight::monitoring_finality::BlockMonitor block_monitor(rpc, indexer);
+block_monitor.subscribe_new_blocks([](const std::string& hash) {
+    std::cout << "new block: " << hash << "\n";
+});
+
+// --- Detect chain reorgs ---
+auto reorg = block_monitor.detect_reorg();
+if (reorg)
+    std::cout << "reorg at height " << reorg->fork_height << "\n";
+
+// --- Track tx lifecycle: mempool → block → finalized ---
+midnight::monitoring_finality::TransactionMonitor tx_monitor(rpc, indexer);
+tx_monitor.monitor_transaction(tx_hash, [](const auto& update) {
+    using S = midnight::monitoring_finality::TransactionStatusUpdate;
+    if (update.status == S::FINALIZED_CONFIRMED)
+        std::cout << "tx finalized at block " << update.block_height << "\n";
+});
+
+// --- Await GRANDPA finality for a specific block (non-blocking) ---
+midnight::monitoring_finality::FinalizationMonitor fin_monitor(rpc);
+fin_monitor.wait_for_finality(target_block_height, [](bool ok) {
+    std::cout << (ok ? "finalized ✓" : "timeout ✗") << "\n";
+});
+
+// --- Or monitor finalization continuously ---
+fin_monitor.monitor_finalization([](uint32_t finalized_height) {
+    std::cout << "GRANDPA finalized up to " << finalized_height << "\n";
+});
+```
+
+---
+
 ## Requirements
 
 - C++20-compatible compiler (gcc 11+, clang 12+, MSVC 2019+)
