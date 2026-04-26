@@ -1,10 +1,13 @@
 # Build directories
 build/
 Build/
+build_local/
+build_*/
 build_verify/
 build_check/
 cmake_build/
 out/
+Testing/
 
 # Compiled files
 *.o
@@ -61,4 +64,18 @@ final-test.json
 midnight-test.json
 midnight-correct.json
 my-test-wallet.json
+node_modules/
+wallet_preview.txt
+
+# Security-sensitive files (seeds, keys, secrets)
+seed_*.hex
+*.seed
+*.pem
+*.key
+*.p12
+*.pfx
+.env
+.env.*
+
+# Node.js (bridge scripts)
 node_modules/

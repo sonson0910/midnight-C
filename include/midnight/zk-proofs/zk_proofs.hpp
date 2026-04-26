@@ -16,6 +16,7 @@
 #include <optional>
 #include <json/json.h>
 #include <cstdint>
+#include <mutex>
 
 namespace midnight::zk_proofs
 {
@@ -316,6 +317,7 @@ namespace midnight::zk_proofs
 
     private:
         static std::map<std::string, std::pair<ZkProof, uint64_t>> cache_;
+        static std::mutex cache_mutex_;
         static constexpr uint64_t CACHE_TTL_SECONDS = 3600; // 1 hour
     };
 
@@ -362,6 +364,7 @@ namespace midnight::zk_proofs
     private:
         static std::vector<uint64_t> generation_times_;
         static std::vector<uint64_t> verification_times_;
+        static std::mutex perf_mutex_;
     };
 
 } // namespace midnight::zk_proofs

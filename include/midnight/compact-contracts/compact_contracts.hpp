@@ -135,7 +135,7 @@ namespace midnight::compact_contracts
     public:
         /**
          * Constructor
-         * @param indexer_graphql_url: GraphQL endpoint (https://indexer.preprod.midnight.network/api/v3/graphql)
+         * @param indexer_graphql_url: GraphQL endpoint (https://indexer.preprod.midnight.network/api/v4/graphql)
          */
         explicit ContractQueryEngine(const std::string &indexer_graphql_url);
 

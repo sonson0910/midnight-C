@@ -19,6 +19,8 @@
 #include <json/json.h>
 #include <cstdint>
 #include <functional>
+#include <thread>
+#include <atomic>
 
 namespace midnight::signing_submission
 {
@@ -262,6 +264,7 @@ namespace midnight::signing_submission
          */
         explicit TransactionSubmitter(const std::string &node_rpc_url);
         TransactionSubmitter(const std::string &node_rpc_url, SubmissionTransportMode mode);
+        ~TransactionSubmitter();
 
         void set_transport_mode(SubmissionTransportMode mode);
         SubmissionTransportMode get_transport_mode() const;
@@ -299,6 +302,8 @@ namespace midnight::signing_submission
          * RPC call to submit transaction
          */
         Json::Value rpc_submit_extrinsic(const SignedTransaction &signed_tx);
+
+        std::thread wait_thread_; ///< Managed thread for wait_for_inclusion
     };
 
     /**
@@ -313,6 +318,7 @@ namespace midnight::signing_submission
          * @param node_rpc_url: Node RPC endpoint
          */
         explicit MempoolMonitor(const std::string &node_rpc_url);
+        ~MempoolMonitor();
 
         /**
          * Get current mempool size
@@ -351,7 +357,8 @@ namespace midnight::signing_submission
 
     private:
         std::string rpc_url_;
-        bool monitoring_ = false;
+        std::atomic<bool> monitoring_{false};
+        std::thread monitor_thread_; ///< Managed monitoring thread
 
         /**
          * RPC query for mempool

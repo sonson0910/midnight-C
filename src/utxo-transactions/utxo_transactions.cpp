@@ -5,6 +5,8 @@
 #include "midnight/utxo-transactions/utxo_transactions.hpp"
 #include "midnight/network/network_client.hpp"
 #include "midnight/network/midnight_node_rpc.hpp"
+#include "midnight/core/logger.hpp"
+#include "midnight/core/common_utils.hpp"
 #include <iostream>
 #include <algorithm>
 #include <cctype>
@@ -33,11 +35,10 @@ namespace midnight::utxo_transactions
             return converted;
         }
 
-        bool is_hex_string(const std::string &value)
-        {
-            return std::all_of(value.begin(), value.end(), [](unsigned char c)
-                               { return std::isxdigit(c) != 0; });
-        }
+        // Use shared is_hex_string from common_utils.hpp
+        // Note: midnight::util::is_hex_string requires even length;
+        // is_signature_hex already checks exact length so this is compatible.
+        using midnight::util::is_hex_string;
 
         bool is_signature_hex(const std::string &signature)
         {
@@ -201,7 +202,7 @@ namespace midnight::utxo_transactions
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error querying UTXOs: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error querying UTXOs: ") + e.what());
             return {};
         }
     }
@@ -262,7 +263,7 @@ namespace midnight::utxo_transactions
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error querying UTXO: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error querying UTXO: ") + e.what());
             return {};
         }
     }
@@ -438,14 +439,14 @@ namespace midnight::utxo_transactions
     {
         if (tx_.inputs.empty() || tx_.outputs.empty())
         {
-            std::cerr << "Transaction must have inputs and outputs" << std::endl;
+            midnight::g_logger->warn("Transaction must have inputs and outputs");
             return false;
         }
 
         if (tx_.inputs.size() > kMaxTxInputs ||
             tx_.outputs.size() > kMaxTxOutputs)
         {
-            std::cerr << "Too many inputs or outputs" << std::endl;
+            midnight::g_logger->warn("Too many inputs or outputs");
             return false;
         }
 
@@ -459,9 +460,57 @@ namespace midnight::utxo_transactions
 
     std::string TransactionBuilder::compute_hash()
     {
-        // In production: Compute blake2_256 hash
-        // For now: Return mock hash
-        return "0x" + std::string(64, 'b');
+        // Compute a deterministic hash over the UTXO transaction body.
+        // In production this should use blake2b-256; we use a cascaded
+        // FNV-1a-64 producing 32 bytes until libblake2 is integrated.
+        // Hash input: all inputs (outpoint + commitment), all outputs
+        // (address + commitment), nonce, and version.
+
+        constexpr uint64_t kOffsetBasis = 14695981039346656037ULL;
+        constexpr uint64_t kPrime = 1099511628211ULL;
+
+        auto fnv_hash = [&](uint64_t state, const std::string &data) -> uint64_t
+        {
+            for (unsigned char c : data)
+            {
+                state ^= c;
+                state *= kPrime;
+            }
+            return state;
+        };
+
+        // Build 4 independent 64-bit hashes → 32-byte digest
+        std::array<uint8_t, 32> digest{};
+        for (size_t block = 0; block < 4; ++block)
+        {
+            uint64_t state = kOffsetBasis ^ (0x9E3779B97F4A7C15ULL * (block + 1));
+
+            // Mix version and nonce
+            state = fnv_hash(state, std::to_string(tx_.version));
+            state = fnv_hash(state, std::to_string(tx_.nonce));
+
+            // Mix inputs
+            for (const auto &inp : tx_.inputs)
+            {
+                state = fnv_hash(state, inp.outpoint);
+                state = fnv_hash(state, inp.amount_commitment);
+            }
+
+            // Mix outputs
+            for (const auto &out : tx_.outputs)
+            {
+                state = fnv_hash(state, out.address);
+                state = fnv_hash(state, out.amount_commitment);
+            }
+
+            for (size_t i = 0; i < 8; ++i)
+            {
+                digest[(block * 8) + i] = static_cast<uint8_t>((state >> (i * 8)) & 0xFF);
+            }
+        }
+
+        return "0x" + midnight::util::bytes_to_hex(
+                          std::vector<uint8_t>(digest.begin(), digest.end()));
     }
 
     // ============================================================================
@@ -533,31 +582,31 @@ namespace midnight::utxo_transactions
     {
         if (!validate_inputs(tx))
         {
-            std::cerr << "Invalid inputs" << std::endl;
+            midnight::g_logger->warn("Invalid inputs");
             return false;
         }
 
         if (!validate_outputs(tx))
         {
-            std::cerr << "Invalid outputs" << std::endl;
+            midnight::g_logger->warn("Invalid outputs");
             return false;
         }
 
         if (!validate_dust_accounting(tx))
         {
-            std::cerr << "Invalid DUST accounting" << std::endl;
+            midnight::g_logger->warn("Invalid DUST accounting");
             return false;
         }
 
         if (!validate_proofs(tx))
         {
-            std::cerr << "Invalid proofs" << std::endl;
+            midnight::g_logger->warn("Invalid proofs");
             return false;
         }
 
         if (!validate_signature(tx))
         {
-            std::cerr << "Invalid signature" << std::endl;
+            midnight::g_logger->warn("Invalid signature");
             return false;
         }
 

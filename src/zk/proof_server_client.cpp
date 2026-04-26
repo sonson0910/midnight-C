@@ -1,6 +1,8 @@
 #include "midnight/zk/proof_server_client.hpp"
 #include <fmt/format.h>
 #include <chrono>
+#include <sstream>
+#include <iomanip>
 
 namespace midnight::zk
 {
@@ -246,6 +248,146 @@ namespace midnight::zk
     {
         config_ = config;
     }
+
+    ProofResult ProofServerClient::prove(
+        const std::string &circuit_name,
+        const std::vector<uint8_t> &prover_key_data,
+        const json &witness_data,
+        const json &public_inputs)
+    {
+        ProofResult result;
+        result.success = false;
+
+        try
+        {
+            if (circuit_name.empty())
+                throw std::runtime_error("Circuit name cannot be empty");
+
+            if (prover_key_data.empty())
+                throw std::runtime_error("Prover key data cannot be empty");
+
+            // Build /prove request
+            // Format matches httpClientProofProvider's request format
+            json request;
+            request["circuitName"] = circuit_name;
+
+            // Encode prover key as base64 or hex
+            std::ostringstream hex_key;
+            for (auto b : prover_key_data)
+                hex_key << std::hex << std::setfill('0') << std::setw(2)
+                        << static_cast<int>(b);
+            request["proverKey"] = hex_key.str();
+
+            if (!witness_data.is_null())
+                request["witnesses"] = witness_data;
+
+            if (!public_inputs.is_null())
+                request["publicInputs"] = public_inputs;
+
+            // POST to /prove endpoint
+            json response = network_client_->post_json("/prove", request);
+
+            result = parse_proof_response(response);
+            if (result.success)
+            {
+                result.proof.metadata.circuit_name = circuit_name;
+                result.proof.generated_at_timestamp =
+                    std::chrono::system_clock::now().time_since_epoch().count() / 1000000;
+                result.proof.proof_server_endpoint = config_.base_url();
+            }
+        }
+        catch (const std::exception &e)
+        {
+            set_error(fmt::format("Prove failed: {}", e.what()));
+            result.error_message = last_error_;
+        }
+
+        return result;
+    }
+
+    ProofResult ProofServerClient::prove_tx(
+        const std::vector<uint8_t> &tx_data,
+        const std::vector<uint8_t> &zk_config)
+    {
+        ProofResult result;
+        result.success = false;
+
+        try
+        {
+            if (tx_data.empty())
+                throw std::runtime_error("Transaction data cannot be empty");
+
+            // Build /prove-tx request
+            json request;
+
+            // Encode tx data as hex
+            std::ostringstream hex_tx;
+            for (auto b : tx_data)
+                hex_tx << std::hex << std::setfill('0') << std::setw(2)
+                       << static_cast<int>(b);
+            request["txData"] = hex_tx.str();
+
+            if (!zk_config.empty())
+            {
+                std::ostringstream hex_zk;
+                for (auto b : zk_config)
+                    hex_zk << std::hex << std::setfill('0') << std::setw(2)
+                           << static_cast<int>(b);
+                request["zkConfig"] = hex_zk.str();
+            }
+
+            // POST to /prove-tx endpoint
+            json response = network_client_->post_json("/prove-tx", request);
+
+            result = parse_proof_response(response);
+            if (result.success)
+            {
+                result.proof.generated_at_timestamp =
+                    std::chrono::system_clock::now().time_since_epoch().count() / 1000000;
+                result.proof.proof_server_endpoint = config_.base_url();
+            }
+        }
+        catch (const std::exception &e)
+        {
+            set_error(fmt::format("Prove-tx failed: {}", e.what()));
+            result.error_message = last_error_;
+        }
+
+        return result;
+    }
+
+    bool ProofServerClient::check_circuit(
+        const std::string &circuit_name,
+        const std::vector<uint8_t> &prover_key_data)
+    {
+        try
+        {
+            json request;
+            request["circuitName"] = circuit_name;
+
+            // Encode prover key as hex
+            std::ostringstream hex_key;
+            for (auto b : prover_key_data)
+                hex_key << std::hex << std::setfill('0') << std::setw(2)
+                        << static_cast<int>(b);
+            request["proverKey"] = hex_key.str();
+
+            json response = network_client_->post_json("/check", request);
+
+            // /check returns {"capable": true/false}
+            if (response.contains("capable"))
+                return response["capable"].get<bool>();
+
+            // If response has no error, assume capable
+            return !response.contains("error");
+        }
+        catch (const std::exception &e)
+        {
+            set_error(fmt::format("Check failed: {}", e.what()));
+            return false;
+        }
+    }
+
 
     json ProofServerClient::build_proof_request(
         const std::string &circuit_name,

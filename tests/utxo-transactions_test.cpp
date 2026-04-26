@@ -95,7 +95,7 @@ namespace
 class UtxoTransactionsTest : public ::testing::Test
 {
 protected:
-    std::string indexer_url = "http://127.0.0.1:8088/api/v3/graphql";
+    std::string indexer_url = "http://127.0.0.1:8088/api/v4/graphql";
     std::string node_rpc_url = "http://127.0.0.1:9944";
     std::string test_address = "0xaddress123";
 
@@ -131,19 +131,14 @@ protected:
 
 TEST_F(UtxoTransactionsTest, QueryUnspentUtxos_ValidAddress_ReturnsUtxos)
 {
-    if (!undeployed_tests_enabled())
-    {
-        GTEST_SKIP() << "Set MIDNIGHT_RUN_UNDEPLOYED_TESTS=1 to run undeployed integration checks.";
-    }
-    UtxoSetManager manager(indexer_url, node_rpc_url);
+    auto indexer_provider = std::make_shared<StubIndexerProvider>();
+    auto node_provider = std::make_shared<StubNodeProvider>();
+    UtxoSetManager manager(indexer_provider, node_provider);
 
     auto utxos = query_unspent(manager);
-    if (!utxos.has_value())
-    {
-        GTEST_SKIP() << "Undeployed indexer is unavailable or returned invalid payload.";
-    }
 
-    EXPECT_TRUE(utxos.has_value());
+    ASSERT_TRUE(utxos.has_value());
+    EXPECT_GE(utxos->size(), 1u);
 }
 
 TEST_F(UtxoTransactionsTest, QueryUnspentUtxos_RealRpcBadEndpoint_ReturnsEmptyOptional)
@@ -161,30 +156,18 @@ TEST_F(UtxoTransactionsTest, QueryUnspentUtxos_RealRpcBadEndpoint_ReturnsEmptyOp
 
 TEST_F(UtxoTransactionsTest, QueryUtxo_ValidOutpoint_ReturnsUtxo)
 {
-    if (!undeployed_tests_enabled())
-    {
-        GTEST_SKIP() << "Set MIDNIGHT_RUN_UNDEPLOYED_TESTS=1 to run undeployed integration checks.";
-    }
-    UtxoSetManager manager(indexer_url, node_rpc_url);
+    auto indexer_provider = std::make_shared<StubIndexerProvider>();
+    auto node_provider = std::make_shared<StubNodeProvider>();
+    UtxoSetManager manager(indexer_provider, node_provider);
 
     auto utxos = query_unspent(manager);
-    if (!utxos.has_value())
-    {
-        GTEST_SKIP() << "Undeployed indexer is unavailable or returned invalid payload.";
-    }
-    if (utxos->empty())
-    {
-        GTEST_SKIP() << "No UTXOs found for test address on undeployed.";
-    }
+    ASSERT_TRUE(utxos.has_value());
+    ASSERT_FALSE(utxos->empty());
 
     const auto &candidate = utxos->front();
     auto utxo = manager.query_utxo(candidate.tx_hash, candidate.output_index);
 
-    if (!utxo.has_value())
-    {
-        GTEST_SKIP() << "Indexer did not return details for a listed UTXO outpoint.";
-    }
-
+    ASSERT_TRUE(utxo.has_value());
     EXPECT_EQ(utxo->tx_hash, candidate.tx_hash);
     EXPECT_EQ(utxo->output_index, candidate.output_index);
 }
@@ -195,21 +178,13 @@ TEST_F(UtxoTransactionsTest, QueryUtxo_ValidOutpoint_ReturnsUtxo)
 
 TEST_F(UtxoTransactionsTest, IsSpent_UnspentUtxo_ReturnsFalse)
 {
-    if (!undeployed_tests_enabled())
-    {
-        GTEST_SKIP() << "Set MIDNIGHT_RUN_UNDEPLOYED_TESTS=1 to run undeployed integration checks.";
-    }
-    UtxoSetManager manager(indexer_url, node_rpc_url);
+    auto indexer_provider = std::make_shared<StubIndexerProvider>();
+    auto node_provider = std::make_shared<StubNodeProvider>();
+    UtxoSetManager manager(indexer_provider, node_provider);
 
     auto utxos = query_unspent(manager);
-    if (!utxos.has_value())
-    {
-        GTEST_SKIP() << "Undeployed indexer is unavailable or returned invalid payload.";
-    }
-    if (utxos->empty())
-    {
-        GTEST_SKIP() << "No UTXOs found for test address on undeployed.";
-    }
+    ASSERT_TRUE(utxos.has_value());
+    ASSERT_FALSE(utxos->empty());
 
     const auto &candidate = utxos->front();
     bool spent = manager.is_spent(candidate.tx_hash, candidate.output_index);
@@ -223,17 +198,12 @@ TEST_F(UtxoTransactionsTest, IsSpent_UnspentUtxo_ReturnsFalse)
 
 TEST_F(UtxoTransactionsTest, CountUnspentUtxos_ValidAddress_ReturnsCount)
 {
-    if (!undeployed_tests_enabled())
-    {
-        GTEST_SKIP() << "Set MIDNIGHT_RUN_UNDEPLOYED_TESTS=1 to run undeployed integration checks.";
-    }
-    UtxoSetManager manager(indexer_url, node_rpc_url);
+    auto indexer_provider = std::make_shared<StubIndexerProvider>();
+    auto node_provider = std::make_shared<StubNodeProvider>();
+    UtxoSetManager manager(indexer_provider, node_provider);
 
     auto utxos = query_unspent(manager);
-    if (!utxos.has_value())
-    {
-        GTEST_SKIP() << "Undeployed indexer is unavailable or returned invalid payload.";
-    }
+    ASSERT_TRUE(utxos.has_value());
 
     uint32_t count = manager.count_unspent_utxos(test_address);
 
@@ -246,19 +216,13 @@ TEST_F(UtxoTransactionsTest, CountUnspentUtxos_ValidAddress_ReturnsCount)
 
 TEST_F(UtxoTransactionsTest, SyncAccount_ValidAddress_ReturnBalance)
 {
-    if (!undeployed_tests_enabled())
-    {
-        GTEST_SKIP() << "Set MIDNIGHT_RUN_UNDEPLOYED_TESTS=1 to run undeployed integration checks.";
-    }
-    UtxoSetManager manager(indexer_url, node_rpc_url);
+    auto indexer_provider = std::make_shared<StubIndexerProvider>();
+    auto node_provider = std::make_shared<StubNodeProvider>();
+    UtxoSetManager manager(indexer_provider, node_provider);
 
     auto balance = manager.sync_account(test_address);
 
-    if (!balance.has_value())
-    {
-        GTEST_SKIP() << "Unable to sync account from undeployed indexer.";
-    }
-
+    ASSERT_TRUE(balance.has_value());
     EXPECT_EQ(balance->address, test_address);
 }
 
@@ -811,18 +775,12 @@ TEST_F(UtxoTransactionsTest, EstimateFee_WithContextReflectsProtocolParams)
 
 TEST_F(UtxoTransactionsTest, Integration_FullTransactionWorkflow_Success)
 {
-    if (!undeployed_tests_enabled())
-    {
-        GTEST_SKIP() << "Set MIDNIGHT_RUN_UNDEPLOYED_TESTS=1 to run undeployed integration checks.";
-    }
-
-    // 1. Query UTXOs
-    UtxoSetManager manager(indexer_url, node_rpc_url);
+    // 1. Query UTXOs using stub provider
+    auto indexer_provider = std::make_shared<StubIndexerProvider>();
+    auto node_provider = std::make_shared<StubNodeProvider>();
+    UtxoSetManager manager(indexer_provider, node_provider);
     auto utxos = query_unspent(manager);
-    if (!utxos.has_value())
-    {
-        GTEST_SKIP() << "Undeployed indexer is unavailable or returned invalid payload.";
-    }
+    ASSERT_TRUE(utxos.has_value());
 
     // 2. Build transaction
     TransactionBuilder builder;

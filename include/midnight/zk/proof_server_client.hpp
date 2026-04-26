@@ -118,6 +118,53 @@ namespace midnight::zk
             const std::string &rpc_endpoint);
 
         /**
+         * @brief Production proof endpoint (/prove)
+         *
+         * Calls the Midnight Proof Server's /prove endpoint directly.
+         * This is the endpoint used by httpClientProofProvider for
+         * contract-specific ZK proof generation.
+         *
+         * @param circuit_name Circuit to prove
+         * @param prover_key_data Prover key bytes (.prover file contents)
+         * @param witness_data Witness inputs
+         * @param public_inputs Public input values
+         * @return ProofResult with ZK proof bytes
+         */
+        ProofResult prove(
+            const std::string &circuit_name,
+            const std::vector<uint8_t> &prover_key_data,
+            const json &witness_data,
+            const json &public_inputs);
+
+        /**
+         * @brief Transaction-level proof endpoint (/prove-tx)
+         *
+         * Calls /prove-tx to generate proofs for a complete transaction.
+         * Used for Zswap balancing and multi-circuit transactions.
+         *
+         * @param tx_data Serialized transaction data
+         * @param zk_config ZK configuration (from compact compile output)
+         * @return ProofResult with transaction proof
+         */
+        ProofResult prove_tx(
+            const std::vector<uint8_t> &tx_data,
+            const std::vector<uint8_t> &zk_config);
+
+        /**
+         * @brief Check circuit capability (/check)
+         *
+         * Validates that the Proof Server can handle a specific circuit
+         * before attempting proof generation.
+         *
+         * @param circuit_name Circuit to check
+         * @param prover_key_data Prover key data
+         * @return true if server can prove this circuit
+         */
+        bool check_circuit(
+            const std::string &circuit_name,
+            const std::vector<uint8_t> &prover_key_data);
+
+        /**
          * @brief Create empty proof for testing
          *
          * Useful for development and tests before Proof Server is available.

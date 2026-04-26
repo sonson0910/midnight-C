@@ -24,7 +24,7 @@
 #include "midnight/network/midnight_node_rpc.hpp"
 #include "midnight/zk/proof_server_client.hpp"
 #include "midnight/zk/proof_server_resilient_client.hpp"
-#include "midnight/blockchain/official_sdk_bridge.hpp"
+#include "midnight/wallet/hd_wallet.hpp"
 
 namespace midnight::wallet
 {
@@ -461,7 +461,7 @@ int main(int argc, char *argv[])
 
         const auto testnet = NetworkConfig::Network::TESTNET;
         const std::string node_endpoint = NetworkConfig::get_rpc_endpoint(testnet);
-        const std::string indexer_endpoint = "https://indexer.preprod.midnight.network/api/v3/graphql";
+        const std::string indexer_endpoint = "https://indexer.preprod.midnight.network/api/v4/graphql";
         const std::string faucet_endpoint = NetworkConfig::get_faucet_url(testnet);
         const std::string proof_endpoint = "http://127.0.0.1:6300";
 
@@ -720,37 +720,55 @@ int main(int argc, char *argv[])
 
     if (use_official_sdk)
     {
-        const auto official = midnight::blockchain::generate_official_wallet_addresses(
-            official_network,
-            seed_hex,
-            0,
-            0,
-            register_dust,
-            proof_server,
-            sync_timeout_seconds,
-            "tools/official-wallet-address.mjs");
+        // Native HD wallet generation (BIP39 + SLIP-10 Ed25519)
+        using midnight::wallet::HDWallet;
+        namespace bip39 = midnight::wallet::bip39;
 
-        if (!official.success)
+        std::string mnemonic;
+        if (!seed_hex.empty())
         {
-            std::cerr << "Official SDK bridge failed: " << official.error << "\n";
-            return 1;
-        }
+            // Use provided seed to derive wallet deterministically
+            auto seed_bytes = std::vector<uint8_t>(64, 0);
+            // Convert hex seed to bytes (pad to 64 if needed)
+            for (size_t i = 0; i < std::min(seed_hex.size() / 2, size_t(64)); i++)
+            {
+                auto byte_str = seed_hex.substr(i * 2, 2);
+                seed_bytes[i] = static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16));
+            }
+            auto hd = HDWallet::from_seed(seed_bytes);
+            auto night_key = hd.derive_night(0, 0);
+            auto dust_key = hd.derive_dust(0, 0);
+            auto zswap_key = hd.derive_zswap(0, 0);
 
-        wallet.name = wallet_name;
-        wallet.source = "official-midnight-sdk";
-        wallet.network = "midnight-" + official_network;
-        wallet.public_key = "N/A (managed by official SDK)";
-        wallet.private_key = "";
-        wallet.seed = official.seed_hex.empty() ? "" : ("0x" + official.seed_hex);
-        official_seed_for_transfer = official.seed_hex;
-        wallet.unshield_address = official.unshielded_address;
-        wallet.shielded_address = official.shielded_address;
-        wallet.dust_address = official.dust_address;
-        wallet.dust_registration_requested = official.dust_registration_requested;
-        wallet.dust_registration_attempted = official.dust_registration_attempted;
-        wallet.dust_registration_success = official.dust_registration_success;
-        wallet.dust_registration_message = official.dust_registration_message;
-        wallet.dust_registration_txid = official.dust_registration_txid;
+            wallet.name = wallet_name;
+            wallet.source = "native-hd-wallet";
+            wallet.network = "midnight-" + official_network;
+            wallet.public_key = night_key.address;
+            wallet.private_key = "";
+            wallet.seed = "0x" + seed_hex;
+            wallet.unshield_address = night_key.address;
+            wallet.shielded_address = zswap_key.address;
+            wallet.dust_address = dust_key.address;
+        }
+        else
+        {
+            // Generate fresh mnemonic
+            mnemonic = bip39::generate_mnemonic(24);
+            auto hd = HDWallet::from_mnemonic(mnemonic);
+            auto night_key = hd.derive_night(0, 0);
+            auto dust_key = hd.derive_dust(0, 0);
+            auto zswap_key = hd.derive_zswap(0, 0);
+
+            wallet.name = wallet_name;
+            wallet.source = "native-hd-wallet";
+            wallet.network = "midnight-" + official_network;
+            wallet.public_key = night_key.address;
+            wallet.private_key = "";
+            wallet.seed = "";
+            wallet.unshield_address = night_key.address;
+            wallet.shielded_address = zswap_key.address;
+            wallet.dust_address = dust_key.address;
+        }
 
         auto now = std::time(nullptr);
         auto tm = std::localtime(&now);
@@ -758,35 +776,12 @@ int main(int argc, char *argv[])
         std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm);
         wallet.created = timestamp;
 
-        dust_registration_requested = wallet.dust_registration_requested;
-        dust_registration_attempted = wallet.dust_registration_attempted;
-        dust_registration_success = wallet.dust_registration_success;
-        dust_registration_message = wallet.dust_registration_message;
-        dust_registration_txid = wallet.dust_registration_txid;
-
         if (transfer_requested)
         {
-            if (official_seed_for_transfer.empty())
-            {
-                std::cerr << "Official SDK transfer requires deterministic seed (--seed-hex) or bridge-returned seed\n";
-                return 1;
-            }
-
+            std::cerr << "Native transfer not yet implemented. Use ContractInteractor + ExtrinsicBuilder.\n";
             official_transfer_attempted = true;
-            const auto transfer = midnight::blockchain::transfer_official_night(
-                official_seed_for_transfer,
-                official_transfer_to,
-                official_transfer_amount,
-                official_network,
-                proof_server,
-                sync_timeout_seconds,
-                "tools/official-transfer-night.mjs");
-
-            official_transfer_success = transfer.success;
-            official_transfer_txid = transfer.txid;
-            official_transfer_message = transfer.success
-                                            ? std::string("Transfer submitted")
-                                            : transfer.error;
+            official_transfer_success = false;
+            official_transfer_message = "Not yet implemented in native mode";
         }
     }
     else

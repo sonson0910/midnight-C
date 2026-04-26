@@ -14,7 +14,7 @@ TEST(NetworkConfigTest, FromString_IsCaseInsensitiveForMidnightAliases)
     EXPECT_EQ(NetworkConfig::from_string("MIDNIGHT-MAINNET"), NetworkConfig::Network::MAINNET);
 }
 
-TEST(NetworkConfigTest, FromString_UnknownDefaultsToTestnet)
+TEST(NetworkConfigTest, FromString_UnknownDefaultsToPreview)
 {
-    EXPECT_EQ(NetworkConfig::from_string("unknown-network"), NetworkConfig::Network::TESTNET);
+    EXPECT_EQ(NetworkConfig::from_string("unknown-network"), NetworkConfig::Network::PREVIEW);
 }

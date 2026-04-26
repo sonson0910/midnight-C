@@ -4,6 +4,7 @@
 
 #include "midnight/monitoring-finality/monitoring_finality.hpp"
 #include "midnight/network/network_client.hpp"
+#include "midnight/core/logger.hpp"
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -282,7 +283,7 @@ namespace midnight::monitoring_finality
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error getting block history: " << e.what() << std::endl;
+            g_logger->error(std::string("Error getting block history: ") + e.what());
             return {};
         }
     }
@@ -325,7 +326,7 @@ namespace midnight::monitoring_finality
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error detecting reorg: " << e.what() << std::endl;
+            g_logger->error(std::string("Error detecting reorg: ") + e.what());
             return {};
         }
     }
@@ -617,7 +618,12 @@ namespace midnight::monitoring_finality
     {
         const std::string rpc_url = rpc_url_;
 
-        std::thread([rpc_url, block_height, callback]()
+        // Store thread handle for safe cleanup instead of detaching
+        if (wait_thread_.joinable())
+        {
+            wait_thread_.join();
+        }
+        wait_thread_ = std::thread([rpc_url, block_height, callback]()
                     {
                         for (int i = 0; i < 120; ++i)
                         {
@@ -630,8 +636,7 @@ namespace midnight::monitoring_finality
                             std::this_thread::sleep_for(std::chrono::seconds(2));
                         }
 
-                        callback(false); })
-            .detach();
+                        callback(false); });
     }
 
     uint32_t FinalizationMonitor::get_finalized_block_height()
@@ -645,6 +650,10 @@ namespace midnight::monitoring_finality
         if (monitoring_thread_.joinable())
         {
             monitoring_thread_.join();
+        }
+        if (wait_thread_.joinable())
+        {
+            wait_thread_.join();
         }
     }
 
@@ -837,7 +846,7 @@ namespace midnight::monitoring_finality
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error detecting reorg: " << e.what() << std::endl;
+            g_logger->error(std::string("Error detecting reorg: ") + e.what());
             return {};
         }
     }
@@ -879,7 +888,7 @@ namespace midnight::monitoring_finality
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error getting abandoned blocks: " << e.what() << std::endl;
+            g_logger->error(std::string("Error getting abandoned blocks: ") + e.what());
             return {};
         }
     }

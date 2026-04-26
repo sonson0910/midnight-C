@@ -42,15 +42,18 @@ namespace midnight::zk
             start_time.time_since_epoch());
 
         // Check circuit breaker
-        if (circuit_breaker_state_ == CircuitBreakerState::OPEN)
         {
-            if (!should_attempt_recovery())
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            if (circuit_breaker_state_ == CircuitBreakerState::OPEN)
             {
-                metrics.last_error = "Circuit breaker is OPEN; proof server is unavailable";
-                log_metrics("generate_proof", metrics, false);
-                throw std::runtime_error(metrics.last_error);
+                if (!should_attempt_recovery_unlocked())
+                {
+                    metrics.last_error = "Circuit breaker is OPEN; proof server is unavailable";
+                    log_metrics("generate_proof", metrics, false);
+                    throw std::runtime_error(metrics.last_error);
+                }
+                circuit_breaker_state_ = CircuitBreakerState::HALF_OPEN;
             }
-            circuit_breaker_state_ = CircuitBreakerState::HALF_OPEN;
         }
 
         ProofResult result;
@@ -120,14 +123,17 @@ namespace midnight::zk
         auto start_time = std::chrono::high_resolution_clock::now();
 
         // Check circuit breaker
-        if (circuit_breaker_state_ == CircuitBreakerState::OPEN)
         {
-            if (!should_attempt_recovery())
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            if (circuit_breaker_state_ == CircuitBreakerState::OPEN)
             {
-                metrics.last_error = "Circuit breaker is OPEN";
-                return false;
+                if (!should_attempt_recovery_unlocked())
+                {
+                    metrics.last_error = "Circuit breaker is OPEN";
+                    return false;
+                }
+                circuit_breaker_state_ = CircuitBreakerState::HALF_OPEN;
             }
-            circuit_breaker_state_ = CircuitBreakerState::HALF_OPEN;
         }
 
         for (uint32_t attempt = 0; attempt <= config_.max_retries; ++attempt)
@@ -185,13 +191,16 @@ namespace midnight::zk
         auto start_time = std::chrono::high_resolution_clock::now();
 
         // Check circuit breaker
-        if (circuit_breaker_state_ == CircuitBreakerState::OPEN)
         {
-            if (!should_attempt_recovery())
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            if (circuit_breaker_state_ == CircuitBreakerState::OPEN)
             {
-                throw std::runtime_error("Circuit breaker is OPEN");
+                if (!should_attempt_recovery_unlocked())
+                {
+                    throw std::runtime_error("Circuit breaker is OPEN");
+                }
+                circuit_breaker_state_ = CircuitBreakerState::HALF_OPEN;
             }
-            circuit_breaker_state_ = CircuitBreakerState::HALF_OPEN;
         }
 
         for (uint32_t attempt = 0; attempt <= config_.max_retries; ++attempt)
@@ -246,13 +255,16 @@ namespace midnight::zk
         auto start_time = std::chrono::high_resolution_clock::now();
 
         // Check circuit breaker
-        if (circuit_breaker_state_ == CircuitBreakerState::OPEN)
         {
-            if (!should_attempt_recovery())
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            if (circuit_breaker_state_ == CircuitBreakerState::OPEN)
             {
-                throw std::runtime_error("Circuit breaker is OPEN");
+                if (!should_attempt_recovery_unlocked())
+                {
+                    throw std::runtime_error("Circuit breaker is OPEN");
+                }
+                circuit_breaker_state_ = CircuitBreakerState::HALF_OPEN;
             }
-            circuit_breaker_state_ = CircuitBreakerState::HALF_OPEN;
         }
 
         for (uint32_t attempt = 0; attempt <= config_.max_retries; ++attempt)
@@ -311,13 +323,16 @@ namespace midnight::zk
         auto start_time = std::chrono::high_resolution_clock::now();
 
         // Check circuit breaker
-        if (circuit_breaker_state_ == CircuitBreakerState::OPEN)
         {
-            if (!should_attempt_recovery())
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            if (circuit_breaker_state_ == CircuitBreakerState::OPEN)
             {
-                throw std::runtime_error("Circuit breaker is OPEN");
+                if (!should_attempt_recovery_unlocked())
+                {
+                    throw std::runtime_error("Circuit breaker is OPEN");
+                }
+                circuit_breaker_state_ = CircuitBreakerState::HALF_OPEN;
             }
-            circuit_breaker_state_ = CircuitBreakerState::HALF_OPEN;
         }
 
         for (uint32_t attempt = 0; attempt <= config_.max_retries; ++attempt)
@@ -484,16 +499,16 @@ namespace midnight::zk
         json stats;
         stats["circuit_breaker_state"] = static_cast<int>(circuit_breaker_state_);
         stats["consecutive_failures"] = consecutive_failures_;
-        stats["total_operations"] = total_operations_;
-        stats["successful_operations"] = successful_operations_;
-        stats["failure_rate"] = total_operations_ > 0
-                                    ? (static_cast<double>(total_operations_ - successful_operations_) / total_operations_)
+        stats["total_operations"] = total_operations_.load();
+        stats["successful_operations"] = successful_operations_.load();
+        stats["failure_rate"] = total_operations_.load() > 0
+                                    ? (static_cast<double>(total_operations_.load() - successful_operations_.load()) / total_operations_.load())
                                     : 0.0;
         stats["average_retries"] = get_average_retries();
         stats["queued_requests"] = request_queue_.size();
 
         // Add timing information
-        if (!last_failure_time_.time_since_epoch().count() == 0)
+        if (last_failure_time_.time_since_epoch().count() != 0)
         {
             auto now = std::chrono::system_clock::now();
             auto seconds_since_failure = std::chrono::duration_cast<std::chrono::seconds>(
@@ -502,7 +517,7 @@ namespace midnight::zk
             stats["seconds_since_last_failure"] = seconds_since_failure;
         }
 
-        if (!last_health_check_.time_since_epoch().count() == 0)
+        if (last_health_check_.time_since_epoch().count() != 0)
         {
             auto now = std::chrono::system_clock::now();
             auto seconds_since_health_check = std::chrono::duration_cast<std::chrono::seconds>(
@@ -543,12 +558,13 @@ namespace midnight::zk
             }
         }
 
-        const_cast<ProofServerResilientClient *>(this)->total_retries_++;
+        total_retries_++;
         return std::chrono::milliseconds(static_cast<int64_t>(backoff_ms));
     }
 
     void ProofServerResilientClient::update_circuit_breaker(bool success)
     {
+        std::lock_guard<std::mutex> lock(state_mutex_);
         if (success)
         {
             if (circuit_breaker_state_ == CircuitBreakerState::HALF_OPEN)
@@ -569,6 +585,12 @@ namespace midnight::zk
     }
 
     bool ProofServerResilientClient::should_attempt_recovery() const
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        return should_attempt_recovery_unlocked();
+    }
+
+    bool ProofServerResilientClient::should_attempt_recovery_unlocked() const
     {
         if (circuit_breaker_state_ != CircuitBreakerState::OPEN)
         {

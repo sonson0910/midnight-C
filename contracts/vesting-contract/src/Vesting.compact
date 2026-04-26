@@ -2,7 +2,22 @@ pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
 
-// Basic vesting state.
+// ═══════════════════════════════════════════════════════
+// Vesting Contract — Linear Vesting with Lock/Unlock
+// ═══════════════════════════════════════════════════════
+//
+// Features:
+//   - Linear vesting from start → end with cliff
+//   - claim(): beneficiary withdraws vested tokens
+//   - lock(): admin pauses all claims (reversible)
+//   - unlock(): admin resumes claims
+//   - revoke(): admin permanently revokes (irreversible)
+//   - transferAdmin(): admin transfers ownership
+//   - vestedAmount() / releasableAmount(): read-only queries
+//   - getStatus(): full state snapshot
+// ═══════════════════════════════════════════════════════
+
+// ── Ledger State ──
 export ledger admin: UserAddress;
 export ledger beneficiary: UserAddress;
 export ledger startTs: Uint<64>;
@@ -11,7 +26,9 @@ export ledger durationSecs: Uint<64>;
 export ledger totalAmount: Uint<128>;
 export ledger releasedAmount: Uint<128>;
 export ledger revoked: Boolean;
+export ledger locked: Boolean;
 
+// ── Constructor ──
 constructor(
     b: UserAddress,
     s: Uint<64>,
@@ -30,24 +47,32 @@ constructor(
     totalAmount = disclose(t);
     releasedAmount = 0;
     revoked = false;
+    locked = false;
 }
+
+// ── Internal helpers ──
 
 circuit vestingEndTs(): Uint<64> {
     return (startTs + durationSecs) as Uint<64>;
 }
 
 circuit vestedInternal(nowTs: Uint<64>): Uint<128> {
+    // Before cliff: nothing vested
     if (nowTs < cliffTs) {
         return 0;
     }
 
-    // Compile-safe baseline schedule:
-    // funds unlock only after full vesting duration has elapsed.
-    if (nowTs < vestingEndTs()) {
-        return 0;
+    // After full vesting period: everything vested
+    if (nowTs >= vestingEndTs()) {
+        return totalAmount;
     }
 
-    return totalAmount;
+    // Linear vesting between start and end:
+    //   vested = totalAmount * (nowTs - startTs) / durationSecs
+    // Use Uint<128> intermediates to prevent overflow.
+    const elapsed = (nowTs - startTs) as Uint<128>;
+    const duration = durationSecs as Uint<128>;
+    return ((totalAmount * elapsed) / duration) as Uint<128>;
 }
 
 circuit releasableInternal(nowTs: Uint<64>): Uint<128> {
@@ -59,6 +84,8 @@ circuit releasableInternal(nowTs: Uint<64>): Uint<128> {
     return vested - releasedAmount;
 }
 
+// ── Read-only queries ──
+
 export circuit vestedAmount(nowTs: Uint<64>): Uint<128> {
     return vestedInternal(disclose(nowTs));
 }
@@ -67,8 +94,11 @@ export circuit releasableAmount(nowTs: Uint<64>): Uint<128> {
     return releasableInternal(disclose(nowTs));
 }
 
+// ── Beneficiary actions ──
+
 export circuit claim(nowTs: Uint<64>, amount: Uint<128>, caller: UserAddress): [] {
     assert(revoked == false, "Vesting revoked");
+    assert(locked == false, "Vesting is locked");
     assert(disclose(caller) == beneficiary, "Only beneficiary can claim");
 
     const releasable = releasableInternal(disclose(nowTs));
@@ -77,7 +107,31 @@ export circuit claim(nowTs: Uint<64>, amount: Uint<128>, caller: UserAddress): [
     releasedAmount = (releasedAmount + disclose(amount)) as Uint<128>;
 }
 
+// ── Admin actions ──
+
+// Lock: temporarily pause all claims (reversible)
+export circuit lock(caller: UserAddress): [] {
+    assert(disclose(caller) == admin, "Only admin can lock");
+    assert(revoked == false, "Cannot lock: already revoked");
+    locked = true;
+}
+
+// Unlock: resume claims after a lock
+export circuit unlock(caller: UserAddress): [] {
+    assert(disclose(caller) == admin, "Only admin can unlock");
+    assert(revoked == false, "Cannot unlock: permanently revoked");
+    locked = false;
+}
+
+// Revoke: permanently stop vesting (irreversible)
 export circuit revoke(caller: UserAddress): [] {
     assert(disclose(caller) == admin, "Only admin can revoke");
     revoked = true;
+    locked = true;
+}
+
+// Transfer admin rights to a new address
+export circuit transferAdmin(newAdmin: UserAddress, caller: UserAddress): [] {
+    assert(disclose(caller) == admin, "Only admin can transfer admin");
+    admin = disclose(newAdmin);
 }

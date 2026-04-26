@@ -5,6 +5,8 @@
 #include "midnight/signing-submission/signing_submission.hpp"
 #include "midnight/network/network_client.hpp"
 #include "midnight/crypto/ed25519_signer.hpp"
+#include "midnight/core/logger.hpp"
+#include "midnight/core/common_utils.hpp"
 #include <iostream>
 #include <algorithm>
 #include <thread>
@@ -16,6 +18,9 @@
 #include <cctype>
 #include <array>
 #include <functional>
+#include <cstring>
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
 
 namespace midnight::signing_submission
 {
@@ -59,48 +64,10 @@ namespace midnight::signing_submission
             return out;
         }
 
-        std::string strip_hex_prefix(const std::string &value)
-        {
-            if (value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0)
-            {
-                return value.substr(2);
-            }
-            return value;
-        }
-
-        bool is_hex_string(const std::string &value)
-        {
-            if (value.empty() || (value.size() % 2) != 0)
-            {
-                return false;
-            }
-
-            for (char c : value)
-            {
-                if (!std::isxdigit(static_cast<unsigned char>(c)))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        int hex_nibble(char c)
-        {
-            if (c >= '0' && c <= '9')
-            {
-                return c - '0';
-            }
-
-            const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (lower >= 'a' && lower <= 'f')
-            {
-                return 10 + (lower - 'a');
-            }
-
-            return -1;
-        }
+        // Import shared hex utilities from common_utils.hpp
+        using midnight::util::strip_hex_prefix;
+        using midnight::util::is_hex_string;
+        using midnight::util::hex_nibble;
 
         bool hex_to_fixed_bytes(const std::string &hex_input, uint8_t *out, size_t out_size)
         {
@@ -135,25 +102,43 @@ namespace midnight::signing_submission
         std::string deterministic_fallback_signature(const std::vector<uint8_t> &message,
                                                      const std::string &material)
         {
-            // Keep offline/dev workflows deterministic even when libsodium is unavailable.
-            std::string accumulator = material;
-            accumulator.append(reinterpret_cast<const char *>(message.data()), message.size());
+            // SECURITY: Fallback signatures are NOT cryptographically secure.
+            // In production builds, this should never be called — libsodium must be available.
+            // We log a loud warning and return a clearly-marked invalid signature.
+            static bool warned = false;
+            if (!warned)
+            {
+                std::cerr << "[SECURITY WARNING] deterministic_fallback_signature() called — "
+                          << "libsodium is NOT available. Signatures are NOT cryptographically valid. "
+                          << "DO NOT use this build in production!" << std::endl;
+                warned = true;
+            }
+
+            // Use HMAC-SHA256 (via OpenSSL, already a dependency) for determinism
+            // This is NOT a real Ed25519 signature, but at least uses a real MAC.
+            std::string key_material = material;
+            key_material.append(reinterpret_cast<const char *>(message.data()), message.size());
+
+            unsigned char hmac_out[EVP_MAX_MD_SIZE];
+            unsigned int hmac_len = 0;
+            HMAC(EVP_sha256(),
+                 key_material.data(), static_cast<int>(key_material.size()),
+                 message.data(), message.size(),
+                 hmac_out, &hmac_len);
 
             std::string hex;
             hex.reserve(128);
-            std::hash<std::string> hasher;
-
-            for (size_t i = 0; i < 4; ++i)
+            for (unsigned int i = 0; i < hmac_len && hex.size() < 128; ++i)
             {
-                const uint64_t h = static_cast<uint64_t>(hasher(accumulator + "#" + std::to_string(i)));
                 std::ostringstream chunk;
-                chunk << std::hex << std::setw(16) << std::setfill('0') << h;
+                chunk << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hmac_out[i]);
                 hex += chunk.str();
             }
 
-            if (hex.size() < 128)
+            // Pad to 128 hex chars (64 bytes = Ed25519 signature size)
+            while (hex.size() < 128)
             {
-                hex.append(128 - hex.size(), '0');
+                hex += "00";
             }
 
             return "0x" + hex.substr(0, 128);
@@ -163,16 +148,20 @@ namespace midnight::signing_submission
             const std::string &seed_phrase)
         {
             std::array<uint8_t, midnight::crypto::Ed25519Signer::SECRET_SEED_SIZE> seed{};
-            std::hash<std::string> hasher;
 
-            for (size_t i = 0; i < seed.size(); i += 8)
-            {
-                const uint64_t h = static_cast<uint64_t>(hasher(seed_phrase + "#" + std::to_string(i / 8)));
-                for (size_t j = 0; j < 8 && (i + j) < seed.size(); ++j)
-                {
-                    seed[i + j] = static_cast<uint8_t>((h >> (j * 8)) & 0xFF);
-                }
-            }
+            // Use HMAC-SHA256 for cryptographically sound key derivation
+            // (replaces non-cryptographic std::hash)
+            const std::string key = "midnight-seed-derivation";
+            unsigned char hmac_out[EVP_MAX_MD_SIZE];
+            unsigned int hmac_len = 0;
+            HMAC(EVP_sha256(),
+                 key.data(), static_cast<int>(key.size()),
+                 reinterpret_cast<const unsigned char *>(seed_phrase.data()),
+                 seed_phrase.size(),
+                 hmac_out, &hmac_len);
+
+            const size_t copy_len = std::min(static_cast<size_t>(hmac_len), seed.size());
+            std::memcpy(seed.data(), hmac_out, copy_len);
 
             return seed;
         }
@@ -228,7 +217,7 @@ namespace midnight::signing_submission
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error generating sr25519 key: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error generating sr25519 key: ") + e.what());
             return make_sr25519_fallback_keypair();
         }
     }
@@ -252,7 +241,7 @@ namespace midnight::signing_submission
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error generating ed25519 key: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error generating ed25519 key: ") + e.what());
             return make_ed25519_fallback_keypair();
         }
     }
@@ -269,7 +258,7 @@ namespace midnight::signing_submission
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error generating ECDSA key: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error generating ECDSA key: ") + e.what());
             return {};
         }
     }
@@ -288,7 +277,7 @@ namespace midnight::signing_submission
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error loading key: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error loading key: ") + e.what());
             return {};
         }
     }
@@ -304,7 +293,7 @@ namespace midnight::signing_submission
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error saving key: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error saving key: ") + e.what());
             return false;
         }
     }
@@ -357,7 +346,7 @@ namespace midnight::signing_submission
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error importing from seed: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error importing from seed: ") + e.what());
             return (type == KeyType::SR25519)
                        ? generate_sr25519_key()
                        : generate_ed25519_key();
@@ -582,6 +571,14 @@ namespace midnight::signing_submission
         transport_mode_ = mode;
     }
 
+    TransactionSubmitter::~TransactionSubmitter()
+    {
+        if (wait_thread_.joinable())
+        {
+            wait_thread_.join();
+        }
+    }
+
     void TransactionSubmitter::set_transport_mode(SubmissionTransportMode mode)
     {
         transport_mode_ = mode;
@@ -666,7 +663,13 @@ namespace midnight::signing_submission
         std::function<void(const SubmissionResult &)> callback)
     {
 
-        std::thread([this, tx_hash, callback]()
+        // Join any previous wait thread before starting a new one
+        if (wait_thread_.joinable())
+        {
+            wait_thread_.join();
+        }
+
+        wait_thread_ = std::thread([this, tx_hash, callback]()
                     {
         for (int i = 0; i < 60; ++i) { // Wait up to 60 seconds
             auto status = get_submission_status(tx_hash);
@@ -683,8 +686,7 @@ namespace midnight::signing_submission
         SubmissionResult timeout_result;
         timeout_result.status = SubmissionStatus::FAILED;
         timeout_result.error_message = "Timeout waiting for inclusion";
-        callback(timeout_result); })
-            .detach();
+        callback(timeout_result); });
     }
 
     Json::Value TransactionSubmitter::rpc_submit_extrinsic(const SignedTransaction &signed_tx)
@@ -758,6 +760,15 @@ namespace midnight::signing_submission
     {
     }
 
+    MempoolMonitor::~MempoolMonitor()
+    {
+        monitoring_.store(false);
+        if (monitor_thread_.joinable())
+        {
+            monitor_thread_.join();
+        }
+    }
+
     uint32_t MempoolMonitor::get_mempool_size()
     {
         try
@@ -773,7 +784,7 @@ namespace midnight::signing_submission
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error getting mempool size: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error getting mempool size: ") + e.what());
             return 0;
         }
     }
@@ -803,7 +814,7 @@ namespace midnight::signing_submission
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error getting mempool transaction: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error getting mempool transaction: ") + e.what());
             return {};
         }
     }
@@ -829,7 +840,15 @@ namespace midnight::signing_submission
 
         monitoring_ = true;
 
-        std::thread([this, callback]()
+        // Join previous monitoring thread if still running
+        if (monitor_thread_.joinable())
+        {
+            monitoring_ = false;
+            monitor_thread_.join();
+            monitoring_ = true;
+        }
+
+        monitor_thread_ = std::thread([this, callback]()
                     {
         std::vector<std::string> last_txs;
 
@@ -857,8 +876,7 @@ namespace midnight::signing_submission
 
             last_txs = current_txs;
             std::this_thread::sleep_for(std::chrono::seconds(6)); // Check every block
-        } })
-            .detach();
+        } });
     }
 
     uint32_t MempoolMonitor::estimate_inclusion_blocks(uint64_t fee_amount)

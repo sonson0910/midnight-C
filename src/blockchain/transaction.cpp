@@ -1,5 +1,6 @@
 #include "midnight/blockchain/transaction.hpp"
 #include "midnight/core/logger.hpp"
+#include "midnight/core/common_utils.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cctype>
@@ -20,32 +21,9 @@ namespace midnight::blockchain
 {
     namespace
     {
-        std::string bytes_to_hex(const std::vector<uint8_t> &bytes)
-        {
-            std::ostringstream out;
-            out << std::hex << std::setfill('0');
-            for (uint8_t byte : bytes)
-            {
-                out << std::setw(2) << static_cast<int>(byte);
-            }
-            return out.str();
-        }
-
-        int hex_nibble(char c)
-        {
-            if (c >= '0' && c <= '9')
-            {
-                return c - '0';
-            }
-
-            const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (lower >= 'a' && lower <= 'f')
-            {
-                return 10 + (lower - 'a');
-            }
-
-            return -1;
-        }
+        // Import shared utilities from common_utils.hpp
+        using midnight::util::bytes_to_hex;
+        using midnight::util::hex_nibble;
 
         std::vector<uint8_t> hex_to_bytes(std::string hex)
         {

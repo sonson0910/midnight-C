@@ -9,11 +9,12 @@ namespace midnight
 {
 
     /**
-     * Official Network Configuration (v2)
-     * Based on: docs.midnight.network (Apr 14, 2026)
+     * Official Network Configuration (v4 API)
+     * Based on: docs.midnight.network (Apr 25, 2026)
      *
      * This file contains all official network parameters for Midnight,
-     * covering consensus, cryptography, privacy, and tokenomics
+     * covering consensus, cryptography, privacy, and tokenomics.
+     * Indexer endpoints now use /api/v4/graphql.
      */
 
     /**
@@ -64,10 +65,10 @@ namespace midnight
         }
 
         static constexpr const char *INDEXER_GRAPHQL_URL =
-            "https://indexer.preprod.midnight.network/api/v3/graphql";
+            "https://indexer.preprod.midnight.network/api/v4/graphql";
 
         static constexpr const char *INDEXER_GRAPHQL_WS =
-            "wss://indexer.preprod.midnight.network/api/v3/graphql/ws";
+            "wss://indexer.preprod.midnight.network/api/v4/graphql/ws";
 
         // === FAUCET (Official) ===
         static constexpr const char *FAUCET_URL = "https://faucet.preprod.midnight.network/";
@@ -78,6 +79,37 @@ namespace midnight
 
         static constexpr const char *NETWORK_NAME = "preprod";
         static constexpr const char *NETWORK_ID = "midnight-preprod-1";
+        static constexpr bool IS_TESTNET = true;
+    };
+
+    /**
+     * Preview (Testnet) Configuration
+     * Official preview endpoints — recommended for development
+     */
+    struct PreviewConfig
+    {
+        static constexpr const char *NODE_RPC_PROTOCOL = "https";
+        static constexpr const char *NODE_RPC_HOST = "rpc.preview.midnight.network";
+        static constexpr uint16_t NODE_RPC_PORT = 443;
+
+        static std::string get_node_rpc_endpoint()
+        {
+            return std::string(NODE_RPC_PROTOCOL) + "://" + NODE_RPC_HOST;
+        }
+
+        static constexpr const char *INDEXER_GRAPHQL_URL =
+            "https://indexer.preview.midnight.network/api/v4/graphql";
+
+        static constexpr const char *INDEXER_GRAPHQL_WS =
+            "wss://indexer.preview.midnight.network/api/v4/graphql/ws";
+
+        static constexpr const char *FAUCET_URL = "https://faucet.preview.midnight.network/";
+        static constexpr const char *FAUCET_TOKEN = "tNIGHT";
+
+        static constexpr const char *EXPLORER_URL = "https://explorer.preview.midnight.network/";
+
+        static constexpr const char *NETWORK_NAME = "preview";
+        static constexpr const char *NETWORK_ID = "midnight-preview";
         static constexpr bool IS_TESTNET = true;
     };
 
@@ -123,6 +155,7 @@ namespace midnight
 
     // Convenience functions
     inline PreprodConfig get_preprod_config() { return PreprodConfig(); }
+    inline PreviewConfig get_preview_config() { return PreviewConfig(); }
     inline NetworkConfig get_network_config() { return NetworkConfig(); }
     inline ProtocolParams get_default_protocol_params() { return ProtocolParams(); }
 

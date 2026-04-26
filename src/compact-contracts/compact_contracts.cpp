@@ -4,6 +4,9 @@
 
 #include "midnight/compact-contracts/compact_contracts.hpp"
 #include "midnight/network/network_client.hpp"
+#include "midnight/core/logger.hpp"
+#include "midnight/core/common_utils.hpp"
+#include "midnight/core/json_bridge_utils.hpp"
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -22,102 +25,11 @@
 
 namespace
 {
-    std::string quote_shell_arg(const std::string &value)
-    {
-#ifdef _WIN32
-        std::string escaped;
-        escaped.reserve(value.size() + 2);
-        escaped.push_back('"');
-        for (char ch : value)
-        {
-            if (ch == '"')
-            {
-                escaped += "\\\"";
-            }
-            else
-            {
-                escaped.push_back(ch);
-            }
-        }
-        escaped.push_back('"');
-        return escaped;
-#else
-        std::string escaped = "'";
-        for (char ch : value)
-        {
-            if (ch == '\'')
-            {
-                escaped += "'\\''";
-            }
-            else
-            {
-                escaped.push_back(ch);
-            }
-        }
-        escaped.push_back('\'');
-        return escaped;
-#endif
-    }
-
-    std::string run_command_capture(const std::string &command, int &exit_code)
-    {
-        std::string output;
-
-#ifdef _WIN32
-        FILE *pipe = _popen(command.c_str(), "r");
-#else
-        FILE *pipe = popen(command.c_str(), "r");
-#endif
-        if (pipe == nullptr)
-        {
-            exit_code = -1;
-            return output;
-        }
-
-        std::array<char, 512> buffer{};
-        while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr)
-        {
-            output += buffer.data();
-        }
-
-#ifdef _WIN32
-        exit_code = _pclose(pipe);
-#else
-        int status = pclose(pipe);
-        if (WIFEXITED(status))
-        {
-            exit_code = WEXITSTATUS(status);
-        }
-        else
-        {
-            exit_code = status;
-        }
-#endif
-
-        return output;
-    }
-
-    std::string extract_json_payload(const std::string &raw_output)
-    {
-        const auto first = raw_output.find('{');
-        const auto last = raw_output.rfind('}');
-        if (first == std::string::npos || last == std::string::npos || first > last)
-        {
-            return raw_output;
-        }
-        return raw_output.substr(first, last - first + 1);
-    }
-
-    std::string to_lower_copy(std::string value)
-    {
-        std::transform(
-            value.begin(),
-            value.end(),
-            value.begin(),
-            [](unsigned char ch)
-            { return static_cast<char>(std::tolower(ch)); });
-        return value;
-    }
+    // Import shared utilities from common_utils.hpp
+    using midnight::util::quote_shell_arg;
+    using midnight::util::run_command_capture;
+    using midnight::util::extract_json_payload;
+    using midnight::util::to_lower_copy;
 
     std::string normalized_contract_key(std::string contract_name)
     {
@@ -132,18 +44,8 @@ namespace
         return contract_name;
     }
 
-    Json::Value nlohmann_to_jsoncpp(const nlohmann::json &input)
-    {
-        Json::CharReaderBuilder builder;
-        Json::Value parsed;
-        std::string errors;
-        std::istringstream stream(input.dump());
-        if (!Json::parseFromStream(builder, stream, &parsed, &errors))
-        {
-            throw std::runtime_error("Failed to parse indexer response: " + errors);
-        }
-        return parsed;
-    }
+    // Import shared JSON bridge from json_bridge_utils.hpp
+    using midnight::util::nlohmann_to_jsoncpp;
 
     bool is_hex_prefixed_string(const std::string &value, size_t min_hex_chars)
     {
@@ -167,15 +69,15 @@ namespace
     {
         if (rpc_url.find("preprod") != std::string::npos)
         {
-            return "https://indexer.preprod.midnight.network/api/v3/graphql";
+            return "https://indexer.preprod.midnight.network/api/v4/graphql";
         }
         if (rpc_url.find("preview") != std::string::npos)
         {
-            return "https://indexer.preview.midnight.network/api/v3/graphql";
+            return "https://indexer.preview.midnight.network/api/v4/graphql";
         }
         if (rpc_url.find("127.0.0.1") != std::string::npos || rpc_url.find("localhost") != std::string::npos)
         {
-            return "http://127.0.0.1:8088/api/v3/graphql";
+            return "http://127.0.0.1:8088/api/v4/graphql";
         }
 
         return "";
@@ -239,7 +141,7 @@ namespace midnight::compact_contracts
             std::istringstream iss(abi_json);
             if (!Json::parseFromStream(builder, iss, &root, &errs))
             {
-                std::cerr << "JSON parse error: " << errs << std::endl;
+                midnight::g_logger->error(std::string("JSON parse error: ") + errs);
                 return {};
             }
 
@@ -306,7 +208,7 @@ namespace midnight::compact_contracts
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error loading ABI: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error loading ABI: ") + e.what());
             return {};
         }
     }
@@ -349,7 +251,7 @@ namespace midnight::compact_contracts
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error loading compiled contract: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error loading compiled contract: ") + e.what());
             return {};
         }
     }
@@ -418,7 +320,7 @@ namespace midnight::compact_contracts
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error querying public state: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error querying public state: ") + e.what());
             return {};
         }
     }
@@ -490,7 +392,7 @@ namespace midnight::compact_contracts
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error querying all public state: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error querying all public state: ") + e.what());
             return {};
         }
     }
@@ -505,7 +407,7 @@ namespace midnight::compact_contracts
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error querying contract ABI: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error querying contract ABI: ") + e.what());
             return {};
         }
     }
@@ -571,7 +473,7 @@ namespace midnight::compact_contracts
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error querying deployment info: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error querying deployment info: ") + e.what());
             return {};
         }
     }
@@ -832,7 +734,7 @@ namespace midnight::compact_contracts
 
             if (normalized_contract_key(contract_name).empty())
             {
-                std::cerr << "Contract deploy bridge received an empty/invalid contract name" << std::endl;
+                midnight::g_logger->error("Contract deploy bridge received an empty/invalid contract name");
                 return {};
             }
 
@@ -1000,7 +902,7 @@ namespace midnight::compact_contracts
             const std::string raw_output = run_command_capture(command.str(), exit_code);
             if (raw_output.empty())
             {
-                std::cerr << "Deploy bridge produced no output" << std::endl;
+                midnight::g_logger->error("Deploy bridge produced no output");
                 return {};
             }
 
@@ -1010,8 +912,8 @@ namespace midnight::compact_contracts
             std::istringstream payload_stream(extract_json_payload(raw_output));
             if (!Json::parseFromStream(reader_builder, payload_stream, &root, &parse_errors))
             {
-                std::cerr << "Deploy bridge returned non-JSON output: " << parse_errors
-                          << ". Raw output: " << raw_output << std::endl;
+                midnight::g_logger->error("Deploy bridge returned non-JSON output: " + parse_errors
+                          + ". Raw output: " + raw_output);
                 return {};
             }
 
@@ -1028,7 +930,7 @@ namespace midnight::compact_contracts
                     bridge_error += " (exit code " + std::to_string(exit_code) + ")";
                 }
 
-                std::cerr << bridge_error << std::endl;
+                midnight::g_logger->error(bridge_error);
                 return {};
             }
 
@@ -1042,7 +944,7 @@ namespace midnight::compact_contracts
 
             if (contract_address.empty())
             {
-                std::cerr << "Deploy bridge succeeded but no contractAddress was returned" << std::endl;
+                midnight::g_logger->error("Deploy bridge succeeded but no contractAddress was returned");
                 return {};
             }
 
@@ -1050,7 +952,7 @@ namespace midnight::compact_contracts
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error deploying contract: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error deploying contract: ") + e.what());
             return {};
         }
     }
@@ -1127,7 +1029,7 @@ namespace midnight::compact_contracts
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error getting deployment status: " << e.what() << std::endl;
+            midnight::g_logger->error(std::string("Error getting deployment status: ") + e.what());
             return {};
         }
     }

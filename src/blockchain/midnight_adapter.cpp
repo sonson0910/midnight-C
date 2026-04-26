@@ -1,6 +1,7 @@
 #include "midnight/blockchain/midnight_adapter.hpp"
 #include "midnight/blockchain/transaction.hpp"
 #include "midnight/core/logger.hpp"
+#include "midnight/core/common_utils.hpp"
 #include "midnight/network/midnight_node_rpc.hpp"
 #include "midnight/crypto/ed25519_signer.hpp"
 #include <nlohmann/json.hpp>
@@ -18,122 +19,24 @@ namespace midnight::blockchain
 
     namespace
     {
-        constexpr uint32_t kBech32mConst = 0x2BC830A3;
-        constexpr const char *kBech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+        // Import shared Bech32m utilities from common_utils.hpp
+        using midnight::util::bech32m::kBech32mConst;
+        using midnight::util::bech32m::kBech32Charset;
+        using midnight::util::bech32m::polymod;
+        using midnight::util::bech32m::hrp_expand;
+        using midnight::util::bech32m::convert_bits;
 
-        uint32_t bech32_polymod(const std::vector<uint8_t> &values)
-        {
-            static constexpr uint32_t gen[5] = {0x3B6A57B2, 0x26508E6D, 0x1EA119FA, 0x3D4233DD, 0x2A1462B3};
-            uint32_t chk = 1;
-            for (auto value : values)
-            {
-                const uint32_t top = chk >> 25;
-                chk = ((chk & 0x1FFFFFF) << 5) ^ value;
-                for (int i = 0; i < 5; ++i)
-                {
-                    chk ^= ((top >> i) & 1) ? gen[i] : 0;
-                }
-            }
-            return chk;
-        }
-
-        std::vector<uint8_t> bech32_hrp_expand(const std::string &hrp)
-        {
-            std::vector<uint8_t> ret;
-            ret.reserve(hrp.size() * 2 + 1);
-            for (unsigned char c : hrp)
-            {
-                ret.push_back(c >> 5);
-            }
-            ret.push_back(0);
-            for (unsigned char c : hrp)
-            {
-                ret.push_back(c & 31);
-            }
-            return ret;
-        }
-
-        std::vector<uint8_t> convert_bits(const uint8_t *data, size_t data_len, int from_bits, int to_bits, bool pad)
-        {
-            int acc = 0;
-            int bits = 0;
-            const int maxv = (1 << to_bits) - 1;
-            const int max_acc = (1 << (from_bits + to_bits - 1)) - 1;
-            std::vector<uint8_t> ret;
-            ret.reserve((data_len * from_bits + to_bits - 1) / to_bits);
-
-            for (size_t i = 0; i < data_len; ++i)
-            {
-                const int value = data[i];
-                acc = ((acc << from_bits) | value) & max_acc;
-                bits += from_bits;
-                while (bits >= to_bits)
-                {
-                    bits -= to_bits;
-                    ret.push_back((acc >> bits) & maxv);
-                }
-            }
-
-            if (pad)
-            {
-                if (bits != 0)
-                {
-                    ret.push_back(static_cast<uint8_t>((acc << (to_bits - bits)) & maxv));
-                }
-            }
-            else if (bits >= from_bits || ((acc << (to_bits - bits)) & maxv) != 0)
-            {
-                return {};
-            }
-
-            return ret;
-        }
+        // Alias to match the old call-sites
+        auto bech32_polymod = polymod;
+        auto bech32_hrp_expand = hrp_expand;
 
         std::string bech32m_encode(const std::string &hrp, const std::array<uint8_t, 32> &payload)
         {
-            std::vector<uint8_t> data;
-            auto converted = convert_bits(payload.data(), payload.size(), 8, 5, true);
-            data.insert(data.end(), converted.begin(), converted.end());
-
-            auto values = bech32_hrp_expand(hrp);
-            values.insert(values.end(), data.begin(), data.end());
-            values.insert(values.end(), 6, 0);
-            const uint32_t polymod = bech32_polymod(values) ^ kBech32mConst;
-
-            std::array<uint8_t, 6> checksum{};
-            for (int i = 0; i < 6; ++i)
-            {
-                checksum[i] = (polymod >> (5 * (5 - i))) & 31;
-            }
-
-            std::string out = hrp + "1";
-            out.reserve(hrp.size() + 1 + data.size() + checksum.size());
-            for (auto v : data)
-            {
-                out.push_back(kBech32Charset[v]);
-            }
-            for (auto v : checksum)
-            {
-                out.push_back(kBech32Charset[v]);
-            }
-            return out;
+            return midnight::util::bech32m::encode(hrp, payload);
         }
 
-        int hex_nibble(char c)
-        {
-            if (c >= '0' && c <= '9')
-            {
-                return c - '0';
-            }
-
-            const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (lower >= 'a' && lower <= 'f')
-            {
-                return 10 + (lower - 'a');
-            }
-
-            return -1;
-        }
+        // Import shared hex_nibble from common_utils.hpp
+        using midnight::util::hex_nibble;
 
         bool hex_to_fixed_bytes(const std::string &hex_input, uint8_t *out, size_t out_size)
         {
@@ -244,14 +147,7 @@ namespace midnight::blockchain
             return bech32_polymod(values) == kBech32mConst;
         }
 
-        std::string strip_hex_prefix(std::string value)
-        {
-            if (value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0)
-            {
-                return value.substr(2);
-            }
-            return value;
-        }
+        using midnight::util::strip_hex_prefix;
 
         std::string extract_submission_payload(const std::string &signed_tx)
         {

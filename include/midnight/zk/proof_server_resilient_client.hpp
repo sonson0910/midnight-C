@@ -6,6 +6,8 @@
 #include <queue>
 #include <memory>
 #include <optional>
+#include <mutex>
+#include <atomic>
 
 namespace midnight::zk
 {
@@ -247,15 +249,19 @@ namespace midnight::zk
 
         std::shared_ptr<ProofServerClient> client_; ///< Underlying proof server client
         ResilienceConfig config_;                   ///< Current resilience configuration
+
+        // Thread safety: mutex protects circuit breaker state transitions
+        mutable std::mutex state_mutex_;
+
         CircuitBreakerState circuit_breaker_state_{CircuitBreakerState::CLOSED};
         uint32_t consecutive_failures_ = 0;                       ///< Current failure count
         std::chrono::system_clock::time_point last_failure_time_; ///< When last failure occurred
         std::chrono::system_clock::time_point last_health_check_; ///< When last health check was performed
 
-        // Statistics tracking
-        uint64_t total_operations_ = 0;      ///< Total operations attempted
-        uint64_t successful_operations_ = 0; ///< Total successful operations
-        uint64_t total_retries_ = 0;         ///< Total retries performed
+        // Statistics tracking — atomic for lock-free reads from monitoring threads
+        std::atomic<uint64_t> total_operations_{0};      ///< Total operations attempted
+        std::atomic<uint64_t> successful_operations_{0}; ///< Total successful operations
+        mutable std::atomic<uint64_t> total_retries_{0};         ///< Total retries performed
 
         // Request queuing
         std::queue<QueuedRequest> request_queue_; ///< Queue for requests during transient failures
@@ -280,6 +286,13 @@ namespace midnight::zk
          * @return true if should attempt recovery
          */
         bool should_attempt_recovery() const;
+
+        /**
+         * @brief Unlocked variant for use inside already-locked critical sections
+         * @note Caller MUST hold state_mutex_ before calling
+         */
+        bool should_attempt_recovery_unlocked() const;
+
 
         /**
          * @brief Attempt to drain queued requests

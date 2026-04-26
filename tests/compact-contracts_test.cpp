@@ -66,7 +66,7 @@ protected:
         ]
     })";
 
-    std::string indexer_url = "https://indexer.preprod.midnight.network/api/v3/graphql";
+    std::string indexer_url = "https://indexer.preprod.midnight.network/api/v4/graphql";
     std::string node_rpc_url = "wss://rpc.preprod.midnight.network";
     std::string placeholder_contract_address = "0x0000000000000000000000000000000000000000";
     std::string placeholder_tx_hash = "0x0000000000000000000000000000000000000000000000000000000000000000";

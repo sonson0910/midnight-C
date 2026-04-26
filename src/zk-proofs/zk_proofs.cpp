@@ -4,6 +4,8 @@
 
 #include "midnight/zk-proofs/zk_proofs.hpp"
 #include "midnight/network/network_client.hpp"
+#include "midnight/core/common_utils.hpp"
+#include "midnight/core/json_bridge_utils.hpp"
 #include <iostream>
 #include <algorithm>
 #include <thread>
@@ -12,38 +14,15 @@
 #include <sstream>
 #include <cctype>
 #include <stdexcept>
+#include <mutex>
 
 namespace
 {
     using NJson = nlohmann::json;
     constexpr uint32_t kProofServerTimeoutMs = 30000;
 
-    std::string strip_hex_prefix(const std::string &value)
-    {
-        if (value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0)
-        {
-            return value.substr(2);
-        }
-        return value;
-    }
-
-    bool is_hex_string(const std::string &value)
-    {
-        if (value.empty())
-        {
-            return false;
-        }
-
-        for (char c : value)
-        {
-            if (!std::isxdigit(static_cast<unsigned char>(c)))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    using midnight::util::strip_hex_prefix;
+    using midnight::util::is_hex_string;
 
     std::vector<uint8_t> decode_hex_or_ascii(const std::string &value)
     {
@@ -63,39 +42,12 @@ namespace
         return std::vector<uint8_t>(value.begin(), value.end());
     }
 
-    std::string bytes_to_hex(const std::vector<uint8_t> &bytes)
-    {
-        static const char *kHex = "0123456789abcdef";
-        std::string encoded;
-        encoded.reserve(bytes.size() * 2);
-        for (uint8_t byte : bytes)
-        {
-            encoded.push_back(kHex[(byte >> 4) & 0x0F]);
-            encoded.push_back(kHex[byte & 0x0F]);
-        }
-        return encoded;
-    }
+    // Import shared bytes_to_hex from common_utils.hpp
+    using midnight::util::bytes_to_hex;
 
-    Json::Value nlohmann_to_jsoncpp(const NJson &input)
-    {
-        Json::CharReaderBuilder builder;
-        Json::Value parsed;
-        std::string errors;
-        std::istringstream stream(input.dump());
-        if (!Json::parseFromStream(builder, stream, &parsed, &errors))
-        {
-            throw std::runtime_error("Failed to convert JSON response: " + errors);
-        }
-        return parsed;
-    }
-
-    NJson jsoncpp_to_nlohmann(const Json::Value &input)
-    {
-        Json::StreamWriterBuilder writer;
-        writer["indentation"] = "";
-        const std::string serialized = Json::writeString(writer, input);
-        return NJson::parse(serialized.empty() ? "{}" : serialized, nullptr, false);
-    }
+    // Import shared JSON bridge from json_bridge_utils.hpp
+    using midnight::util::nlohmann_to_jsoncpp;
+    using midnight::util::jsoncpp_to_nlohmann;
 
     std::optional<std::string> extract_proof_hex(const NJson &node)
     {
@@ -690,6 +642,7 @@ namespace midnight::zk_proofs
     // ============================================================================
 
     std::map<std::string, std::pair<ZkProof, uint64_t>> ProofCache::cache_;
+    std::mutex ProofCache::cache_mutex_;
 
     void ProofCache::cache_proof(const std::string &circuit_id,
                                  const std::vector<std::string> &public_inputs,
@@ -701,6 +654,7 @@ namespace midnight::zk_proofs
             cache_key += ":" + input;
         }
 
+        std::lock_guard<std::mutex> lock(cache_mutex_);
         cache_[cache_key] = {proof, std::time(nullptr)};
     }
 
@@ -715,6 +669,7 @@ namespace midnight::zk_proofs
             cache_key += ":" + input;
         }
 
+        std::lock_guard<std::mutex> lock(cache_mutex_);
         auto it = cache_.find(cache_key);
         if (it == cache_.end())
         {
@@ -734,11 +689,13 @@ namespace midnight::zk_proofs
 
     void ProofCache::clear()
     {
+        std::lock_guard<std::mutex> lock(cache_mutex_);
         cache_.clear();
     }
 
     size_t ProofCache::cache_size()
     {
+        std::lock_guard<std::mutex> lock(cache_mutex_);
         return cache_.size();
     }
 
@@ -748,19 +705,23 @@ namespace midnight::zk_proofs
 
     std::vector<uint64_t> ProofPerformanceMonitor::generation_times_;
     std::vector<uint64_t> ProofPerformanceMonitor::verification_times_;
+    std::mutex ProofPerformanceMonitor::perf_mutex_;
 
     void ProofPerformanceMonitor::record_generation_time(uint64_t time_ms)
     {
+        std::lock_guard<std::mutex> lock(perf_mutex_);
         generation_times_.push_back(time_ms);
     }
 
     void ProofPerformanceMonitor::record_verification_time(uint64_t time_ms)
     {
+        std::lock_guard<std::mutex> lock(perf_mutex_);
         verification_times_.push_back(time_ms);
     }
 
     uint64_t ProofPerformanceMonitor::get_avg_generation_time()
     {
+        std::lock_guard<std::mutex> lock(perf_mutex_);
         if (generation_times_.empty())
         {
             return 0;
@@ -777,6 +738,7 @@ namespace midnight::zk_proofs
 
     uint64_t ProofPerformanceMonitor::get_avg_verification_time()
     {
+        std::lock_guard<std::mutex> lock(perf_mutex_);
         if (verification_times_.empty())
         {
             return 0;
@@ -793,9 +755,33 @@ namespace midnight::zk_proofs
 
     ProofPerformanceMonitor::PerfStats ProofPerformanceMonitor::get_stats()
     {
+        std::lock_guard<std::mutex> lock(perf_mutex_);
         PerfStats stats;
-        stats.avg_generation_ms = get_avg_generation_time();
-        stats.avg_verification_ms = get_avg_verification_time();
+
+        // Inline avg computation to avoid deadlock (don't call
+        // get_avg_generation_time / get_avg_verification_time which also lock)
+        if (!generation_times_.empty())
+        {
+            uint64_t sum = 0;
+            for (auto t : generation_times_) sum += t;
+            stats.avg_generation_ms = sum / generation_times_.size();
+        }
+        else
+        {
+            stats.avg_generation_ms = 0;
+        }
+
+        if (!verification_times_.empty())
+        {
+            uint64_t sum = 0;
+            for (auto t : verification_times_) sum += t;
+            stats.avg_verification_ms = sum / verification_times_.size();
+        }
+        else
+        {
+            stats.avg_verification_ms = 0;
+        }
+
         stats.generation_count = generation_times_.size();
         stats.verification_count = verification_times_.size();
         return stats;

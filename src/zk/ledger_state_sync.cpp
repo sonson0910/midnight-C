@@ -1,4 +1,5 @@
 #include "midnight/zk/ledger_state_sync.hpp"
+#include "midnight/core/logger.hpp"
 #include <iostream>
 #include <algorithm>
 #include <chrono>
@@ -41,7 +42,7 @@ namespace midnight::zk
 
         // In production, would spawn background thread here
         // For now, monitoring can be triggered manually via trigger_full_sync()
-        std::cout << fmt::format("Started monitoring ledger at {}", rpc_endpoint_) << std::endl;
+        g_logger->info(fmt::format("Started monitoring ledger at {}", rpc_endpoint_));
 
         return true;
     }
@@ -49,7 +50,7 @@ namespace midnight::zk
     void LedgerStateSyncManager::stop_monitoring()
     {
         monitoring_active_ = false;
-        std::cout << "Stopped monitoring ledger" << std::endl;
+        g_logger->info("Stopped monitoring ledger");
     }
 
     bool LedgerStateSyncManager::is_monitoring() const
@@ -136,7 +137,7 @@ namespace midnight::zk
         }
         catch (const std::exception &e)
         {
-            std::cerr << fmt::format("Sync failed: {}", e.what()) << std::endl;
+            g_logger->error(fmt::format("Sync failed: {}", e.what()));
             return false;
         }
     }

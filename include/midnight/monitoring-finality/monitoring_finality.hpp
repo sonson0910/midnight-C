@@ -233,6 +233,7 @@ namespace midnight::monitoring_finality
         std::string rpc_url_;
         std::atomic<bool> monitoring_{false};
         std::thread monitoring_thread_;
+        std::thread wait_thread_; ///< Managed thread for wait_for_finality
         uint32_t last_finalized_height_ = 0;
     };
 

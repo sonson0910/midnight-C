@@ -20,9 +20,10 @@ namespace midnight::network
         enum class Network
         {
             DEVNET,   // Local development
+            PREVIEW,  // Preview testnet (recommended for dev)
             TESTNET,  // Preprod testnet
             STAGENET, // Staging network (future)
-            MAINNET   // Production mainnet (future)
+            MAINNET   // Production mainnet
         };
 
         /**
@@ -33,16 +34,19 @@ namespace midnight::network
             switch (network)
             {
             case Network::DEVNET:
-                return "http://localhost:5678/api";
+                return "http://localhost:9944";
+
+            case Network::PREVIEW:
+                return "https://rpc.preview.midnight.network";
 
             case Network::TESTNET:
                 return "https://rpc.preprod.midnight.network";
 
             case Network::STAGENET:
-                return "https://staging.midnight.network/api";
+                return "https://rpc.staging.midnight.network";
 
             case Network::MAINNET:
-                return "https://mainnet.midnight.network/api";
+                return "https://rpc.mainnet.midnight.network";
 
             default:
                 return "";
@@ -57,16 +61,19 @@ namespace midnight::network
             switch (network)
             {
             case Network::DEVNET:
-                return "http://localhost:9000/graphql";
+                return "http://localhost:8088/api/v4/graphql";
+
+            case Network::PREVIEW:
+                return "https://indexer.preview.midnight.network/api/v4/graphql";
 
             case Network::TESTNET:
-                return "https://indexer.preprod.midnight.network/api/v3/graphql";
+                return "https://indexer.preprod.midnight.network/api/v4/graphql";
 
             case Network::STAGENET:
-                return "https://staging-explorer.midnight.network/graphql";
+                return "https://indexer.staging.midnight.network/api/v4/graphql";
 
             case Network::MAINNET:
-                return "https://explorer.midnight.network/graphql";
+                return "https://indexer.mainnet.midnight.network/api/v4/graphql";
 
             default:
                 return "";
@@ -82,6 +89,9 @@ namespace midnight::network
             {
             case Network::DEVNET:
                 return ""; // No faucet for local devnet
+
+            case Network::PREVIEW:
+                return "https://faucet.preview.midnight.network/";
 
             case Network::TESTNET:
                 return "https://faucet.preprod.midnight.network/";
@@ -106,6 +116,8 @@ namespace midnight::network
             {
             case Network::DEVNET:
                 return "devnet";
+            case Network::PREVIEW:
+                return "preview";
             case Network::TESTNET:
                 return "testnet";
             case Network::STAGENET:
@@ -127,8 +139,11 @@ namespace midnight::network
                            [](unsigned char c) -> char
                            { return static_cast<char>(std::tolower(c)); });
 
-            if (normalized == "devnet" || normalized == "midnight-devnet")
+            if (normalized == "devnet" || normalized == "midnight-devnet" ||
+                normalized == "undeployed")
                 return Network::DEVNET;
+            if (normalized == "preview" || normalized == "midnight-preview")
+                return Network::PREVIEW;
             if (normalized == "testnet" || normalized == "preprod" ||
                 normalized == "midnight-testnet" || normalized == "midnight-preprod")
                 return Network::TESTNET;
@@ -136,7 +151,7 @@ namespace midnight::network
                 return Network::STAGENET;
             if (normalized == "mainnet" || normalized == "midnight-mainnet")
                 return Network::MAINNET;
-            return Network::TESTNET; // Default to testnet
+            return Network::PREVIEW; // Default to preview
         }
     };
 

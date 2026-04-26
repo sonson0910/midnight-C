@@ -1,5 +1,6 @@
 #include "midnight/crypto/ed25519_signer.hpp"
 #include "midnight/core/logger.hpp"
+#include "midnight/core/common_utils.hpp"
 #include <algorithm>
 #include <cctype>
 #include <mutex>
@@ -18,21 +19,8 @@ namespace midnight::crypto
 {
     namespace
     {
-        int hex_nibble(char c)
-        {
-            if (c >= '0' && c <= '9')
-            {
-                return c - '0';
-            }
-
-            const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (lower >= 'a' && lower <= 'f')
-            {
-                return 10 + (lower - 'a');
-            }
-
-            return -1;
-        }
+        // Import shared hex_nibble from common_utils.hpp
+        using midnight::util::hex_nibble;
 
         uint8_t parse_hex_byte(char hi, char lo)
         {

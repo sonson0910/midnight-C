@@ -26,7 +26,7 @@ class BlockMonitorTest : public ::testing::Test
 {
 protected:
     BlockMonitor monitor_{"wss://rpc.preprod.midnight.network",
-                          "https://indexer.preprod.midnight.network/api/v3/graphql"};
+                          "https://indexer.preprod.midnight.network/api/v4/graphql"};
 };
 
 TEST_F(BlockMonitorTest, SubscribeNewBlocks_ValidCallback_CallsBack)
@@ -81,7 +81,7 @@ TEST_F(BlockMonitorTest, DetectReorg_DifferentBestBlock_ReturnsReorgEvent)
 class StateMonitorTest : public ::testing::Test
 {
 protected:
-    StateMonitor monitor_{"https://indexer.preprod.midnight.network/api/v3/graphql"};
+    StateMonitor monitor_{"https://indexer.preprod.midnight.network/api/v4/graphql"};
 };
 
 TEST_F(StateMonitorTest, SubscribeStateChanges_ValidCallback_CallsBack)
@@ -196,7 +196,7 @@ class TransactionMonitorTest : public ::testing::Test
 {
 protected:
     TransactionMonitor monitor_{"wss://rpc.preprod.midnight.network",
-                                "https://indexer.preprod.midnight.network/api/v3/graphql"};
+                                "https://indexer.preprod.midnight.network/api/v4/graphql"};
 };
 
 TEST_F(TransactionMonitorTest, MonitorTransaction_ValidTxHash_CallsCallback)
@@ -321,7 +321,7 @@ class MonitoringIntegrationTest : public ::testing::Test
 {
 protected:
     MonitoringManager manager_{"wss://rpc.preprod.midnight.network",
-                               "https://indexer.preprod.midnight.network/api/v3/graphql"};
+                               "https://indexer.preprod.midnight.network/api/v4/graphql"};
 };
 
 TEST_F(MonitoringIntegrationTest, FullMonitoringLifecycle_StartStop_CompletesSuccessfully)
@@ -368,7 +368,7 @@ TEST_F(MonitoringIntegrationTest, MonitoringWithEventHandlers_RegisterHandlers_R
 TEST(BlockMonitorEdgeCases, GetBlockHistory_ZeroRange_ReturnsAllToFinalized)
 {
     BlockMonitor monitor{"wss://rpc.preprod.midnight.network",
-                         "https://indexer.preprod.midnight.network/api/v3/graphql"};
+                         "https://indexer.preprod.midnight.network/api/v4/graphql"};
 
     const uint32_t best_height = monitor.get_best_block_height();
     const uint32_t start_height = (best_height > 10) ? (best_height - 10) : 0;
@@ -383,7 +383,7 @@ TEST(BlockMonitorEdgeCases, GetBlockHistory_ZeroRange_ReturnsAllToFinalized)
 TEST(TransactionMonitorEdgeCases, MonitorTransaction_EmptyHash_HandlesGracefully)
 {
     TransactionMonitor monitor{"wss://rpc.preprod.midnight.network",
-                               "https://indexer.preprod.midnight.network/api/v3/graphql"};
+                               "https://indexer.preprod.midnight.network/api/v4/graphql"};
 
     bool error_handled = true;
 
@@ -415,7 +415,7 @@ TEST(FinalityAwaiterEdgeCases, WaitForFinality_TimeoutZero_WaitsIndefinitely)
 TEST(MonitoringManagerEdgeCases, GetStatistics_NoActivity_ReturnsZeroStats)
 {
     MonitoringManager manager{"wss://rpc.preprod.midnight.network",
-                              "https://indexer.preprod.midnight.network/api/v3/graphql"};
+                              "https://indexer.preprod.midnight.network/api/v4/graphql"};
 
     auto stats = manager.get_statistics();
 

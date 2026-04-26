@@ -46,6 +46,9 @@ if(ENABLE_BLOCKCHAIN)
         network/network_client.cpp
         network/midnight_node_rpc.cpp
         network/transaction_confirmation.cpp
+        network/indexer_client.cpp
+        network/indexer_subscription.cpp
+        network/substrate_rpc.cpp
     )
 endif()
 
@@ -54,6 +57,33 @@ set(MIDNIGHT_CRYPTO_SOURCES)
 if(ENABLE_BLOCKCHAIN)
     list(APPEND MIDNIGHT_CRYPTO_SOURCES
         crypto/ed25519_signer.cpp
+    )
+endif()
+
+# SCALE codec (Substrate binary serialization)
+set(MIDNIGHT_CODEC_SOURCES)
+if(ENABLE_BLOCKCHAIN)
+    list(APPEND MIDNIGHT_CODEC_SOURCES
+        codec/scale_codec.cpp
+    )
+endif()
+
+# HD Wallet (BIP39 + SLIP-10 Ed25519) + Bech32m address encoding
+set(MIDNIGHT_WALLET_SOURCES)
+if(ENABLE_BLOCKCHAIN)
+    list(APPEND MIDNIGHT_WALLET_SOURCES
+        wallet/hd_wallet.cpp
+        wallet/bech32m.cpp
+        wallet/wallet_facade.cpp
+        wallet/wallet_services.cpp
+    )
+endif()
+
+# Transaction builder (Substrate extrinsics)
+set(MIDNIGHT_TX_SOURCES)
+if(ENABLE_BLOCKCHAIN)
+    list(APPEND MIDNIGHT_TX_SOURCES
+        tx/extrinsic_builder.cpp
     )
 endif()
 
@@ -77,13 +107,14 @@ if(ENABLE_BLOCKCHAIN)
         blockchain/block.cpp
         blockchain/wallet.cpp
         blockchain/wallet_manager.cpp
-        blockchain/official_sdk_bridge.cpp
         blockchain/midnight_adapter.cpp
         utxo-transactions/utxo_transactions.cpp
         compact-contracts/compact_contracts.cpp
         zk-proofs/zk_proofs.cpp
         monitoring-finality/monitoring_finality.cpp
         signing-submission/signing_submission.cpp
+        contracts/contract_interactor.cpp
+        contract/contract_manager.cpp
     )
 endif()
 
@@ -93,6 +124,9 @@ add_library(midnight-core
     ${MIDNIGHT_PROTOCOL_SOURCES}
     ${MIDNIGHT_NETWORK_SOURCES}
     ${MIDNIGHT_CRYPTO_SOURCES}
+    ${MIDNIGHT_CODEC_SOURCES}
+    ${MIDNIGHT_WALLET_SOURCES}
+    ${MIDNIGHT_TX_SOURCES}
     ${MIDNIGHT_ZK_SOURCES}
     ${MIDNIGHT_BLOCKCHAIN_SOURCES}
 )
@@ -121,6 +155,42 @@ endif()
 # Link dependencies
 find_package(OpenSSL QUIET)
 find_package(Sodium QUIET)
+
+# Fallback: use pkg-config for libsodium on systems without CMake find module
+if(NOT Sodium_FOUND)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(SODIUM_PKG QUIET libsodium)
+        if(SODIUM_PKG_FOUND)
+            if(NOT TARGET Sodium::Sodium)
+                add_library(Sodium::Sodium INTERFACE IMPORTED)
+                set_target_properties(Sodium::Sodium PROPERTIES
+                    INTERFACE_INCLUDE_DIRECTORIES "${SODIUM_PKG_INCLUDE_DIRS}"
+                    INTERFACE_LINK_LIBRARIES "${SODIUM_PKG_LINK_LIBRARIES}"
+                )
+            endif()
+            set(Sodium_FOUND TRUE)
+            message(STATUS "Found libsodium via pkg-config: ${SODIUM_PKG_LINK_LIBRARIES}")
+        endif()
+    endif()
+endif()
+
+# Fallback: direct library search on standard paths
+if(NOT Sodium_FOUND)
+    find_path(SODIUM_INCLUDE_DIR NAMES sodium.h)
+    find_library(SODIUM_LIBRARY NAMES sodium)
+    if(SODIUM_INCLUDE_DIR AND SODIUM_LIBRARY)
+        if(NOT TARGET Sodium::Sodium)
+            add_library(Sodium::Sodium UNKNOWN IMPORTED)
+            set_target_properties(Sodium::Sodium PROPERTIES
+                IMPORTED_LOCATION "${SODIUM_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${SODIUM_INCLUDE_DIR}"
+            )
+        endif()
+        set(Sodium_FOUND TRUE)
+        message(STATUS "Found libsodium: ${SODIUM_LIBRARY}")
+    endif()
+endif()
 
 # Fallback to conda-provided crypto libraries when package config files are unavailable.
 if(NOT OPENSSL_FOUND AND DEFINED ENV{CONDA_PREFIX})
@@ -198,7 +268,6 @@ target_link_libraries(midnight-core
         fmt::fmt
         $<$<TARGET_EXISTS:jsoncpp_lib>:jsoncpp_lib>
         $<$<TARGET_EXISTS:JsonCpp::JsonCpp>:JsonCpp::JsonCpp>
-    PRIVATE
         $<$<BOOL:${OPENSSL_FOUND}>:OpenSSL::SSL>
         $<$<BOOL:${OPENSSL_FOUND}>:OpenSSL::Crypto>
         $<$<BOOL:${Sodium_FOUND}>:Sodium::Sodium>
