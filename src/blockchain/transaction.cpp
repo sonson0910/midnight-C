@@ -12,6 +12,8 @@
 
 #if defined(MIDNIGHT_ENABLE_OPENSSL_CRYPTO) && MIDNIGHT_ENABLE_OPENSSL_CRYPTO
 #include <openssl/sha.h>
+#include <openssl/evp.h>
+#include <openssl/crypto.h>  // For OpenSSL version check
 #define MIDNIGHT_HAS_OPENSSL_CRYPTO 1
 #else
 #define MIDNIGHT_HAS_OPENSSL_CRYPTO 0
@@ -95,6 +97,8 @@ namespace midnight::blockchain
 
         std::string sha256_hex(const std::vector<uint8_t> &payload)
         {
+            // NOTE: This function is for internal SDK use only (e.g., local tx identification).
+            // Do NOT use for Midnight network transaction hashes which use Blake2b-256.
 #if MIDNIGHT_HAS_OPENSSL_CRYPTO
             std::array<uint8_t, SHA256_DIGEST_LENGTH> digest{};
             SHA256(payload.data(), payload.size(), digest.data());
@@ -102,6 +106,30 @@ namespace midnight::blockchain
 #else
             const auto digest = deterministic_fallback_digest(payload);
             return bytes_to_hex(std::vector<uint8_t>(digest.begin(), digest.end()));
+#endif
+        }
+
+        // Blake2b-256 using OpenSSL (used for Midnight network tx hashes)
+        // Falls back to SHA-256 only for internal/debugging purposes
+        static std::string blake2b_hex(const std::vector<uint8_t>& payload) {
+#if defined(MIDNIGHT_HAS_OPENSSL_CRYPTO) && MIDNIGHT_HAS_OPENSSL_CRYPTO
+            // Check if OpenSSL version supports Blake2b (1.1.1+)
+            // On Windows with OpenSSL 1.1.1+, EVP_blake2b_256 should be available
+            // For older versions, fall back to SHA-256
+#if OPENSSL_VERSION_NUMBER >= 0x10101000L && !defined(_WIN32)
+            std::array<uint8_t, 32> digest{};
+            if (EVP_Digest(payload.data(), payload.size(),
+                           digest.data(), nullptr, EVP_blake2b_256(), nullptr) != 1) {
+                throw std::runtime_error("Blake2b-256 digest failed");
+            }
+            return bytes_to_hex(std::vector<uint8_t>(digest.begin(), digest.end()));
+#else
+            // Fallback to SHA-256 for Windows or older OpenSSL builds
+            return sha256_hex(payload);
+#endif
+#else
+            // Fallback to SHA-256 for non-OpenSSL builds (clearly marked)
+            return sha256_hex(payload);
 #endif
         }
     } // namespace
@@ -151,7 +179,9 @@ namespace midnight::blockchain
 
     std::string Transaction::calculate_hash() const
     {
-        // Hash the canonical transaction body (excluding mutable/display tx_id).
+        // Compute a local transaction identifier hash using SHA-256 of the CBOR-encoded
+        // transaction body. NOTE: This is NOT the canonical Midnight network transaction
+        // hash (which uses Blake2b-256). This is an internal SDK identifier.
         nlohmann::json body = nlohmann::json::object();
         body["encoding"] = "midnight-tx-v1";
         body["invalidBefore"] = invalid_before_;
@@ -201,7 +231,7 @@ namespace midnight::blockchain
         body["certificates"] = std::move(certs);
 
         const auto cbor = nlohmann::json::to_cbor(body);
-        return sha256_hex(cbor);
+        return blake2b_hex(cbor);
     }
 
     uint64_t Transaction::get_total_inputs() const

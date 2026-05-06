@@ -20,7 +20,9 @@ namespace midnight
         DEBUG = 1,
         INFO = 2,
         WARN = 3,
-        ERROR = 4,
+        // Never name an enum value ERROR — Windows headers #define it as a macro.
+        // Use ERR to avoid the conflict with the Windows ERROR macro.
+        ERR = 4,
         CRITICAL = 5
     };
 
@@ -38,7 +40,7 @@ namespace midnight
         void debug(const std::string &msg) { log(LogLevel::DEBUG, msg); }
         void info(const std::string &msg) { log(LogLevel::INFO, msg); }
         void warn(const std::string &msg) { log(LogLevel::WARN, msg); }
-        void error(const std::string &msg) { log(LogLevel::ERROR, msg); }
+        void error(const std::string &msg) { log(LogLevel::ERR, msg); }
         void critical(const std::string &msg) { log(LogLevel::CRITICAL, msg); }
     };
 

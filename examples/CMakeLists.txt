@@ -31,9 +31,39 @@ target_link_libraries(wallet-generator PRIVATE midnight-core)
 target_include_directories(wallet-generator PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 add_executable(native_contract_interactor_example native_contract_interactor_example.cpp)
-target_link_libraries(native_contract_interactor_example PRIVATE midnight-core sodium)
+target_link_libraries(native_contract_interactor_example PRIVATE midnight-core)
 target_include_directories(native_contract_interactor_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 add_executable(e2e_transfer_night e2e_transfer_night.cpp)
-target_link_libraries(e2e_transfer_night PRIVATE midnight-core sodium)
+target_link_libraries(e2e_transfer_night PRIVATE midnight-core)
 target_include_directories(e2e_transfer_night PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(midnight-wallet-tool midnight-wallet-tool.cpp)
+target_link_libraries(midnight-wallet-tool PRIVATE midnight-core)
+target_include_directories(midnight-wallet-tool PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(indexer-probe indexer-probe.cpp)
+target_link_libraries(indexer-probe PRIVATE midnight-core)
+target_include_directories(indexer-probe PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${HTTPLIB_SOURCE_DIR}
+)
+if(WIN32)
+    target_compile_definitions(indexer-probe PRIVATE
+        WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 WINVER=0x0A00
+    )
+endif()
+target_compile_definitions(indexer-probe PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
+
+add_executable(ws-probe ws-probe.cpp)
+target_link_libraries(ws-probe PRIVATE midnight-core)
+target_include_directories(ws-probe PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${HTTPLIB_SOURCE_DIR}
+)
+if(WIN32)
+    target_compile_definitions(ws-probe PRIVATE
+        WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 WINVER=0x0A00
+    )
+endif()
+target_compile_definitions(ws-probe PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)

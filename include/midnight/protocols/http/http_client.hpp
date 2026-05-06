@@ -9,13 +9,13 @@ namespace midnight::protocols::http
 
     enum class HttpMethod
     {
-        GET,
-        POST,
-        PUT,
-        DELETE,
-        PATCH,
-        HEAD,
-        OPTIONS
+        Get,
+        Post,
+        Put,
+        Delete,
+        Patch,
+        Head,
+        Options
     };
 
     struct HttpResponse
@@ -25,12 +25,17 @@ namespace midnight::protocols::http
         std::map<std::string, std::string> headers;
     };
 
+    class HttpClientImpl;
+
     /**
      * @brief HTTP/HTTPS Client
      */
     class HttpClient
     {
     public:
+        HttpClient();
+        ~HttpClient();
+
         /**
          * @brief Send HTTP request
          */
@@ -64,6 +69,7 @@ namespace midnight::protocols::http
         void set_ssl_verify(bool verify);
 
     private:
+        std::unique_ptr<HttpClientImpl> pImpl_;
         bool ssl_verify_ = true;
     };
 

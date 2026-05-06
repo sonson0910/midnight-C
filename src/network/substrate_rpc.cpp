@@ -475,5 +475,56 @@ namespace midnight::network
         }
     }
 
+    json SubstrateRPC::contracts_call(
+        const std::string &contract_address,
+        const std::string &origin_address,
+        uint64_t value,
+        uint64_t gas_limit,
+        const std::string &call_data)
+    {
+        // Build contracts.call SCALE-encoded call structure
+        codec::ScaleEncoder enc;
+
+        // dest: MultiAddress (AccountId variant = 0)
+        enc.encode_u8(0);  // Id variant
+        auto addr_bytes = codec::util::hex_to_bytes(origin_address.empty()
+            ? "0x0000000000000000000000000000000000000000000000000000000000000000"
+            : origin_address);
+        enc.encode_raw(addr_bytes);
+
+        // value: Compact<u128>
+        enc.encode_compact(value);
+
+        // gas_limit: Weight { ref_time: u64, proof_size: u64 }
+        enc.encode_compact(gas_limit);
+        enc.encode_compact(gas_limit / 4);  // proof_size estimate
+
+        // storage_deposit_limit: Option<Compact<u128>> = None
+        enc.encode_option_none();
+
+        // data: Vec<u8>
+        auto data_bytes = codec::util::hex_to_bytes(call_data.empty() ? "0x" : call_data);
+        enc.encode_bytes(data_bytes);
+
+        std::string call_hex = codec::util::bytes_to_hex(enc.data());
+
+        try
+        {
+            json params = json::object({
+                {"call", call_hex}
+            });
+
+            midnight::g_logger->debug("contracts_call RPC: dest=" + contract_address +
+                                    " gas=" + std::to_string(gas_limit));
+
+            return rpc_call("contracts_call", json::array({params}));
+        }
+        catch (const std::exception &e)
+        {
+            midnight::g_logger->warn("contracts_call failed: " + std::string(e.what()));
+            throw;
+        }
+    }
+
 } // namespace midnight::network
 

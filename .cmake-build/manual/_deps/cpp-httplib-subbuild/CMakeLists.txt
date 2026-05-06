@@ -1,7 +1,7 @@
 # Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
-# file Copyright.txt or https://cmake.org/licensing for details.
+# file LICENSE.rst or https://cmake.org/licensing for details.
 
-cmake_minimum_required(VERSION 3.31.6)
+cmake_minimum_required(VERSION 4.3.1)
 
 # Reject any attempt to use a toolchain file. We must not use one because
 # we could be downloading it here. If the CMAKE_TOOLCHAIN_FILE environment
@@ -20,8 +20,8 @@ project(cpp-httplib-populate NONE)
 include(ExternalProject)
 ExternalProject_Add(cpp-httplib-populate
                      "UPDATE_DISCONNECTED" "False" "DOWNLOAD_EXTRACT_TIMESTAMP" "TRUE" "EXTERNALPROJECT_INTERNAL_ARGUMENT_SEPARATOR" "URL" "https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.42.0.zip"
-                    SOURCE_DIR          "/media/son/Projects1/venera/midnight/night_fund/.cmake-build/manual/_deps/cpp-httplib-src"
-                    BINARY_DIR          "/media/son/Projects1/venera/midnight/night_fund/.cmake-build/manual/_deps/cpp-httplib-build"
+                    SOURCE_DIR          "D:/venera/midnight/night_fund/.cmake-build/manual/_deps/cpp-httplib-src"
+                    BINARY_DIR          "D:/venera/midnight/night_fund/.cmake-build/manual/_deps/cpp-httplib-build"
                     CONFIGURE_COMMAND   ""
                     BUILD_COMMAND       ""
                     INSTALL_COMMAND     ""

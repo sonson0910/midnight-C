@@ -106,16 +106,27 @@ if(MIDNIGHT_FORCE_FETCH_FMT OR NOT fmt_FOUND)
     unset(_MIDNIGHT_FMT_CANDIDATE)
 endif()
 
-find_package(jsoncpp QUIET)
-if(NOT jsoncpp_FOUND)
+# Fetch and build jsoncpp (JSON parsing library)
+# Force static library to ensure proper linking
+set(JSONCPP_BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+set(JSONCPP_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(JSONCPP_BUILD_OBJECT_LIBS OFF CACHE BOOL "" FORCE)
+
+if(NOT DEFINED jsoncpp_SOURCE_DIR)
     message(STATUS "Fetching jsoncpp...")
     FetchContent_Declare(
         jsoncpp
         URL https://github.com/open-source-parsers/jsoncpp/archive/refs/tags/1.9.6.zip
-        QUIET
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
-    FetchContent_MakeAvailable(jsoncpp)
+    FetchContent_GetProperties(jsoncpp)
+    if(NOT jsoncpp_POPULATED)
+        FetchContent_Populate(jsoncpp)
+    endif()
+    set(jsoncpp_SOURCE_DIR "${jsoncpp_SOURCE_DIR}")
+    set(jsoncpp_POPULATED TRUE)
 endif()
+add_subdirectory("${jsoncpp_SOURCE_DIR}" "${jsoncpp_BINARY_DIR}" EXCLUDE_FROM_ALL)
 
 # Fetch cpp-httplib (header-only HTTP client library)
 if(NOT DEFINED HTTPLIB_SOURCE_DIR)
@@ -132,6 +143,51 @@ if(NOT DEFINED HTTPLIB_SOURCE_DIR)
     set(HTTPLIB_SOURCE_DIR "${cpp-httplib_SOURCE_DIR}")
 endif()
 message(STATUS "cpp-httplib path: ${HTTPLIB_SOURCE_DIR}")
+
+# gRPC + Protobuf (required for gRPC protocol support)
+option(ENABLE_GRPC "Enable gRPC protocol support" ON)
+
+if(ENABLE_GRPC)
+    # gRPC depends on abseil; disable unwanted targets
+    set(gRPC_BUILD_STRIP_ERRORS OFF CACHE BOOL "" FORCE)
+    set(gRPC_BUILD_CSHARP_EXT OFF CACHE BOOL "" FORCE)
+    set(gRPC_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    set(gRPC_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(gRPC_INSTALL OFF CACHE BOOL "" FORCE)
+    set(CMAKE_POLICY_DEFAULT_CMP0167 NEW) # FetchContent_MakeAvailable
+
+    FetchContent_Declare(
+        grpc
+        GIT_REPOSITORY https://github.com/grpc/grpc.git
+        GIT_TAG v1.68.0
+        GIT_SUBMODULES "third_party/zlib third_party/gflags third_party/abseil-cpp third_party/protobuf"
+    )
+
+    FetchContent_Declare(
+        protobuf
+        GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
+        GIT_TAG v28.3
+        GIT_SUBMODULES "third_party/utf8_range"
+    )
+
+    if(NOT grpc_POPULATED)
+        FetchContent_GetProperties(grpc)
+        if(NOT grpc_POPULATED)
+            message(STATUS "Fetching gRPC v1.68.0...")
+            FetchContent_Populate(grpc)
+        endif()
+    endif()
+    add_subdirectory(${grpc_SOURCE_DIR} ${grpc_BINARY_DIR} EXCLUDE_FROM_ALL)
+
+    if(NOT protobuf_POPULATED)
+        FetchContent_GetProperties(protobuf)
+        if(NOT protobuf_POPULATED)
+            message(STATUS "Fetching protobuf v28.3...")
+            FetchContent_Populate(protobuf)
+        endif()
+    endif()
+    add_subdirectory(${protobuf_SOURCE_DIR} ${protobuf_BINARY_DIR} EXCLUDE_FROM_ALL)
+endif()
 
 # Add subdirectories
 add_subdirectory(src)

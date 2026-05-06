@@ -2,8 +2,11 @@
 
 #include "midnight/wallet/hd_wallet.hpp"
 #include "midnight/wallet/bech32m.hpp"
+#include "midnight/wallet/shielded_address.hpp"
 #include "midnight/wallet/wallet_services.hpp"
 #include "midnight/network/indexer_client.hpp"
+#include "midnight/blockchain/midnight_adapter.hpp"
+#include "midnight/errors/wallet_errors.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -156,11 +159,20 @@ struct SwapOutputs {
 struct TransferResult {
     bool success = false;
     std::string tx_hash;
-    std::string error;
     std::vector<UtxoWithMeta> inputs_used;
     std::vector<UtxoWithMeta> change_outputs;
     uint64_t fee_estimate = 0;
-    SubmissionEvent submission_event;      ///< Submission status from SubmissionService
+    SubmissionEvent submission_event;
+    
+    using ErrorType = errors::WalletError;
+    std::optional<ErrorType> error;
+    
+    std::string error_message() const {
+        if (error) {
+            return errors::get_message(*error);
+        }
+        return {};
+    }
 };
 
 // ─── Dust Registration ──────────────────────────────────────
@@ -168,8 +180,17 @@ struct TransferResult {
 struct DustRegistrationResult {
     bool success = false;
     std::string tx_hash;
-    std::string error;
     uint64_t estimated_dust_per_epoch = 0;
+    
+    using ErrorType = errors::WalletError;
+    std::optional<ErrorType> error;
+    
+    std::string error_message() const {
+        if (error) {
+            return errors::get_message(*error);
+        }
+        return {};
+    }
 };
 
 // ─── Fee Estimation ─────────────────────────────────────────
@@ -210,6 +231,7 @@ struct DustWalletState {
 
 struct ShieldedWalletState {
     std::string address;
+    std::vector<blockchain::UTXO> utxos;
 };
 
 // ─── Combined Facade State ──────────────────────────────────
@@ -243,6 +265,14 @@ struct WalletFacadeConfig {
 
 class WalletFacade {
 public:
+    // Allow test fixtures to inject state for testing
+    void set_available_coins(const std::vector<UtxoWithMeta>& coins) {
+        state_.unshielded.available_coins = coins;
+    }
+    void set_balance(const std::string& token, uint64_t amount) {
+        state_.unshielded.balances[token] = amount;
+    }
+
     // ─── Factory Methods ─────────────────────────────────────
 
     static WalletFacade from_mnemonic(
@@ -418,9 +448,30 @@ public:
 
     std::vector<uint8_t> sign(const std::vector<uint8_t>& data) const;
 
+    // ─── Shielded Address ────────────────────────────────────────
+    std::string shielded_address() const;
+    std::optional<ShieldedAddress> get_shielded_address() const;
+
     // ─── Serialization ───────────────────────────────────────
 
     std::string serialize() const;
+    
+    /**
+     * @brief Serialize wallet state and encrypt with password
+     * @param password Encryption password
+     * @return Base64-encoded encrypted state
+     */
+    std::string serialize_encrypted(const std::string& password) const;
+    
+    /**
+     * @brief Restore wallet from encrypted state
+     * @param encrypted_base64 Base64-encoded encrypted state
+     * @param password Decryption password
+     * @return true if restored successfully
+     */
+    bool restore_from_encrypted(
+        const std::string& encrypted_base64,
+        const std::string& password);
 
     // ─── Memory Wipe ─────────────────────────────────────────
 
@@ -447,6 +498,7 @@ private:
     KeyPair metadata_key_;
     std::string night_addr_;
     std::string dust_addr_;
+    std::string shielded_addr_;
     std::string indexer_url_;
     address::Network network_ = address::Network::Preview;
     FacadeState state_;

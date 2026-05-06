@@ -25,6 +25,7 @@
 #include "midnight/zk/proof_server_client.hpp"
 #include "midnight/zk/proof_server_resilient_client.hpp"
 #include "midnight/wallet/hd_wallet.hpp"
+#include "midnight/wallet/bech32m_encoder.hpp"
 
 namespace midnight::wallet
 {
@@ -432,8 +433,10 @@ int main(int argc, char *argv[])
     bool use_official_sdk = false;
     bool register_dust = false;
     std::string official_network = "preprod";
-    std::string seed_hex = "";
-    std::string proof_server = "";
+        std::string official_seed_hex = "";
+        std::string proof_server = "";
+        bool mnemonic_requested = false;
+        std::string mnemonic_input = "";
     uint32_t sync_timeout_seconds = 120;
     std::string official_transfer_to = "";
     std::string official_transfer_amount = "";
@@ -584,7 +587,21 @@ int main(int argc, char *argv[])
         }
         else if (arg == "--seed-hex" && i + 1 < argc)
         {
-            seed_hex = argv[++i];
+            official_seed_hex = argv[++i];
+        }
+        else if (arg == "--mnemonic" && i + 1 < argc)
+        {
+            std::string mn;
+            for (int j = i + 1; j < argc; ++j) {
+                std::string tok = argv[j];
+                if (tok.rfind("--", 0) == 0) { --j; break; }
+                if (!mn.empty()) mn += " ";
+                mn += tok;
+            }
+            i = argc;
+            mnemonic_requested = true;
+            mnemonic_input = mn;
+            use_official_sdk = true;
         }
         else if (arg == "--register-dust")
         {
@@ -725,14 +742,38 @@ int main(int argc, char *argv[])
         namespace bip39 = midnight::wallet::bip39;
 
         std::string mnemonic;
-        if (!seed_hex.empty())
+        if (mnemonic_requested)
+        {
+            mnemonic = mnemonic_input;
+            auto hd = HDWallet::from_mnemonic(mnemonic);
+            auto night_key = hd.derive_night(0, 0);
+            auto dust_key = hd.derive_dust(0, 0);
+            auto zswap_key = hd.derive_zswap(0, 0);
+
+            wallet.name = wallet_name;
+            wallet.source = "native-hd-wallet";
+            wallet.network = "midnight-" + official_network;
+            wallet.public_key = night_key.address;
+            wallet.private_key = night_key.address;
+            wallet.seed = mnemonic;
+            wallet.unshield_address = night_key.address;
+            wallet.shielded_address = zswap_key.address;
+            wallet.dust_address = dust_key.address;
+
+            auto now = std::time(nullptr);
+            auto tm = std::localtime(&now);
+            char timestamp[32];
+            std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm);
+            wallet.created = timestamp;
+        }
+        else if (!official_seed_hex.empty())
         {
             // Use provided seed to derive wallet deterministically
             auto seed_bytes = std::vector<uint8_t>(64, 0);
             // Convert hex seed to bytes (pad to 64 if needed)
-            for (size_t i = 0; i < std::min(seed_hex.size() / 2, size_t(64)); i++)
+            for (size_t i = 0; i < std::min(official_seed_hex.size() / 2, size_t(64)); i++)
             {
-                auto byte_str = seed_hex.substr(i * 2, 2);
+                auto byte_str = official_seed_hex.substr(i * 2, 2);
                 seed_bytes[i] = static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16));
             }
             auto hd = HDWallet::from_seed(seed_bytes);
@@ -745,7 +786,7 @@ int main(int argc, char *argv[])
             wallet.network = "midnight-" + official_network;
             wallet.public_key = night_key.address;
             wallet.private_key = "";
-            wallet.seed = "0x" + seed_hex;
+            wallet.seed = "0x" + official_seed_hex;
             wallet.unshield_address = night_key.address;
             wallet.shielded_address = zswap_key.address;
             wallet.dust_address = dust_key.address;

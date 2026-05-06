@@ -3,6 +3,9 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <atomic>
+#include <shared_mutex>
+#include <unordered_map>
 
 namespace midnight::blockchain
 {
@@ -39,7 +42,7 @@ namespace midnight::blockchain
         /**
          * @brief Get chain height
          */
-        uint64_t get_height() const { return chain_height_; }
+        uint64_t get_height() const { return chain_height_.load(std::memory_order_acquire); }
 
         /**
          * @brief Validate block
@@ -53,7 +56,9 @@ namespace midnight::blockchain
 
     private:
         std::vector<std::shared_ptr<Block>> blockchain_;
-        uint64_t chain_height_ = 0;
+        std::atomic<uint64_t> chain_height_{0};
+        mutable std::shared_mutex mutex_;
+        std::unordered_map<std::string, size_t> hash_to_index_;
     };
 
 } // namespace midnight::blockchain

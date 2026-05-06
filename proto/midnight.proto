@@ -1,0 +1,213 @@
+syntax = "proto3";
+package midnight;
+
+option cc_enable_arenas = true;
+
+// ── Common types ──────────────────────────────────────────────
+
+message HexBytes {
+    bytes data = 1;
+}
+
+message Empty {}
+
+message Timestamp {
+    int64 unix_ns = 1;
+}
+
+// ── UTXO types ───────────────────────────────────────────────
+
+message Utxo {
+    string tx_hash = 1;
+    uint32 output_index = 2;
+    string address = 3;
+    uint64 amount = 4;
+    string token_type = 5;
+    map<string, uint64> multi_assets = 6;
+    uint32 block_height = 7;
+}
+
+message UtxoQuery {
+    string address = 1;
+    uint32 limit = 2;
+    uint64 after_block = 3;
+}
+
+message UtxoResponse {
+    repeated Utxo utxos = 1;
+    uint64 total = 2;
+}
+
+// ── Transaction types ────────────────────────────────────────
+
+message TransactionInput {
+    string tx_hash = 1;
+    uint32 output_index = 2;
+}
+
+message TransactionOutput {
+    string address = 1;
+    uint64 amount = 2;
+    string token_type = 3;
+}
+
+message UnsignedTransaction {
+    repeated TransactionInput inputs = 1;
+    repeated TransactionOutput outputs = 2;
+    uint32 valid_after = 3;
+    uint32 valid_until = 4;
+    uint64 fee = 5;
+    bytes ttl = 6;
+}
+
+message SignedTransaction {
+    bytes transaction = 1;
+    bytes signature = 2;
+    bytes public_key = 3;
+    string format = 4;
+}
+
+message SubmitTxRequest {
+    SignedTransaction transaction = 1;
+}
+
+message SubmitTxResponse {
+    string tx_hash = 1;
+    bool success = 2;
+    string error = 3;
+}
+
+message TxQuery {
+    string tx_hash = 1;
+}
+
+message TxResponse {
+    string tx_hash = 1;
+    uint32 block_height = 2;
+    string block_hash = 3;
+    uint64 confirmations = 4;
+    bool finalized = 5;
+    bytes raw_cbor = 6;
+}
+
+// ── Block types ───────────────────────────────────────────────
+
+message BlockHeader {
+    string hash = 1;
+    uint32 height = 2;
+    string parent_hash = 3;
+    uint64 timestamp = 4;
+    uint32 tx_count = 5;
+    bytes state_root = 6;
+}
+
+message BlockResponse {
+    BlockHeader header = 1;
+    repeated TxSummary transactions = 2;
+}
+
+message TxSummary {
+    string tx_hash = 1;
+    uint32 index = 2;
+    uint64 fee = 3;
+}
+
+message BlockQuery {
+    oneof query {
+        uint32 by_height = 1;
+        string by_hash = 2;
+    }
+}
+
+// ── Contract types ───────────────────────────────────────────
+
+message ContractCallRequest {
+    string contract_address = 1;
+    string circuit_name = 2;
+    bytes call_data = 3;
+    uint64 gas_limit = 4;
+    uint64 value = 5;
+}
+
+message ContractDeployRequest {
+    bytes code = 1;
+    bytes constructor_args = 2;
+    uint64 gas_limit = 3;
+    uint64 storage_limit = 4;
+    uint64 value = 5;
+}
+
+message ContractResponse {
+    string success = 1;
+    string result = 2;
+    string error = 3;
+    uint64 gas_used = 4;
+    string contract_address = 5;
+}
+
+// ── Balance ──────────────────────────────────────────────────
+
+message BalanceQuery {
+    string address = 1;
+}
+
+message BalanceResponse {
+    uint64 unshielded = 1;
+    uint64 dust = 2;
+    uint64 total = 3;
+}
+
+// ── Protocol params ─────────────────────────────────────────
+
+message ProtocolParamsRequest {}
+
+message ProtocolParamsResponse {
+    uint64 min_fee_a = 1;
+    uint64 min_fee_b = 2;
+    uint64 utxo_cost_per_byte = 3;
+    uint32 max_tx_size = 4;
+    uint32 max_block_size = 5;
+}
+
+// ── Node info ────────────────────────────────────────────────
+
+message NodeInfoRequest {}
+
+message NodeInfoResponse {
+    string chain = 1;
+    string name = 2;
+    string version = 3;
+    bool synced = 4;
+    uint32 peers = 5;
+    uint32 best_height = 6;
+    uint64 timestamp = 7;
+}
+
+// ── Services ────────────────────────────────────────────────
+
+service MidnightNode {
+    // Transaction submission
+    rpc SubmitTransaction(SubmitTxRequest) returns (SubmitTxResponse);
+    rpc QueryTransaction(TxQuery) returns (TxResponse);
+    
+    // UTXO queries
+    rpc QueryUTXOs(UtxoQuery) returns (UtxoResponse);
+    
+    // Block data
+    rpc GetBlock(BlockQuery) returns (BlockResponse);
+    rpc GetProtocolParams(ProtocolParamsRequest) returns (ProtocolParamsResponse);
+    
+    // Contract operations
+    rpc DeployContract(ContractDeployRequest) returns (ContractResponse);
+    rpc CallContract(ContractCallRequest) returns (ContractResponse);
+    
+    // Balance
+    rpc GetBalance(BalanceQuery) returns (BalanceResponse);
+    
+    // Node info
+    rpc GetNodeInfo(NodeInfoRequest) returns (NodeInfoResponse);
+    
+    // Streaming subscriptions
+    rpc SubscribeBlocks(Empty) returns (stream BlockHeader);
+    rpc WatchTransactions(UtxoQuery) returns (stream TxResponse);
+}

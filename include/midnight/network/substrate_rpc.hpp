@@ -250,6 +250,26 @@ namespace midnight::network
         static std::string compute_account_storage_key(
             const std::string &account_id_hex);
 
+        /**
+         * @brief Dry-run a contract call (off-chain execution without state changes)
+         *
+         * Uses the Substrate contracts_call RPC to simulate contract execution.
+         * Returns gas used and any return data without making any state changes.
+         *
+         * @param contract_address Target contract address (hex)
+         * @param origin_address Caller address (hex, defaults to zero)
+         * @param value Transfer value in base units
+         * @param gas_limit Maximum gas to spend
+         * @param call_data SCALE-encoded call data (selector + args)
+         * @return JSON with gas_used, return_data, debug_message, etc.
+         */
+        json contracts_call(
+            const std::string &contract_address,
+            const std::string &origin_address,
+            uint64_t value,
+            uint64_t gas_limit,
+            const std::string &call_data);
+
     private:
         std::unique_ptr<NetworkClient> client_;
         uint32_t request_id_ = 1;

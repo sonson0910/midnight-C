@@ -19,23 +19,30 @@ namespace midnight::wallet
         NightExternal = 0, ///< Unshielded NIGHT transfers (external)
         NightInternal = 1, ///< Unshielded NIGHT transfers (internal/change)
         Dust = 2,          ///< Fee (DUST) token management
-        Zswap = 3,         ///< Shielded (ZK-private) transactions
+        Zswap = 3,        ///< Shielded (ZK-private) transactions
         Metadata = 4       ///< Wallet metadata key
     };
 
     /**
      * @brief Ed25519 key pair with derived Midnight address
+     *
+     * KeyPair uses libsodium Ed25519 (via midnight::crypto::Ed25519Signer):
+     * - secret_key: 64 bytes = Ed25519 expanded private key
+     * - public_key: 32 bytes = Ed25519 public key
+     * - address: Bech32m-encoded Midnight address (mn_addr prefix)
+     *
+     * Signing/verification uses crypto_sign_detached/crypto_sign_verify_detached.
      */
     struct KeyPair
     {
-        std::vector<uint8_t> secret_key; ///< 64-byte Ed25519 secret key
+        std::vector<uint8_t> secret_key; ///< 64-byte Ed25519 expanded secret key
         std::vector<uint8_t> public_key; ///< 32-byte Ed25519 public key
-        std::string address;             ///< Hex-encoded address (0x + pubkey hex)
+        std::string address;             ///< Bech32m-encoded Midnight address
 
-        /// Sign a message, returns 64-byte Ed25519 signature
+        /// Sign a message with Ed25519 (libsodium), returns 64-byte signature
         std::vector<uint8_t> sign(const std::vector<uint8_t> &message) const;
 
-        /// Verify a signature
+        /// Verify an Ed25519 signature against this key pair's public key
         bool verify(const std::vector<uint8_t> &message,
                     const std::vector<uint8_t> &signature) const;
     };
@@ -63,7 +70,11 @@ namespace midnight::wallet
      *   - 2400 = Midnight coin type (official SLIP-44 registration)
      *   - role  = NightExternal(0) | NightInternal(1) | Dust(2) | Zswap(3) | Metadata(4)
      *
-     * Uses SLIP-10 for Ed25519 (hardened-only derivation).
+     * Uses SLIP-10 for Ed25519 (hardened-only derivation at levels 1-3).
+     * Level 4 (role) is NON-hardened per SLIP-10 spec — the public key at
+     * that level is derived and exposed as the role-specific public key.
+     * Level 5 (index) is NON-hardened for address discovery (BIP-44 chain).
+     *
      * Values verified against @midnight-ntwrk/wallet-sdk-hd v4.0.
      *
      * Example:
@@ -101,11 +112,26 @@ namespace midnight::wallet
         /// Convenience: derive Metadata key — role 4
         KeyPair derive_metadata(uint32_t account = 0, uint32_t index = 0) const;
 
+        /// Derive the shielded encryption public key from the Zswap keypair.
+        ///
+        /// The SDK derives the encryption public key via Curve25519 scalar multiplication
+        /// of the zswap secret key with the Ristretto255 base point. This keeps the
+        /// encryption key cryptographically linked to the zswap key while remaining
+        /// computationally independent (different curve). This means the shielded address
+        /// coin_pk = zswap_pk and enc_pk = curve25519(scalar_from_zswap_sk).
+        ///
+        /// @param zswap_secret_key 64-byte Ed25519 secret key from derive_zswap()
+        /// @return 32-byte encryption public key (Curve25519 point)
+        std::vector<uint8_t> derive_shielded_encryption_key(
+            const std::vector<uint8_t> &zswap_secret_key) const;
+
         /// Get the raw 64-byte master seed
         const std::vector<uint8_t> &master_seed() const { return seed_; }
 
     private:
-        std::vector<uint8_t> seed_; // 64-byte master seed
+        std::vector<uint8_t> seed_;         // 64-byte BIP39 seed
+        std::array<uint8_t, 32> master_key_;   // BIP32 master private key
+        std::array<uint8_t, 32> master_chain_; // BIP32 master chain code
 
         struct ChainNode
         {
@@ -113,14 +139,12 @@ namespace midnight::wallet
             std::array<uint8_t, 32> chain_code;
         };
 
-        /// SLIP-10 Ed25519 master key derivation
-        ChainNode slip10_master() const;
-
-        /// SLIP-10 hardened child derivation
-        ChainNode slip10_derive_child(const ChainNode &parent, uint32_t index) const;
-
         /// Derive full path: m/44'/2400'/account'/role/index
-        ChainNode derive_path(uint32_t account, uint32_t role, uint32_t index) const;
+        ChainNode derive_path(uint32_t account, Role role, uint32_t index) const;
+
+        /// Derive public key from a private key using libsodium Ed25519
+        static std::array<uint8_t, 32> derive_public_key_from_private(
+            const std::array<uint8_t, 32> &private_key);
     };
 
 } // namespace midnight::wallet

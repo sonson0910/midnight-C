@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 
 namespace midnight
 {
@@ -61,7 +62,9 @@ namespace midnight
 
         static std::string get_node_rpc_endpoint()
         {
-            return std::string(NODE_RPC_PROTOCOL) + "://" + NODE_RPC_HOST;
+            // Cached to avoid repeated string allocation
+            static const std::string cached = std::string(NODE_RPC_PROTOCOL) + "://" + NODE_RPC_HOST;
+            return cached;
         }
 
         static constexpr const char *INDEXER_GRAPHQL_URL =
@@ -94,7 +97,9 @@ namespace midnight
 
         static std::string get_node_rpc_endpoint()
         {
-            return std::string(NODE_RPC_PROTOCOL) + "://" + NODE_RPC_HOST;
+            // Cached to avoid repeated string allocation
+            static const std::string cached = std::string(NODE_RPC_PROTOCOL) + "://" + NODE_RPC_HOST;
+            return cached;
         }
 
         static constexpr const char *INDEXER_GRAPHQL_URL =

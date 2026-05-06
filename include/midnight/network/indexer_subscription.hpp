@@ -108,6 +108,9 @@ private:
     uint64_t last_known_balance_ = 0;
     uint64_t last_utxo_count_ = 0;
 
+    // Track known UTXOs for spent detection: key = tx_hash:output_index
+    std::map<std::string, wallet::UtxoWithMeta> last_known_utxos_;
+
     void poll_loop(uint32_t interval_ms);
 };
 

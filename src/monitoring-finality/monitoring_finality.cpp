@@ -13,12 +13,65 @@
 #include <iomanip>
 #include <limits>
 #include <algorithm>
+#include <cctype>
 
 namespace
 {
     using NJson = nlohmann::json;
 
     constexpr uint32_t kMonitoringRpcTimeoutMs = 10000;
+
+    // Sanitize error messages to prevent internal information disclosure.
+    static std::string sanitize_error_message(const std::string &raw)
+    {
+        if (raw.empty())
+        {
+            return "An internal error occurred";
+        }
+
+        std::string sanitized;
+        sanitized.reserve(std::min(raw.size(), size_t(200)));
+
+        for (size_t i = 0; i < raw.size() && sanitized.size() < 200; ++i)
+        {
+            char c = raw[i];
+            if (c >= 32 && c <= 126)
+            {
+                sanitized += c;
+            }
+            else
+            {
+                sanitized += '?';
+            }
+        }
+
+        if (sanitized.size() > 200)
+        {
+            sanitized.resize(200);
+            sanitized += "...";
+        }
+
+        const std::string sensitive_patterns[] = {
+            "password", "token", "secret", "api_key", "apikey",
+            "authorization", "private_key", "credential"
+        };
+        for (const auto &pattern : sensitive_patterns)
+        {
+            for (size_t pos = sanitized.find(pattern); pos != std::string::npos; pos = sanitized.find(pattern, pos + 1))
+            {
+                size_t colon_pos = sanitized.find(':', pos);
+                size_t newline_pos = sanitized.find('\n', pos);
+                size_t end = std::min(colon_pos, newline_pos);
+                if (end != std::string::npos && end > pos)
+                {
+                    sanitized.replace(pos, end - pos + 1, pattern + ": <redacted>");
+                }
+                pos = sanitized.find(pattern, pos + pattern.size() + 12);
+            }
+        }
+
+        return sanitized;
+    }
 
     std::string normalize_rpc_url(const std::string &url)
     {
@@ -109,7 +162,10 @@ namespace
                 NJson response = client.post_json(path, request);
                 if (response.contains("error") && !response["error"].is_null())
                 {
-                    throw std::runtime_error(response["error"].dump());
+                    std::string raw_err = response["error"].is_string()
+                        ? response["error"].get<std::string>()
+                        : response["error"].dump();
+                    throw std::runtime_error(sanitize_error_message(raw_err));
                 }
                 if (!response.contains("result"))
                 {

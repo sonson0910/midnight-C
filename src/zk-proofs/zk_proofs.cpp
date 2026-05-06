@@ -6,6 +6,7 @@
 #include "midnight/network/network_client.hpp"
 #include "midnight/core/common_utils.hpp"
 #include "midnight/core/json_bridge_utils.hpp"
+#include "midnight/core/logger.hpp"
 #include <iostream>
 #include <algorithm>
 #include <thread>
@@ -15,6 +16,7 @@
 #include <cctype>
 #include <stdexcept>
 #include <mutex>
+#include <cstring>
 
 namespace
 {
@@ -23,6 +25,59 @@ namespace
 
     using midnight::util::strip_hex_prefix;
     using midnight::util::is_hex_string;
+
+    // Sanitize error messages to prevent internal information disclosure.
+    // Only allows printable ASCII, limits length, and strips sensitive patterns.
+    static std::string sanitize_error_message(const std::string &raw)
+    {
+        if (raw.empty())
+        {
+            return "An internal error occurred";
+        }
+
+        std::string sanitized;
+        sanitized.reserve(std::min(raw.size(), size_t(200)));
+
+        for (size_t i = 0; i < raw.size() && sanitized.size() < 200; ++i)
+        {
+            char c = raw[i];
+            if (c >= 32 && c <= 126)
+            {
+                sanitized += c;
+            }
+            else
+            {
+                sanitized += '?';
+            }
+        }
+
+        if (sanitized.size() > 200)
+        {
+            sanitized.resize(200);
+            sanitized += "...";
+        }
+
+        const std::string sensitive_patterns[] = {
+            "password", "token", "secret", "api_key", "apikey",
+            "authorization", "private_key", "credential"
+        };
+        for (const auto &pattern : sensitive_patterns)
+        {
+            for (size_t pos = sanitized.find(pattern); pos != std::string::npos; pos = sanitized.find(pattern, pos + 1))
+            {
+                size_t colon_pos = sanitized.find(':', pos);
+                size_t newline_pos = sanitized.find('\n', pos);
+                size_t end = std::min(colon_pos, newline_pos);
+                if (end != std::string::npos && end > pos)
+                {
+                    sanitized.replace(pos, end - pos + 1, pattern + ": <redacted>");
+                }
+                pos = sanitized.find(pattern, pos + pattern.size() + 12);
+            }
+        }
+
+        return sanitized;
+    }
 
     std::vector<uint8_t> decode_hex_or_ascii(const std::string &value)
     {
@@ -274,11 +329,11 @@ namespace midnight::zk_proofs
                 result.success = false;
                 if (response["error"].is_string())
                 {
-                    result.error_message = response["error"].get<std::string>();
+                    result.error_message = sanitize_error_message(response["error"].get<std::string>());
                 }
                 else
                 {
-                    result.error_message = response["error"].dump();
+                    result.error_message = sanitize_error_message(response["error"].dump());
                 }
             }
 
@@ -376,7 +431,7 @@ namespace midnight::zk_proofs
                 if (response.contains("error") && response["error"].is_string())
                 {
                     result.success = false;
-                    result.error_message = response["error"].get<std::string>();
+                    result.error_message = sanitize_error_message(response["error"].get<std::string>());
                 }
 
                 const auto proof_hex = extract_proof_hex(response.contains("result") ? response["result"] : response);

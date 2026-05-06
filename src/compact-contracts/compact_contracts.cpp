@@ -2,11 +2,27 @@
  * Phase 2: Compact Contracts Implementation
  */
 
-#include "midnight/compact-contracts/compact_contracts.hpp"
-#include "midnight/network/network_client.hpp"
+// Define these BEFORE any includes to minimize Windows SDK footprint
+// and prevent conflicts between SDK headers and MSVC intrinsics
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00
+#endif
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+
+#pragma warning(push)
+#pragma warning(disable: 4996 4244 4267 4018 4458 4100)
+// Suppress specific errors from Windows SDK intrinsic conflicts
+#pragma warning(disable: 2371 2733 2116 2993 2039 1003)
+
+// Include logger FIRST - before windows.h to ensure clean namespace
 #include "midnight/core/logger.hpp"
-#include "midnight/core/common_utils.hpp"
-#include "midnight/core/json_bridge_utils.hpp"
+
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
+#include "midnight/compact-contracts/compact_contracts.hpp"
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -15,13 +31,21 @@
 #include <regex>
 #include <algorithm>
 #include <fstream>
+#include <filesystem>
 #include <sstream>
 #include <cctype>
 #include <ctime>
+#include <memory>
+#include <vector>
+#include <string>
+#include <optional>
 
-#ifndef _WIN32
-#include <sys/wait.h>
-#endif
+// Include network/json headers AFTER standard library to avoid Windows header conflicts
+#include "midnight/core/common_utils.hpp"
+#include "midnight/network/network_client.hpp"
+#include "midnight/core/json_bridge_utils.hpp"
+
+#pragma warning(pop)
 
 namespace
 {
@@ -30,6 +54,8 @@ namespace
     using midnight::util::run_command_capture;
     using midnight::util::extract_json_payload;
     using midnight::util::to_lower_copy;
+
+    constexpr std::size_t kMaxContractNameLength = 128;
 
     std::string normalized_contract_key(std::string contract_name)
     {
@@ -42,6 +68,40 @@ namespace
                 { return !std::isalnum(ch); }),
             contract_name.end());
         return contract_name;
+    }
+
+    /**
+     * @brief Validate contract_name against a strict alphanumeric + hyphen + underscore whitelist.
+     *        Returns false if the name contains shell metacharacters or other unsafe characters.
+     */
+    bool is_valid_contract_name(const std::string &name)
+    {
+        if (name.empty() || name.size() > kMaxContractNameLength)
+        {
+            return false;
+        }
+        for (char c : name)
+        {
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                  (c >= '0' && c <= '9') || c == '-' || c == '_'))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * @brief Safely set an environment variable for sensitive data.
+     *        Uses SetEnvironmentVariableA on Windows and setenv on Unix.
+     */
+    bool set_env_var(const std::string &name, const std::string &value)
+    {
+#if defined(_WIN32)
+        return SetEnvironmentVariableA(name.c_str(), value.c_str()) != 0;
+#else
+        return setenv(name.c_str(), value.c_str(), 1) == 0;
+#endif
     }
 
     // Import shared JSON bridge from json_bridge_utils.hpp
@@ -794,6 +854,16 @@ namespace midnight::compact_contracts
                 bridge_script = "tools/official-deploy-contract.mjs";
             }
 
+            // Check if the deploy script exists before attempting to run it
+            if (!std::filesystem::exists(bridge_script))
+            {
+                midnight::g_logger->error(
+                    "Deploy bridge script not found: " + bridge_script + ". " +
+                    "The C++ SDK's ContractManager::deploy() provides native deployment via SubstrateRPC. " +
+                    "For TypeScript SDK bridge deployment, install the @midnight-ntwrk/compact npm package and use its CLI.");
+                return {};
+            }
+
             const std::string seed_hex = read_string({"seed_hex", "seed", "wallet_seed_hex"});
             const std::string initial_nonce_hex = read_string({"initial_nonce_hex", "initial_nonce"});
             const std::string proof_server = read_string({"proof_server", "proofServer"});
@@ -833,6 +903,21 @@ namespace midnight::compact_contracts
                 node_url = rpc_url_;
             }
 
+            // Validate contract_name against strict whitelist to prevent shell injection
+            if (!is_valid_contract_name(contract_name))
+            {
+                throw std::invalid_argument("Invalid contract_name: must contain only alphanumeric characters, underscores, and hyphens");
+            }
+
+            // SECURITY FIX H2: Pass seed via environment variable instead of CLI to prevent exposure via ps/cmdline
+            if (!seed_hex.empty())
+            {
+                if (!set_env_var("MIDNIGHT_DEPLOY_SEED_HEX", seed_hex))
+                {
+                    throw std::runtime_error("Failed to set MIDNIGHT_DEPLOY_SEED_HEX environment variable");
+                }
+            }
+
             std::ostringstream command;
             command << "node " << quote_shell_arg(bridge_script)
                     << " --contract " << quote_shell_arg(contract_name)
@@ -845,7 +930,7 @@ namespace midnight::compact_contracts
 
             if (!seed_hex.empty())
             {
-                command << " --seed " << quote_shell_arg(seed_hex);
+                command << " --seed-from-env MIDNIGHT_DEPLOY_SEED_HEX";
             }
             if (!initial_nonce_hex.empty())
             {

@@ -1,0 +1,21 @@
+# ninja log v7
+1	58	7996853751781829	googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-mkdir	2cbc4a87f7128c5c
+1	58	7996853751781829	D:/venera/midnight/night_fund/.cmake-build/manual/_deps/googletest-subbuild/googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-mkdir	2cbc4a87f7128c5c
+59	1617	7996853767344782	googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-download	26356c8715778f9b
+59	1617	7996853767344782	D:/venera/midnight/night_fund/.cmake-build/manual/_deps/googletest-subbuild/googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-download	26356c8715778f9b
+1617	1683	7996853768025060	googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-update	e9fe82172cb9471f
+1617	1683	7996853768025060	D:/venera/midnight/night_fund/.cmake-build/manual/_deps/googletest-subbuild/googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-update	e9fe82172cb9471f
+1683	1746	7996853768647939	googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-patch	550cd1a6a6403f2f
+1683	1746	7996853768647939	D:/venera/midnight/night_fund/.cmake-build/manual/_deps/googletest-subbuild/googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-patch	550cd1a6a6403f2f
+1746	1801	7996853769202998	googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-configure	ebe0efcae90bd143
+1746	1801	7996853769202998	D:/venera/midnight/night_fund/.cmake-build/manual/_deps/googletest-subbuild/googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-configure	ebe0efcae90bd143
+1801	1858	7996853769766956	googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-build	f3582903d09a7fb1
+1801	1858	7996853769766956	D:/venera/midnight/night_fund/.cmake-build/manual/_deps/googletest-subbuild/googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-build	f3582903d09a7fb1
+1858	1915	7996853770352039	googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-install	c8e1cf3258646b6f
+1858	1915	7996853770352039	D:/venera/midnight/night_fund/.cmake-build/manual/_deps/googletest-subbuild/googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-install	c8e1cf3258646b6f
+1915	1972	7996853770913426	googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-test	a9e87abb8d1f2b4e
+1915	1972	7996853770913426	D:/venera/midnight/night_fund/.cmake-build/manual/_deps/googletest-subbuild/googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-test	a9e87abb8d1f2b4e
+1972	2046	7996853771657141	CMakeFiles/googletest-populate-complete	7e173dcdfe77b9ae
+1972	2046	7996853771657141	googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-done	7e173dcdfe77b9ae
+1972	2046	7996853771657141	D:/venera/midnight/night_fund/.cmake-build/manual/_deps/googletest-subbuild/CMakeFiles/googletest-populate-complete	7e173dcdfe77b9ae
+1972	2046	7996853771657141	D:/venera/midnight/night_fund/.cmake-build/manual/_deps/googletest-subbuild/googletest-populate-prefix/src/googletest-populate-stamp/googletest-populate-done	7e173dcdfe77b9ae

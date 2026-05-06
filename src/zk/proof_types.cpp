@@ -29,9 +29,18 @@ namespace midnight::zk
 
         for (size_t i = 0; i < hex.length(); i += 2)
         {
-            std::string byte_str = hex.substr(i, 2);
-            uint8_t byte = static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16));
-            proof.proof_bytes.push_back(byte);
+            auto nibble = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+                if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+                return -1;
+            };
+            int hi = nibble(hex[i]);
+            int lo = nibble(hex[i + 1]);
+            if (hi < 0 || lo < 0) {
+                throw std::invalid_argument("Non-hex character in proof hex");
+            }
+            proof.proof_bytes.push_back(static_cast<uint8_t>((hi << 4) | lo));
         }
 
         return proof;
@@ -120,9 +129,18 @@ namespace midnight::zk
 
         for (size_t i = 0; i < hex.length(); i += 2)
         {
-            std::string byte_str = hex.substr(i, 2);
-            uint8_t byte = static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16));
-            wo.output_bytes.push_back(byte);
+            auto nibble = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+                if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+                return -1;
+            };
+            int hi = nibble(hex[i]);
+            int lo = nibble(hex[i + 1]);
+            if (hi < 0 || lo < 0) {
+                throw std::invalid_argument("Non-hex character in witness hex");
+            }
+            wo.output_bytes.push_back(static_cast<uint8_t>((hi << 4) | lo));
         }
 
         return wo;

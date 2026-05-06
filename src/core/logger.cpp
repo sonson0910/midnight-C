@@ -20,7 +20,7 @@ namespace midnight
             return "INFO";
         case LogLevel::WARN:
             return "WARN";
-        case LogLevel::ERROR:
+        case LogLevel::ERR:
             return "ERROR";
         case LogLevel::CRITICAL:
             return "CRITICAL";

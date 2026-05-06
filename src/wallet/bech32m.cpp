@@ -313,31 +313,37 @@ ShieldedAddressData decode_shielded(const std::string& address) {
 // ─── Dust Address (BLS Scalar / SCALE BigInt) ────────────────
 
 std::string encode_dust(const std::vector<uint8_t>& dust_scalar_le, Network network) {
-    // The SDK's DustAddress stores a BLS scalar as a bigint.
-    // When encoding to Bech32m, it uses ScaleBigInt.encode(bigint) which
-    // produces a SCALE-encoded little-endian representation.
+    // The SDK's DustAddress stores DustPublicKey as a bigint.
+    // DustPublicKey IS the 32-byte SLIP-10 scalar.
+    // For Bech32m encoding, we use SCALE compact encoding of this bigint.
     //
-    // For the Bech32m codec, the raw scalar bytes are passed directly
-    // (they are already in the correct LE format from the BLS key).
+    // SCALE compact encoding for a 32-byte value (fits in big-integer mode):
+    //   - byte[0] = ((32 - 4) << 2) | 0x03 = (28 << 2) | 0x03 = 0x73
+    //   - byte[1..32] = LE bytes of the scalar
+    //
+    // This matches: DustAddress.serialize() → ScaleBigInt.encode(bigint) → Bech32m
+
     if (dust_scalar_le.empty()) {
         throw std::runtime_error("Dust scalar data must not be empty");
     }
+
+    std::vector<uint8_t> scale_encoded;
+
+    // SCALE big-integer mode: length in bytes (4-bit) | 0x03
+    // For 32-byte scalar: (32 - 4) << 2 | 3 = 28 << 2 | 3 = 112 | 3 = 115 = 0x73
+    uint8_t len_nibbles = static_cast<uint8_t>(((dust_scalar_le.size() - 4) << 2) | 0x03);
+    scale_encoded.push_back(len_nibbles);
+
+    // Append the scalar bytes in little-endian order
+    scale_encoded.insert(scale_encoded.end(), dust_scalar_le.begin(), dust_scalar_le.end());
+
     std::string hrp = get_hrp("dust", network);
-    return bech32m::encode(hrp, dust_scalar_le);
+    return bech32m::encode(hrp, scale_encoded);
 }
 
 std::string encode_dust_from_pubkey(const std::vector<uint8_t>& pubkey_32, Network network) {
-    // Convenience: DustPublicKey in the SDK is a BLS scalar, which may be
-    // derived differently than Ed25519. For our HD wallet, the dust key
-    // is already a 32-byte Ed25519 pubkey.
-    //
-    // The SDK's DustAddress.encodePublicKey converts the DustPublicKey
-    // (BLS scalar) to bytes. Since our C++ wallet derives dust keys via
-    // Ed25519 (like the HD module), we treat the 32-byte pubkey as the
-    // scalar representation directly.
-    //
-    // NOTE: For full SDK parity, this should go through BLS key derivation.
-    // This works for testing and preview network operations.
+    // The dust key is the SLIP-10 derived scalar (32 bytes).
+    // We pass it directly to encode_dust() which applies SCALE encoding.
     if (pubkey_32.size() != 32) {
         throw std::runtime_error("Dust public key must be 32 bytes");
     }

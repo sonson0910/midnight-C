@@ -85,11 +85,22 @@ namespace midnight::network
         WalletState query_wallet_state(const std::string &address);
 
         /**
-         * @brief Query UTXOs for an address
+         * @brief Query UTXOs for an address (full chain scan from genesis)
          * @param address Midnight address
          * @return Vector of UTXOs owned by address
          */
         std::vector<blockchain::UTXO> query_utxos(const std::string &address);
+
+        /**
+         * @brief Query UTXOs for an address within a block range
+         * @param address Midnight address
+         * @param from_block Start block (inclusive)
+         * @param to_block End block (inclusive)
+         * @return Vector of UTXOs created within the block range
+         */
+        std::vector<blockchain::UTXO> query_utxos(const std::string &address,
+                                                  uint32_t from_block,
+                                                  uint32_t to_block);
 
         /**
          * @brief Query contract ledger state
@@ -105,7 +116,14 @@ namespace midnight::network
          * @return JSON object with requested fields
          */
         json query_contract_fields(const std::string &contract_address,
-                                   const std::vector<std::string> &fields);
+                                  const std::vector<std::string> &fields);
+
+        /**
+         * @brief Query a transaction by hash and extract contract-related data
+         * @param tx_hash Transaction hash (hex)
+         * @return JSON with contract actions and metadata
+         */
+        json query_transaction(const std::string &tx_hash);
 
         /**
          * @brief Query DUST registration status

@@ -21,6 +21,7 @@
 #include <functional>
 #include <thread>
 #include <atomic>
+#include <mutex>
 
 namespace midnight::signing_submission
 {
@@ -202,14 +203,14 @@ namespace midnight::signing_submission
         std::string signer_address_;
 
         /**
-         * SR25519 sign operation
+         * Ed25519 sign operation (Midnight unshielded transactions)
          */
-        std::string sr25519_sign(const std::vector<uint8_t> &message);
+        std::string ed25519_sign(const std::vector<uint8_t> &message);
 
         /**
-         * SR25519 verify operation
+         * Ed25519 verify operation (Midnight unshielded transactions)
          */
-        bool sr25519_verify(const std::vector<uint8_t> &message,
+        bool ed25519_verify(const std::vector<uint8_t> &message,
                             const std::string &signature) const;
     };
 
@@ -217,14 +218,14 @@ namespace midnight::signing_submission
      * Finality Vote Signer
      * Signs GRANDPA finality votes with ed25519
      */
-    class FinallityVoteSigner
+    class FinalityVoteSigner
     {
     public:
         /**
          * Constructor
          * @param voter_keypair: ed25519 keypair for validator
          */
-        explicit FinallityVoteSigner(const Keypair &voter_keypair);
+        explicit FinalityVoteSigner(const Keypair &voter_keypair);
 
         /**
          * Sign finality vote
@@ -297,6 +298,7 @@ namespace midnight::signing_submission
         std::string rpc_url_;
         SubmissionTransportMode transport_mode_ = SubmissionTransportMode::MOCK;
         std::map<std::string, SubmissionResult> submission_cache_;
+        mutable std::mutex submission_cache_mutex_; ///< Protects submission_cache_ against concurrent access
 
         /**
          * RPC call to submit transaction

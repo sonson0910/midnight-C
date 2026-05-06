@@ -2,7 +2,9 @@
 #define MIDNIGHT_NETWORK_CLIENT_HPP
 
 #include <string>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 
 namespace midnight::network
@@ -57,11 +59,16 @@ namespace midnight::network
         json get_json(const std::string &path);
 
         /**
-         * @brief Set HTTP header
+         * @brief Set HTTP header (persisted for all subsequent requests)
          * @param header_name Name of header
          * @param header_value Value of header
          */
         void set_header(const std::string &header_name, const std::string &header_value);
+
+        /**
+         * @brief Clear all persisted HTTP headers
+         */
+        void clear_headers();
 
         /**
          * @brief Check connection status
@@ -82,28 +89,24 @@ namespace midnight::network
     private:
         std::string base_url_;
         uint32_t timeout_ms_;
+        mutable std::map<std::string, std::string> headers_;
+        mutable std::mutex headers_mutex_;
 
-        // Platform-specific implementation - could use curl or Windows WinHTTP
-        // For now, we'll provide a mock implementation that can be swapped
+        struct ParsedEndpoint {
+            std::string host;
+            uint16_t port = 80;
+            std::string path_prefix;
+            bool use_tls = false;
+        };
 
-        /**
-         * @brief Internal method to perform HTTP POST
-         * @param path URL path
-         * @param body Request body
-         * @param content_type Content-Type header
-         * @return Response body
-         */
-        std::string http_post(
-            const std::string &path,
-            const std::string &body,
-            const std::string &content_type = "application/json");
+        ParsedEndpoint parse_url(const std::string &url) const;
 
-        /**
-         * @brief Internal method to perform HTTP GET
-         * @param path URL path
-         * @return Response body
-         */
-        std::string http_get(const std::string &path);
+        template<typename ClientT>
+        std::string do_post(ClientT &cli, const std::string &path,
+                           const std::string &body, const std::string &content_type);
+
+        template<typename ClientT>
+        std::string do_get(ClientT &cli, const std::string &path);
     };
 
 } // namespace midnight::network

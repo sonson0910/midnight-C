@@ -13,10 +13,12 @@
  *   --info, -i            Query Midnight runtime info (pallets, Zswap state)
  *   --balance, -b         Query NIGHT balance via Indexer (correct method)
  *   --utxos, -u           List individual unshielded UTXOs
+ *   --faucet, -f          Request NIGHT from faucet
+ *   --transfer, -t AMT     Transfer NIGHT to self (demo)
  *   --help, -h            Show usage
  *
  * Required:
- *   --mnemonic, -m WORDS  24-word BIP39 mnemonic (for balance/utxos)
+ *   --mnemonic, -m WORDS  24-word BIP39 mnemonic (for balance/utxos/transfer)
  *   --rpc, -r URL         RPC endpoint (default: preview)
  *   --indexer URL         Indexer GraphQL URL (default: preview)
  */
@@ -26,12 +28,18 @@
 #include <sstream>
 #include <cstring>
 #include <fstream>
+#include <vector>
+#include <chrono>
+#include <thread>
 
 #include "midnight/wallet/hd_wallet.hpp"
 #include "midnight/wallet/bech32m.hpp"
+#include "midnight/wallet/wallet_facade.hpp"
 #include "midnight/network/substrate_rpc.hpp"
 #include "midnight/network/indexer_client.hpp"
+#include "midnight/network/network_client.hpp"
 #include "midnight/network/network_config.hpp"
+#include "midnight/network/graphql_subscription.hpp"
 
 // ═══════════════════════════════════════════════════════════════
 // Display Helpers
@@ -130,33 +138,17 @@ static int cmd_generate()
     std::cout << "    - Address format: Bech32m (mn_addr_preview1...)\n";
     box_sep();
 
-    std::cout << "  NEXT STEPS:\n";
-    std::cout << "    1. Go to: https://faucet.preview.midnight.network/\n";
-    std::cout << "    2. Paste the UNSHIELDED ADDRESS (mn_addr_preview1...) above\n";
-    std::cout << "    3. Request NIGHT tokens\n";
-    std::cout << "    4. Run: e2e_transfer_night -m \"...\" --balance\n";
-    std::cout << "    5. Run: e2e_transfer_night -m \"...\" --utxos\n";
-    box_end();
+    std::cout << "  SECURITY WARNING:\n";
+    std::cout << "  *** NEVER store your mnemonic digitally! ***\n";
+    std::cout << "  *** This tool will NEVER ask for your mnemonic again! ***\n";
+    std::cout << "  1. WRITE DOWN your mnemonic on paper RIGHT NOW\n";
+    std::cout << "  2. Store the paper in a SECURE, FIREPROOF location\n";
+    std::cout << "  3. NEVER share your mnemonic with anyone\n";
+    std::cout << "  4. NEVER take screenshots or photos of it\n";
+    std::cout << "  5. If you lose it, you lose access to all funds forever\n";
+    box_sep();
 
-    // Save to file
-    std::ofstream f("wallet_preview.txt");
-    if (f.is_open())
-    {
-        f << "Midnight Preview Wallet\n";
-        f << "=======================\n";
-        f << "Mnemonic: " << mnemonic << "\n";
-        f << "\n--- Unshielded Address (Bech32m — for faucet) ---\n";
-        f << "Night Address: " << night_addr << "\n";
-        f << "Dust Address:  " << dust_addr << "\n";
-        f << "\n--- Raw Keys (hex) ---\n";
-        f << "Night Public Key: " << night_key.address << "\n";
-        f << "Dust Public Key:  " << dust_key.address << "\n";
-        f << "Zswap Public Key: " << zswap_key.address << "\n";
-        f << "\nFaucet: https://faucet.preview.midnight.network/\n";
-        f << "Note: Paste the mn_addr_preview1... address into the faucet.\n";
-        f.close();
-        std::cout << "  Wallet saved to: wallet_preview.txt\n\n";
-    }
+    box_end();
 
     return 0;
 }
@@ -262,13 +254,18 @@ static int cmd_balance(const std::string &mnemonic,
     auto hd = HDWallet::from_mnemonic(mnemonic);
     auto night_key = hd.derive_night(0, 0);
 
+    // IMPORTANT: Indexer uses Bech32m format, NOT hex!
+    std::string hex_addr = night_key.address; // 0xf525...
+    std::string bech32m_addr = address::encode_unshielded(night_key.public_key, address::Network::Preview);
+
     box_top("NIGHT Balance — Midnight Preview");
-    box_row("Account:", night_key.address.substr(0, 48) + "...");
+    box_row("Bech32m Address:", bech32m_addr);
+    box_row("Hex Address:", hex_addr.substr(0, 48) + "...");
     box_row("RPC:", rpc_url);
     box_row("Indexer:", indexer_url);
     box_sep();
 
-    // 1. RPC: basic node info
+    // 1. RPC: basic node info (uses hex format)
     try
     {
         SubstrateRPC rpc(rpc_url);
@@ -278,7 +275,7 @@ static int cmd_balance(const std::string &mnemonic,
         box_row("Spec Version:", std::to_string(version.spec_version));
 
         // System.Account (nonce only on Midnight — balance is always 0)
-        auto info = rpc.get_account_info(night_key.address);
+        auto info = rpc.get_account_info(hex_addr);
         box_row("System Nonce:", std::to_string(info.nonce));
         box_row("System Balance:", std::to_string(info.free) + " (always 0 — NIGHT is UTXO)");
     }
@@ -296,8 +293,8 @@ static int cmd_balance(const std::string &mnemonic,
     {
         IndexerClient indexer(indexer_url);
 
-        // Query wallet state
-        auto wallet_state = indexer.query_wallet_state(night_key.address);
+        // Query wallet state using Bech32m address!
+        auto wallet_state = indexer.query_wallet_state(bech32m_addr);
 
         if (!wallet_state.error.empty())
         {
@@ -372,14 +369,16 @@ static int cmd_utxos(const std::string &mnemonic,
     auto night_key = hd.derive_night(0, 0);
 
     box_top("Unshielded NIGHT UTXOs — Preview Network");
-    box_row("Account:", night_key.address.substr(0, 48) + "...");
+    std::string bech32m_addr = address::encode_unshielded(night_key.public_key, address::Network::Preview);
+    box_row("Bech32m Address:", bech32m_addr);
     box_row("Indexer:", indexer_url);
     box_sep();
 
     try
     {
         IndexerClient indexer(indexer_url);
-        auto utxos = indexer.query_utxos(night_key.address);
+        // bech32m_addr already defined above
+        auto utxos = indexer.query_utxos(bech32m_addr);
 
         if (utxos.empty())
         {
@@ -413,6 +412,330 @@ static int cmd_utxos(const std::string &mnemonic,
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Command: Request NIGHT from Faucet
+// ═══════════════════════════════════════════════════════════════
+
+static int cmd_faucet(const std::string &mnemonic,
+                      const std::string &rpc_url,
+                      const std::string &faucet_url)
+{
+    using namespace midnight::wallet;
+    using namespace midnight::network;
+
+    auto hd = HDWallet::from_mnemonic(mnemonic);
+    auto night_key = hd.derive_night(0, 0);
+
+    // Generate unshielded address
+    std::string night_addr = address::encode_unshielded(
+        night_key.public_key, address::Network::Preview);
+
+    box_top("NIGHT Faucet — Midnight Preview");
+    box_row("Address:", night_addr);
+    box_row("Faucet:", faucet_url);
+    box_sep();
+
+    // Build faucet request using NetworkClient
+    try
+    {
+        NetworkClient client(faucet_url, 30000);
+
+        // Try common faucet formats
+        std::cout << "  Requesting NIGHT from faucet...\n";
+        std::cout << "  Address: " << night_addr << "\n";
+
+        // Format 1: JSON-RPC style request
+        try
+        {
+            nlohmann::json request = {
+                {"jsonrpc", "2.0"},
+                {"method", "request_tokens"},
+                {"params", {
+                    {"address", night_addr},
+                    {"network", "preview"}
+                }},
+                {"id", 1}
+            };
+
+            auto response = client.post_json("/", request);
+            std::cout << "  JSON-RPC Response: " << response.dump() << "\n";
+        }
+        catch (const std::exception &e)
+        {
+            std::cout << "  JSON-RPC failed: " << e.what() << "\n";
+        }
+
+        box_sep();
+        std::cout << "  Wait 15 seconds for tokens to arrive...\n";
+        std::this_thread::sleep_for(std::chrono::seconds(15));
+
+        // Check balance after faucet
+        IndexerClient indexer("https://indexer.preview.midnight.network/api/v4/graphql");
+        auto utxos = indexer.query_utxos(night_addr);
+        uint64_t total = 0;
+        for (const auto &utxo : utxos)
+            total += utxo.amount;
+
+        box_row("  UTXOs after faucet:", std::to_string(utxos.size()));
+        box_row("  Total NIGHT:", std::to_string(total));
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "  Faucet request failed: " << e.what() << "\n";
+    }
+
+    box_sep();
+    std::cout << "  NOTE: If faucet requires Discord/Twitter auth,\n";
+    std::cout << "  use the web interface: https://faucet.preview.midnight.network\n";
+    box_end();
+
+    return 0;
+}
+
+static int cmd_register_dust(const std::string &mnemonic,
+                           const std::string &rpc_url,
+                           const std::string &indexer_url,
+                           uint64_t night_amount)
+{
+    using namespace midnight::wallet;
+    using namespace midnight::network;
+
+    box_top("DUST Registration — Midnight Preview");
+    box_row("RPC:", rpc_url);
+    box_row("Indexer:", indexer_url);
+    box_row("NIGHT Amount:", std::to_string(night_amount));
+    box_sep();
+
+    // Create wallet facade
+    WalletFacade wallet = WalletFacade::from_mnemonic(mnemonic, indexer_url);
+
+    // Get our address
+    std::string unshield_addr = wallet.unshielded_address();
+    box_row("From:", unshield_addr);
+    box_sep();
+
+    // Sync wallet state
+    std::cout << "  [1/4] Syncing wallet state...\n";
+    wallet.sync();
+
+    uint64_t balance = wallet.balance("NIGHT");
+    box_row("  NIGHT Balance:", std::to_string(balance));
+
+    if (balance < night_amount)
+    {
+        std::cerr << "  ERROR: Insufficient NIGHT balance!\n";
+        std::cerr << "  Need " << night_amount << " but only have " << balance << "\n";
+        box_end();
+        return 1;
+    }
+
+    // Step 2: Register for dust
+    std::cout << "  [2/4] Registering for dust generation...\n";
+    auto result = wallet.register_for_dust(night_amount);
+    if (result.error)
+    {
+        std::cerr << "  ERROR: Registration failed: " << result.error_message() << "\n";
+        box_end();
+        return 1;
+    }
+
+    std::cout << "  [2/4] Dust registration successful!\n";
+    box_row("  TX Hash:", result.tx_hash);
+    box_row("  Est. DUST/epoch:", std::to_string(result.estimated_dust_per_epoch));
+    box_sep();
+
+    // Step 3: Wait for confirmation
+    std::cout << "  [3/4] Waiting for transaction confirmation...\n";
+    std::this_thread::sleep_for(std::chrono::seconds(6));
+
+    // Step 4: Verify dust balance
+    std::cout << "  [4/4] Verifying dust registration...\n";
+    wallet.sync();
+    auto dust_balance = wallet.balance("DUST");
+    box_row("  DUST Balance:", std::to_string(dust_balance));
+    box_sep();
+
+    std::cout << "  Dust registration complete!\n";
+    std::cout << "  TX Hash: " << result.tx_hash << "\n";
+    std::cout << "  Monitor at: https://preview.midnight.network/tx/" << result.tx_hash << "\n";
+
+    box_end();
+    return 0;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Command: Real-time Balance Tracking via WebSocket
+// ═══════════════════════════════════════════════════════════════
+
+static int cmd_realtime(const std::string &mnemonic,
+                        const std::string &indexer_url)
+{
+    using namespace midnight::wallet;
+    using namespace midnight::network;
+
+    auto hd = HDWallet::from_mnemonic(mnemonic);
+    auto night_key = hd.derive_night(0, 0);
+
+    // IMPORTANT: Indexer uses Bech32m format!
+    std::string bech32m_addr = address::encode_unshielded(night_key.public_key, address::Network::Preview);
+
+    box_top("Real-time Balance Tracker — Midnight Preview");
+    box_row("Address:", bech32m_addr);
+    box_row("WS Indexer:", "wss://indexer.preview.midnight.network/api/v4/graphql");
+    box_row("HTTP Indexer:", indexer_url);
+    box_sep();
+
+    std::cout << "  Connecting to Midnight Indexer WebSocket...\n";
+    std::cout << "  Tracking UTXO changes for your address in real-time.\n";
+    std::cout << "  Press Ctrl+C to exit.\n";
+    box_sep();
+
+    // Create realtime client
+    std::string ws_url = "wss://indexer.preview.midnight.network/api/v4/graphql";
+    RealtimeIndexerClient client(ws_url, indexer_url);
+
+    // Set up callbacks
+    client.on_connection([](bool ok, const std::string &msg) {
+        if (ok) {
+            std::cout << "  [WS] Connected: " << msg << "\n";
+        } else {
+            std::cout << "  [WS] Disconnected: " << msg << "\n";
+        }
+    });
+
+    client.on_balance([](const std::string &token, uint64_t bal) {
+        std::cout << "  [BALANCE] " << token << ": " << bal << " units\n";
+    });
+
+    client.on_utxo([](const UnshieldedTxEvent &evt) {
+        for (auto &u : evt.created) {
+            std::cout << "  [UTXO] Created: " << u.amount << " " << u.token_type
+                      << " (tx: " << u.tx_hash.substr(0, 16) << "...)\n";
+        }
+        for (auto &u : evt.spent) {
+            std::cout << "  [UTXO] Spent: " << u.amount << " " << u.token_type
+                      << " (tx: " << u.tx_hash.substr(0, 16) << "...)\n";
+        }
+    });
+
+    // Initialize state and subscribe
+    if (!client.subscribe(bech32m_addr)) {
+        std::cerr << "  ERROR: Failed to subscribe to indexer\n";
+        box_end();
+        return 1;
+    }
+
+    std::cout << "  Subscribed! Waiting for real-time events...\n";
+    std::cout << "  (This will track faucet deposits, transfers, etc.)\n\n";
+
+    // Run blocking message loop (until Ctrl+C or disconnect)
+    client.run();
+
+    box_end();
+    return 0;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Command: Transfer NIGHT
+// ═══════════════════════════════════════════════════════════════
+
+static int cmd_transfer(const std::string &mnemonic,
+                       uint64_t amount,
+                       const std::string &rpc_url,
+                       const std::string &indexer_url)
+{
+    using namespace midnight::wallet;
+    using namespace midnight::network;
+
+    box_top("NIGHT Transfer — Midnight Preview");
+    box_row("RPC:", rpc_url);
+    box_row("Indexer:", indexer_url);
+    box_sep();
+
+    // Create wallet facade
+    WalletFacade wallet = WalletFacade::from_mnemonic(mnemonic, indexer_url);
+
+    // Get our address
+    std::string unshield_addr = wallet.unshielded_address();
+    std::cout << "  From: " << unshield_addr << "\n";
+    box_sep();
+
+    // Sync wallet state
+    std::cout << "  [1/5] Syncing wallet state...\n";
+    wallet.sync();
+
+    uint64_t balance = wallet.balance("NIGHT");
+    box_row("  Available NIGHT:", std::to_string(balance));
+    box_row("  Amount to send:", std::to_string(amount));
+    box_sep();
+
+    if (balance < amount)
+    {
+        std::cerr << "  ERROR: Insufficient balance!\n";
+        std::cerr << "  Request NIGHT from faucet first.\n";
+        box_end();
+        return 1;
+    }
+
+    // Step 1: Build transfer
+    std::cout << "  [2/5] Building transfer...\n";
+    std::vector<TokenTransfer> outputs = {
+        {amount, "NIGHT", unshield_addr}  // Send to self for demo
+    };
+    auto tx_result = wallet.build_transfer(outputs);
+    if (tx_result.error)
+    {
+        std::cerr << "  ERROR: Build failed: " << tx_result.error_message() << "\n";
+        box_end();
+        return 1;
+    }
+    std::cout << "  [2/5] Transfer built successfully\n";
+
+    // Step 2: Sign transaction
+    std::cout << "  [3/5] Signing transaction...\n";
+    auto signed_tx = wallet.sign_transaction(tx_result);
+    if (signed_tx.error)
+    {
+        std::cerr << "  ERROR: Sign failed: " << signed_tx.error_message() << "\n";
+        box_end();
+        return 1;
+    }
+    std::cout << "  [3/5] Transaction signed\n";
+
+    // Step 3: Full transfer with proof (combines sign + prove + balance + submit)
+    std::cout << "  [4/5] Generating ZK proof and balancing...\n";
+    std::cout << "  (This may take a moment for the proving circuit)\n";
+
+    auto transfer_result = wallet.transfer_transaction(outputs, true);
+    if (transfer_result.error)
+    {
+        std::cerr << "  ERROR: Transfer failed: " << transfer_result.error_message() << "\n";
+        box_end();
+        return 1;
+    }
+
+    // Step 5: Submit
+    std::cout << "  [5/5] Submitting to network...\n";
+    auto submission = wallet.submit_transaction(transfer_result);
+    if (submission.is_error())
+    {
+        std::cerr << "  ERROR: Submission failed: " << submission.error << "\n";
+        box_end();
+        return 1;
+    }
+
+    box_row("  TX Hash:", submission.tx_hash);
+    box_row("  Block:", std::to_string(submission.block_number));
+    box_sep();
+
+    std::cout << "  Transfer submitted!\n";
+    std::cout << "  TX Hash: " << submission.tx_hash << "\n";
+    std::cout << "  Monitor at: https://preview.midnight.network/tx/" << submission.tx_hash << "\n";
+
+    box_end();
+    return 0;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Main
 // ═══════════════════════════════════════════════════════════════
 
@@ -423,8 +746,15 @@ int main(int argc, char *argv[])
     bool do_info = false;
     bool do_balance = false;
     bool do_utxos = false;
+    bool do_faucet = false;
+    bool do_transfer = false;
+    bool do_register_dust = false;
+    bool do_realtime = false;
+    uint64_t transfer_amount = 0;
+    uint64_t dust_amount = 0;
     std::string rpc_url = "https://rpc.preview.midnight.network";
     std::string indexer_url = "https://indexer.preview.midnight.network/api/v4/graphql";
+    std::string faucet_url = "https://faucet.preview.midnight.network";
 
     // Parse arguments
     for (int i = 1; i < argc; ++i)
@@ -439,24 +769,53 @@ int main(int argc, char *argv[])
             do_balance = true;
         else if (arg == "--utxos" || arg == "-u")
             do_utxos = true;
+        else if (arg == "--faucet" || arg == "-f")
+            do_faucet = true;
+        else if (arg == "--register-dust" || arg == "--dust" || arg == "-d")
+        {
+            do_register_dust = true;
+            if (i + 1 < argc)
+            {
+                dust_amount = std::stoull(argv[++i]);
+            }
+        }
+        else if (arg == "--realtime" || arg == "--rt")
+        {
+            do_realtime = true;
+        }
+        else if (arg == "--transfer" || arg == "-t")
+        {
+            do_transfer = true;
+            if (i + 1 < argc)
+            {
+                transfer_amount = std::stoull(argv[++i]);
+            }
+        }
         else if ((arg == "--mnemonic" || arg == "-m") && i + 1 < argc)
             mnemonic = argv[++i];
         else if ((arg == "--rpc" || arg == "-r") && i + 1 < argc)
             rpc_url = argv[++i];
         else if (arg == "--indexer" && i + 1 < argc)
             indexer_url = argv[++i];
+        else if (arg == "--faucet-url" && i + 1 < argc)
+            faucet_url = argv[++i];
         else if (arg == "--help" || arg == "-h")
         {
             std::cout << "Midnight E2E Validation Tool (Correct Workflow)\n\n";
             std::cout << "Commands:\n";
             std::cout << "  --generate, -g           Generate new wallet + show faucet address\n";
             std::cout << "  --info, -i               Query Midnight runtime info\n";
-            std::cout << "  --balance, -b             Check NIGHT balance via Indexer (correct)\n";
-            std::cout << "  --utxos, -u              List unshielded NIGHT UTXOs\n\n";
+            std::cout << "  --balance, -b           Check NIGHT balance via Indexer (correct)\n";
+            std::cout << "  --utxos, -u             List unshielded NIGHT UTXOs\n";
+            std::cout << "  --faucet, -f            Request NIGHT from faucet\n";
+            std::cout << "  --register-dust, -d AMT  Register for dust generation\n";
+            std::cout << "  --transfer, -t AMT       Transfer NIGHT (requires --mnemonic)\n";
+            std::cout << "  --realtime, --rt        Real-time balance tracking via WebSocket\n\n";
             std::cout << "Options:\n";
             std::cout << "  --mnemonic, -m WORDS     24-word BIP39 mnemonic\n";
-            std::cout << "  --rpc, -r URL            RPC endpoint (default: preview)\n";
-            std::cout << "  --indexer URL            Indexer GraphQL URL (default: preview)\n\n";
+            std::cout << "  --rpc, -r URL           RPC endpoint (default: preview)\n";
+            std::cout << "  --indexer URL           Indexer GraphQL URL (default: preview)\n";
+            std::cout << "  --faucet-url URL        Faucet URL (default: preview faucet)\n\n";
             std::cout << "Architecture:\n";
             std::cout << "  Midnight does NOT use Substrate Balances pallet.\n";
             std::cout << "  NIGHT tokens live in the Zswap UTXO set.\n";
@@ -467,7 +826,8 @@ int main(int argc, char *argv[])
             std::cout << "  e2e_transfer_night --generate\n";
             std::cout << "  e2e_transfer_night --info\n";
             std::cout << "  e2e_transfer_night -m \"word1 word2 ...\" --balance\n";
-            std::cout << "  e2e_transfer_night -m \"word1 word2 ...\" --utxos\n";
+            std::cout << "  e2e_transfer_night -m \"word1 word2 ...\" --faucet\n";
+            std::cout << "  e2e_transfer_night -m \"word1 word2 ...\" --transfer 1000000\n";
             return 0;
         }
     }
@@ -479,9 +839,66 @@ int main(int argc, char *argv[])
     if (do_info)
         return cmd_info(rpc_url);
 
+    // Auto-load mnemonic from mnemonic.seed if not provided
+    if (mnemonic.empty()) {
+        std::vector<std::string> search_paths = {
+            "mnemonic.seed",                                    // current directory (manual)
+            "d:/venera/midnight/night_fund/mnemonic.seed",    // absolute path
+            "d:\\venera\\midnight\\night_fund\\mnemonic.seed", // Windows absolute path
+            "../../../mnemonic.seed",                           // from manual/ up to project root
+        };
+
+        for (const auto& sp : search_paths) {
+            std::ifstream seed_file(sp);
+            if (seed_file.is_open()) {
+                std::string line;
+                int line_num = 0;
+                while (std::getline(seed_file, line)) {
+                    line_num++;
+                    // Remove any "Mnemonic:" prefix if present
+                    if (line.rfind("Mnemonic:", 0) == 0) {
+                        line = line.substr(9);
+                    }
+                    // Trim leading spaces
+                    size_t start = line.find_first_not_of(" \t\r\n");
+                    if (start != std::string::npos) {
+                        line = line.substr(start);
+                    }
+                    // Trim trailing whitespace
+                    size_t end = line.find_last_not_of(" \t\r\n");
+                    if (end != std::string::npos) {
+                        line = line.substr(0, end + 1);
+                    }
+                    // Count words - should be 24 for valid BIP39
+                    std::istringstream iss(line);
+                    std::string word;
+                    int word_count = 0;
+                    while (iss >> word) word_count++;
+                    if (word_count >= 12) {
+                        mnemonic = line;
+                        std::cerr << "[INFO] Loaded mnemonic (" << word_count << " words) from: " << sp << "\n";
+                        break;
+                    }
+                }
+                seed_file.close();
+                if (mnemonic.empty()) {
+                    std::cerr << "[WARN] File opened but no valid mnemonic found (need >= 12 words)\n";
+                }
+            } else {
+                std::cerr << "[DEBUG] Could not open: " << sp << "\n";
+            }
+        }
+    }
+
     if (mnemonic.empty() && (do_balance || do_utxos))
     {
         std::cerr << "Error: --mnemonic required for balance/utxo queries\n";
+        return 1;
+    }
+
+    if (mnemonic.empty() && (do_faucet || do_transfer || do_register_dust || do_realtime))
+    {
+        std::cerr << "Error: --mnemonic required for faucet/transfer/dust/realtime commands\n";
         return 1;
     }
 
@@ -491,6 +908,42 @@ int main(int argc, char *argv[])
     if (do_utxos)
         return cmd_utxos(mnemonic, indexer_url);
 
-    // Default: show info
-    return cmd_info(rpc_url);
+    if (do_faucet)
+        return cmd_faucet(mnemonic, rpc_url, faucet_url);
+
+    if (do_register_dust)
+    {
+        if (dust_amount == 0)
+        {
+            std::cerr << "Error: --register-dust requires a NIGHT amount\n";
+            return 1;
+        }
+        return cmd_register_dust(mnemonic, rpc_url, indexer_url, dust_amount);
+    }
+
+    if (do_transfer)
+    {
+        if (transfer_amount == 0)
+        {
+            std::cerr << "Error: --transfer requires an amount\n";
+            return 1;
+        }
+        return cmd_transfer(mnemonic, transfer_amount, rpc_url, indexer_url);
+    }
+
+    if (do_realtime)
+    {
+        return cmd_realtime(mnemonic, indexer_url);
+    }
+
+    // Default: show help
+    std::cout << "Midnight E2E Tool — Preview Network\n\n";
+    std::cout << "Usage: e2e_transfer_night [options]\n";
+    std::cout << "Try:   e2e_transfer_night --generate\n";
+    std::cout << "       e2e_transfer_night --info\n";
+    std::cout << "       e2e_transfer_night -m \"...\" --balance\n";
+    std::cout << "       e2e_transfer_night -m \"...\" --faucet\n";
+    std::cout << "       e2e_transfer_night -m \"...\" -t 1000000\n";
+    std::cout << "       e2e_transfer_night --help\n\n";
+    return 0;
 }

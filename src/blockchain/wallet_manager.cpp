@@ -1,9 +1,11 @@
 #include "midnight/blockchain/wallet_manager.hpp"
+#include "midnight/crypto/state_encryption.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <chrono>
+#include <thread>
 #include <cctype>
 #include <ctime>
 #include <cstdlib>
@@ -12,10 +14,21 @@
 #include <fstream>
 #include <iomanip>
 #include <optional>
+
+// Forward declaration for helper function - placed inside namespace
+namespace midnight::blockchain
+{
+    std::optional<std::vector<uint8_t>> base64_decode_state(const std::string& input);
+}
+
 #include <sstream>
 #include <string>
 #include <system_error>
 #include <vector>
+
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 #if defined(MIDNIGHT_ENABLE_OPENSSL_CRYPTO) && MIDNIGHT_ENABLE_OPENSSL_CRYPTO
 #include <openssl/evp.h>
@@ -484,6 +497,10 @@ namespace midnight::blockchain
 
         bool read_wallet_json(const std::filesystem::path &wallet_path, nlohmann::json &json_out, std::string *error)
         {
+#if !MIDNIGHT_HAS_OPENSSL_CRYPTO
+            throw std::runtime_error("Wallet storage requires OpenSSL crypto support. Please compile with MIDNIGHT_ENABLE_OPENSSL_CRYPTO enabled.");
+#endif
+
             std::ifstream input(wallet_path, std::ios::in | std::ios::binary);
             if (!input)
             {
@@ -508,12 +525,14 @@ namespace midnight::blockchain
         {
             const auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
             const auto temp_path = wallet_path.parent_path() / (wallet_path.filename().string() + ".tmp." + std::to_string(now));
+            std::error_code ec;
 
             {
                 std::ofstream out(temp_path, std::ios::out | std::ios::trunc | std::ios::binary);
                 if (!out)
                 {
                     set_error(error, "Failed to write temporary wallet file: " + temp_path.string());
+                    std::filesystem::remove(temp_path, ec);
                     return false;
                 }
 
@@ -521,11 +540,36 @@ namespace midnight::blockchain
                 if (!out.good())
                 {
                     set_error(error, "Failed to persist wallet payload to temporary file");
+                    std::filesystem::remove(temp_path, ec);
                     return false;
                 }
             }
 
-            std::error_code ec;
+#ifndef _WIN32
+            // SECURITY FIX: Set restrictive permissions AFTER file creation, using replace to ensure
+            // ONLY owner_read|owner_write remain — removes any group/world read added by default umask.
+            // Must be done BEFORE rename to prevent any window where the file is world-readable.
+            std::filesystem::permissions(
+                temp_path,
+                std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+                std::filesystem::perm_options::replace,
+                ec);
+            if (ec)
+            {
+                set_error(error, "Failed to set restrictive permissions on temp wallet file: " + ec.message());
+                std::filesystem::remove(temp_path, ec);
+                return false;
+            }
+#else
+            // On Windows, set the temp file hidden + read-only to restrict access.
+            DWORD attrs = GetFileAttributesW(temp_path.wstring().c_str());
+            if (attrs != INVALID_FILE_ATTRIBUTES)
+            {
+                SetFileAttributesW(temp_path.wstring().c_str(),
+                    attrs | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_READONLY);
+            }
+#endif
+
             if (std::filesystem::exists(wallet_path, ec))
             {
                 ec.clear();
@@ -545,15 +589,6 @@ namespace midnight::blockchain
                 set_error(error, "Failed to move wallet file into place: " + ec.message());
                 return false;
             }
-
-#ifndef _WIN32
-            std::filesystem::permissions(
-                wallet_path,
-                std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-                std::filesystem::perm_options::replace,
-                ec);
-            (void)ec;
-#endif
 
             return true;
         }
@@ -623,23 +658,18 @@ namespace midnight::blockchain
         }
 #endif
 
+#if !MIDNIGHT_HAS_OPENSSL_CRYPTO
+        throw std::runtime_error("Wallet storage requires OpenSSL crypto support. Please compile with MIDNIGHT_ENABLE_OPENSSL_CRYPTO enabled.");
+#else
         const nlohmann::json payload = {
-#if MIDNIGHT_HAS_OPENSSL_CRYPTO
             {"version", 2},
             {"alias", alias},
             {"network", network},
             {"seedCipher", seed_cipher_payload},
             {"createdAt", created_at},
             {"updatedAt", now_utc_iso8601()}
-#else
-            {"version", 1},
-            {"alias", alias},
-            {"network", network},
-            {"seedHex", normalized_seed},
-            {"createdAt", created_at},
-            {"updatedAt", now_utc_iso8601()}
-#endif
         };
+#endif
 
         if (!write_wallet_json(wallet_path, payload, error))
         {
@@ -810,16 +840,28 @@ namespace midnight::blockchain
         const std::filesystem::path wallet_path = alias_file_path(store_path, alias);
 
         std::error_code ec;
-        const bool removed = std::filesystem::remove(wallet_path, ec);
-        if (ec)
-        {
-            set_error(error, "Failed to remove wallet alias: " + ec.message());
-            return false;
+        bool removed = std::filesystem::remove(wallet_path, ec);
+
+#if defined(_WIN32)
+        // Windows: file may be locked by the process itself. Clear readonly attribute and retry.
+        if (!removed) {
+            DWORD attrs = GetFileAttributesW(wallet_path.c_str());
+            if (attrs != INVALID_FILE_ATTRIBUTES) {
+                SetFileAttributesW(wallet_path.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY);
+            }
+            // Flush file buffers to release any held handles
+            HANDLE fh = CreateFileW(wallet_path.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (fh != INVALID_HANDLE_VALUE) {
+                FlushFileBuffers(fh);
+                CloseHandle(fh);
+            }
+            removed = std::filesystem::remove(wallet_path, ec);
         }
+#endif
 
         if (!removed)
         {
-            set_error(error, "Wallet alias not found: " + alias);
+            set_error(error, ec ? ("Failed to remove wallet alias: " + ec.message()) : "Wallet alias not found: " + alias);
             return false;
         }
 
@@ -828,5 +870,182 @@ namespace midnight::blockchain
             error->clear();
         }
         return true;
+    }
+
+    bool WalletManager::save_encrypted(
+        const std::string &alias,
+        const std::string &encrypted_state,
+        const std::string &store_dir,
+        std::string *error)
+    {
+        if (!is_valid_alias(alias))
+        {
+            set_error(error, "Invalid wallet alias. Use 3-64 chars [A-Za-z0-9._-], starting and ending with alphanumeric.");
+            return false;
+        }
+
+        const std::filesystem::path store_path = resolve_store_dir_canonical(store_dir);
+        if (!ensure_store_dir(store_path, error))
+        {
+            return false;
+        }
+
+        const std::filesystem::path wallet_path = alias_file_path(store_path, alias);
+
+        std::string created_at = now_utc_iso8601();
+        nlohmann::json existing;
+        if (read_wallet_json(wallet_path, existing, nullptr))
+        {
+            const std::string existing_created_at = existing.value("createdAt", "");
+            if (!existing_created_at.empty())
+            {
+                created_at = existing_created_at;
+            }
+        }
+
+        // Create encrypted wallet payload
+        const nlohmann::json payload = {
+            {"version", 3},
+            {"alias", alias},
+            {"encryptedState", encrypted_state},
+            {"createdAt", created_at},
+            {"updatedAt", now_utc_iso8601()}
+        };
+
+        if (!write_wallet_json(wallet_path, payload, error))
+        {
+            return false;
+        }
+
+        if (error != nullptr)
+        {
+            error->clear();
+        }
+        return true;
+    }
+
+    std::optional<std::string> WalletManager::load_encrypted(
+        const std::string &alias,
+        const std::string &password,
+        const std::string &store_dir,
+        std::string *error)
+    {
+        if (!is_valid_alias(alias))
+        {
+            set_error(error, "Invalid wallet alias. Use 3-64 chars [A-Za-z0-9._-], starting and ending with alphanumeric.");
+            return std::nullopt;
+        }
+
+        const std::filesystem::path store_path = resolve_store_dir_canonical(store_dir);
+        const std::filesystem::path wallet_path = alias_file_path(store_path, alias);
+
+        nlohmann::json payload;
+        if (!read_wallet_json(wallet_path, payload, error))
+        {
+            return std::nullopt;
+        }
+
+        // Check if this is an encrypted wallet (version 3)
+        const int version = payload.value("version", 1);
+        if (version != 3)
+        {
+            set_error(error, "Wallet is not in encrypted format (version " + std::to_string(version) + ")");
+            return std::nullopt;
+        }
+
+        const std::string encrypted_state = payload.value("encryptedState", "");
+        if (encrypted_state.empty())
+        {
+            set_error(error, "Wallet file is missing encrypted state data");
+            return std::nullopt;
+        }
+
+        // Base64 decode
+        auto decoded = base64_decode_state(encrypted_state);
+        if (!decoded)
+        {
+            set_error(error, "Failed to decode encrypted state - invalid base64");
+            return std::nullopt;
+        }
+
+        // Decrypt
+        auto decrypted = midnight::crypto::EncryptedState::decrypt(*decoded, password);
+        if (!decrypted)
+        {
+            set_error(error, "Failed to decrypt wallet - wrong password or corrupted data");
+            return std::nullopt;
+        }
+
+        if (error != nullptr)
+        {
+            error->clear();
+        }
+        return decrypted;
+    }
+
+    bool WalletManager::is_encrypted_wallet(
+        const std::string &alias,
+        const std::string &store_dir)
+    {
+        if (!is_valid_alias(alias))
+        {
+            return false;
+        }
+
+        const std::filesystem::path store_path = resolve_store_dir_canonical(store_dir);
+        const std::filesystem::path wallet_path = alias_file_path(store_path, alias);
+
+        nlohmann::json payload;
+        std::string dummy_error;
+        if (!read_wallet_json(wallet_path, payload, &dummy_error))
+        {
+            return false;
+        }
+
+        // Version 3 indicates encrypted wallet state format
+        return payload.value("version", 1) == 3;
+    }
+
+    // Helper for base64 decoding
+    std::optional<std::vector<uint8_t>> base64_decode_state(const std::string& input) {
+        static int b64_table[256] = {};
+        static bool initialized = false;
+        
+        if (!initialized) {
+            for (int i = 0; i < 256; i++) b64_table[i] = -1;
+            const char* b64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            for (int i = 0; b64_chars[i]; i++) {
+                b64_table[(unsigned char)b64_chars[i]] = i;
+            }
+            initialized = true;
+        }
+        
+        std::vector<uint8_t> result;
+        int i = 0;
+        uint8_t char_array_4[4];
+        
+        for (char c : input) {
+            if (c == '=') break;
+            if (!isalnum((unsigned char)c) && c != '+' && c != '/') continue;
+            char_array_4[i++] = (unsigned char)c;
+            if (i == 4) {
+                for (int k = 0; k < 4; k++) {
+                    char_array_4[k] = (unsigned char)b64_table[char_array_4[k]];
+                }
+                result.push_back((char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4));
+                result.push_back(((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2));
+                result.push_back(((char_array_4[2] & 0x3) << 6) + char_array_4[3]);
+                i = 0;
+            }
+        }
+        
+        if (i > 0) {
+            for (int k = i; k < 4; k++) char_array_4[k] = 0;
+            for (int k = 0; k < i - 1; k++) {
+                result.push_back((char_array_4[k] << 2) + ((char_array_4[k+1] & 0x30) >> 4));
+            }
+        }
+        
+        return result;
     }
 } // namespace midnight::blockchain

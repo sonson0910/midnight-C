@@ -296,52 +296,150 @@ namespace midnight::blockchain
         const std::vector<std::pair<std::string, uint64_t>> &outputs,
         const std::string &change_address)
     {
-
         Result result{false, "", ""};
+
         if (utxos.empty())
         {
             result.error_message = "No UTXOs provided";
+            midnight::g_logger->error(result.error_message);
             return result;
         }
 
         if (outputs.empty())
         {
             result.error_message = "No outputs specified";
+            midnight::g_logger->error(result.error_message);
             return result;
         }
 
-        midnight::g_logger->debug("Building Midnight transaction");
+        midnight::g_logger->info("Building Midnight transaction with UTXO selection");
 
-        uint64_t total_input = 0;
-        for (const auto &utxo : utxos)
+        try
         {
-            total_input += utxo.amount;
-        }
+            // Create a new Transaction object
+            Transaction tx;
 
-        uint64_t total_output = 0;
-        for (const auto &output : outputs)
-        {
-            total_output += output.second;
-        }
+            // Step 1: Add inputs from UTXOs
+            for (const auto &utxo : utxos)
+            {
+                Transaction::Input input;
+                input.tx_hash = utxo.tx_hash;
+                input.output_index = utxo.output_index;
+                tx.add_input(input);
+            }
 
-        uint64_t fee = calculate_min_fee(256); // Estimate fee
+            midnight::g_logger->debug("Added " + std::to_string(utxos.size()) + " inputs to transaction");
 
-        if (total_input < total_output + fee)
-        {
-            result.error_message = "Insufficient funds for transaction and fees";
+            // Step 2: Calculate total input and output amounts
+            uint64_t total_input = 0;
+            for (const auto &utxo : utxos)
+            {
+                total_input += utxo.amount;
+            }
+
+            uint64_t total_output = 0;
+            for (const auto &output : outputs)
+            {
+                total_output += output.second;
+            }
+
+            // Step 3: Add outputs
+            for (const auto &output : outputs)
+            {
+                Transaction::Output tx_output;
+                tx_output.address = output.first;
+                tx_output.amount = output.second;
+                // Initialize empty multi-assets map
+                tx_output.assets = {};
+                tx.add_output(tx_output);
+            }
+
+            midnight::g_logger->debug("Added " + std::to_string(outputs.size()) + " outputs to transaction");
+
+            // Step 4: Set validity interval (TTL = 100 blocks from now)
+            // Get current block height if connected, otherwise use default
+            uint64_t current_height = 0;
+            if (connected_ && rpc_)
+            {
+                try
+                {
+                    auto tip = rpc_->get_chain_tip();
+                    current_height = tip.first;
+                }
+                catch (const std::exception &e)
+                {
+                    midnight::g_logger->warn("Could not get chain tip, using default validity");
+                }
+            }
+
+            const uint64_t ttl = 100;
+            tx.set_validity(current_height + ttl, current_height);
+
+            midnight::g_logger->debug("Set validity: " + std::to_string(current_height) +
+                                      " to " + std::to_string(current_height + ttl));
+
+            // Step 5: Calculate fee based on transaction size
+            const size_t tx_size = tx.get_size();
+            const uint64_t fee = calculate_min_fee(tx_size);
+
+            midnight::g_logger->debug("Transaction size: " + std::to_string(tx_size) + " bytes, fee: " + std::to_string(fee));
+
+            // Step 6: Validate sufficient funds
+            if (total_input < total_output + fee)
+            {
+                result.error_message = "Insufficient funds: need " +
+                                       std::to_string(total_output + fee) +
+                                       " but have " + std::to_string(total_input);
+                midnight::g_logger->error(result.error_message);
+                return result;
+            }
+
+            // Step 7: Add change output if there's leftover
+            if (total_input > total_output + fee && !change_address.empty())
+            {
+                const uint64_t change_amount = total_input - total_output - fee;
+                Transaction::Output change_output;
+                change_output.address = change_address;
+                change_output.amount = change_amount;
+                change_output.assets = {};
+                tx.add_output(change_output);
+
+                std::ostringstream change_msg;
+                change_msg << "Added change output: " << change_amount << " to " << change_address.substr(0, 20) << "...";
+                midnight::g_logger->debug(change_msg.str());
+            }
+
+            // Step 8: Serialize to CBOR hex format
+            const std::string tx_cbor_hex = tx.to_cbor_hex();
+
+            // Step 9: Calculate final fee (using actual size after all additions)
+            const size_t final_size = tx.get_size();
+            const uint64_t final_fee = calculate_min_fee(final_size);
+
+            // Step 10: Calculate and set transaction ID
+            const std::string tx_id = tx.calculate_hash();
+
+            // Build success result
+            result.success = true;
+            result.result = tx_cbor_hex;
+
+            std::ostringstream build_msg;
+            build_msg << "Transaction built successfully:"
+                      << " id=" << tx_id.substr(0, 16) << "..."
+                      << " inputs=" << utxos.size()
+                      << " outputs=" << (outputs.size() + (total_input > total_output + fee && !change_address.empty() ? 1 : 0))
+                      << " fee=" << final_fee
+                      << " size=" << final_size << " bytes";
+            midnight::g_logger->info(build_msg.str());
+
             return result;
         }
-
-        // Build transaction representation
-        result.success = true;
-        result.result = "tx_" + std::to_string(utxos.size()) + "_" + std::to_string(outputs.size());
-
-        std::ostringstream build_msg;
-        build_msg << "Transaction built with " << utxos.size() << " inputs and "
-                  << outputs.size() << " outputs";
-        midnight::g_logger->debug(build_msg.str());
-
-        return result;
+        catch (const std::exception &e)
+        {
+            result.error_message = std::string("Transaction build failed: ") + e.what();
+            midnight::g_logger->error(result.error_message);
+            return result;
+        }
     }
 
     Result MidnightBlockchain::sign_transaction(const std::string &transaction_hex, const std::string &private_key)
@@ -372,9 +470,35 @@ namespace midnight::blockchain
             }
 
             // Sign the transaction (transaction_hex is treated as the message)
+            // NOTE: We convert hex to raw bytes before signing (line 478-495) to match
+            // TypeScript SDK behavior. Using the string-based sign_message directly would
+            // sign UTF-8 bytes, producing incorrect signatures.
+            std::string tx_hex_normalized = transaction_hex;
+            if (tx_hex_normalized.rfind("0x", 0) == 0 || tx_hex_normalized.rfind("0X", 0) == 0) {
+                tx_hex_normalized = tx_hex_normalized.substr(2);
+            }
+            std::vector<uint8_t> tx_bytes;
+            tx_bytes.reserve(tx_hex_normalized.size() / 2);
+            for (size_t i = 0; i < tx_hex_normalized.size(); i += 2) {
+                auto nibble = [](char c) -> int {
+                    if (c >= '0' && c <= '9') return c - '0';
+                    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+                    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+                    return -1;
+                };
+                int hi = nibble(tx_hex_normalized[i]);
+                int lo = nibble(tx_hex_normalized[i + 1]);
+                if (hi < 0 || lo < 0) {
+                    result.error_message = "Invalid hex character in transaction_hex";
+                    midnight::g_logger->error(result.error_message);
+                    return result;
+                }
+                tx_bytes.push_back(static_cast<uint8_t>((hi << 4) | lo));
+            }
+
+            // Sign the raw bytes (matching TypeScript SDK)
             auto signature = midnight::crypto::Ed25519Signer::sign_message(
-                transaction_hex,
-                priv_key_bytes);
+                tx_bytes.data(), tx_bytes.size(), priv_key_bytes);
 
             // Convert signature to hex string
             std::string signature_hex = midnight::crypto::Ed25519Signer::signature_to_hex(signature);

@@ -1,0 +1,18 @@
+{
+  "name": "midnight-npm-review",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@midnight-ntwrk/wallet-sdk-address-format": "3.1.1",
+    "@midnight-ntwrk/wallet-sdk-facade": "3.0.0",
+    "@midnight-ntwrk/wallet-sdk-hd": "3.0.0",
+    "@midnight-ntwrk/wallet-sdk-dust-wallet": "3.0.0",
+    "@midnight-ntwrk/wallet-sdk-unshielded-wallet": "2.1.0",
+    "@midnight-ntwrk/wallet-sdk-shielded": "2.1.0",
+    "@midnight-ntwrk/wallet-sdk-capabilities": "3.3.0",
+    "@midnight-ntwrk/wallet-sdk-indexer-client": "1.2.1",
+    "@midnight-ntwrk/wallet-sdk-node-client": "1.1.1",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "4.0.4",
+    "@midnight-ntwrk/ledger": "4.0.0"
+  }
+}

@@ -1,4 +1,7 @@
-FROM ubuntu:24.04 AS builder
+# Pin to specific Ubuntu 24.04 LTS image SHA to ensure reproducible builds.
+# Source: https://hub.docker.com/v2/repositories/library/ubuntu/tags/24.04
+# amd64 digest (last pulled: 2026-05-06)
+FROM ubuntu:24.04@sha256:cdb5fd928fced577cfecf12c8966e830fcdf42ee481fb0b91904eeddc2fe5eff AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8

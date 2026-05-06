@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Phase 5: Signing & Submission Implementation
  */
 
@@ -19,6 +19,7 @@
 #include <array>
 #include <functional>
 #include <cstring>
+#include <mutex>
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
 
@@ -32,15 +33,6 @@ namespace midnight::signing_submission
 #else
         constexpr bool kHasSodium = false;
 #endif
-
-        Keypair make_sr25519_fallback_keypair()
-        {
-            Keypair fallback;
-            fallback.type = KeyType::SR25519;
-            fallback.public_key = "0x" + std::string(64, '2');
-            fallback.private_key = "0x" + std::string(128, '1');
-            return fallback;
-        }
 
         Keypair make_ed25519_fallback_keypair()
         {
@@ -97,51 +89,6 @@ namespace midnight::signing_submission
         {
             std::vector<uint8_t> bytes(data.begin(), data.end());
             return to_hex(bytes);
-        }
-
-        std::string deterministic_fallback_signature(const std::vector<uint8_t> &message,
-                                                     const std::string &material)
-        {
-            // SECURITY: Fallback signatures are NOT cryptographically secure.
-            // In production builds, this should never be called — libsodium must be available.
-            // We log a loud warning and return a clearly-marked invalid signature.
-            static bool warned = false;
-            if (!warned)
-            {
-                std::cerr << "[SECURITY WARNING] deterministic_fallback_signature() called — "
-                          << "libsodium is NOT available. Signatures are NOT cryptographically valid. "
-                          << "DO NOT use this build in production!" << std::endl;
-                warned = true;
-            }
-
-            // Use HMAC-SHA256 (via OpenSSL, already a dependency) for determinism
-            // This is NOT a real Ed25519 signature, but at least uses a real MAC.
-            std::string key_material = material;
-            key_material.append(reinterpret_cast<const char *>(message.data()), message.size());
-
-            unsigned char hmac_out[EVP_MAX_MD_SIZE];
-            unsigned int hmac_len = 0;
-            HMAC(EVP_sha256(),
-                 key_material.data(), static_cast<int>(key_material.size()),
-                 message.data(), message.size(),
-                 hmac_out, &hmac_len);
-
-            std::string hex;
-            hex.reserve(128);
-            for (unsigned int i = 0; i < hmac_len && hex.size() < 128; ++i)
-            {
-                std::ostringstream chunk;
-                chunk << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hmac_out[i]);
-                hex += chunk.str();
-            }
-
-            // Pad to 128 hex chars (64 bytes = Ed25519 signature size)
-            while (hex.size() < 128)
-            {
-                hex += "00";
-            }
-
-            return "0x" + hex.substr(0, 128);
         }
 
         std::array<uint8_t, midnight::crypto::Ed25519Signer::SECRET_SEED_SIZE> derive_seed_bytes_from_phrase(
@@ -201,49 +148,32 @@ namespace midnight::signing_submission
     {
         if (!kHasSodium)
         {
-            return make_sr25519_fallback_keypair();
+            throw std::runtime_error("Cannot generate sr25519 key: libsodium crypto is unavailable");
         }
 
-        try
-        {
-            // Midnight currently wires Ed25519 primitives; use real cryptography instead of fixed mock bytes.
-            auto [public_key, private_key] = midnight::crypto::Ed25519Signer::generate_keypair();
+        auto [public_key, private_key] = midnight::crypto::Ed25519Signer::generate_keypair();
 
-            Keypair keypair;
-            keypair.type = KeyType::SR25519;
-            keypair.public_key = "0x" + midnight::crypto::Ed25519Signer::public_key_to_hex(public_key);
-            keypair.private_key = array_to_hex_prefixed(private_key);
-            return keypair;
-        }
-        catch (const std::exception &e)
-        {
-            midnight::g_logger->error(std::string("Error generating sr25519 key: ") + e.what());
-            return make_sr25519_fallback_keypair();
-        }
+        Keypair keypair;
+        keypair.type = KeyType::SR25519;
+        keypair.public_key = "0x" + midnight::crypto::Ed25519Signer::public_key_to_hex(public_key);
+        keypair.private_key = array_to_hex_prefixed(private_key);
+        return keypair;
     }
 
     std::optional<Keypair> KeyManager::generate_ed25519_key()
     {
         if (!kHasSodium)
         {
-            return make_ed25519_fallback_keypair();
+            throw std::runtime_error("Cannot generate ed25519 key: libsodium crypto is unavailable");
         }
 
-        try
-        {
-            auto [public_key, private_key] = midnight::crypto::Ed25519Signer::generate_keypair();
+        auto [public_key, private_key] = midnight::crypto::Ed25519Signer::generate_keypair();
 
-            Keypair keypair;
-            keypair.type = KeyType::ED25519;
-            keypair.public_key = "0x" + midnight::crypto::Ed25519Signer::public_key_to_hex(public_key);
-            keypair.private_key = array_to_hex_prefixed(private_key);
-            return keypair;
-        }
-        catch (const std::exception &e)
-        {
-            midnight::g_logger->error(std::string("Error generating ed25519 key: ") + e.what());
-            return make_ed25519_fallback_keypair();
-        }
+        Keypair keypair;
+        keypair.type = KeyType::ED25519;
+        keypair.public_key = "0x" + midnight::crypto::Ed25519Signer::public_key_to_hex(public_key);
+        keypair.private_key = array_to_hex_prefixed(private_key);
+        return keypair;
     }
 
     std::optional<Keypair> KeyManager::generate_ecdsa_key()
@@ -317,49 +247,35 @@ namespace midnight::signing_submission
     {
         if (!kHasSodium)
         {
-            if (type == KeyType::SR25519)
-            {
-                return make_sr25519_fallback_keypair();
-            }
-
-            if (type == KeyType::ED25519)
-            {
-                Keypair fallback = make_ed25519_fallback_keypair();
-                fallback.seed = seed_phrase;
-                return fallback;
-            }
-
-            return generate_ecdsa_key();
+            throw std::runtime_error("Cannot import from seed: libsodium crypto is unavailable");
         }
 
-        try
-        {
-            const auto derived_seed = derive_seed_bytes_from_phrase(seed_phrase);
-            auto [public_key, private_key] = midnight::crypto::Ed25519Signer::keypair_from_seed(derived_seed);
+        const auto derived_seed = derive_seed_bytes_from_phrase(seed_phrase);
+        auto [public_key, private_key] = midnight::crypto::Ed25519Signer::keypair_from_seed(derived_seed);
 
-            Keypair keypair;
-            keypair.type = type;
-            keypair.seed = seed_phrase;
-            keypair.public_key = "0x" + midnight::crypto::Ed25519Signer::public_key_to_hex(public_key);
-            keypair.private_key = array_to_hex_prefixed(private_key);
-            return keypair;
-        }
-        catch (const std::exception &e)
-        {
-            midnight::g_logger->error(std::string("Error importing from seed: ") + e.what());
-            return (type == KeyType::SR25519)
-                       ? generate_sr25519_key()
-                       : generate_ed25519_key();
-        }
+        Keypair keypair;
+        keypair.type = type;
+        keypair.seed = seed_phrase;
+        keypair.public_key = "0x" + midnight::crypto::Ed25519Signer::public_key_to_hex(public_key);
+        keypair.private_key = array_to_hex_prefixed(private_key);
+        return keypair;
     }
 
     std::string KeyManager::derive_address_sr25519(const std::string &public_key)
     {
+        if (!kHasSodium)
+        {
+            throw std::runtime_error("Cannot derive address: libsodium crypto is unavailable");
+        }
         return "5" + public_key.substr(2, 40); // Midnight sr25519 address format
     }
 
     std::string KeyManager::derive_address_ed25519(const std::string &public_key)
     {
+        if (!kHasSodium)
+        {
+            throw std::runtime_error("Cannot derive address: libsodium crypto is unavailable");
+        }
         return "e" + public_key.substr(2, 40); // ed25519 validator address
     }
 
@@ -375,13 +291,14 @@ namespace midnight::signing_submission
 
     std::string TransactionSigner::sign_transaction(const std::vector<uint8_t> &tx_data)
     {
-        return sr25519_sign(tx_data);
+        // Midnight uses Ed25519 for unshielded transaction signing
+        return ed25519_sign(tx_data);
     }
 
     bool TransactionSigner::verify_signature(const std::vector<uint8_t> &tx_data,
                                              const std::string &signature) const
     {
-        return sr25519_verify(tx_data, signature);
+        return ed25519_verify(tx_data, signature);
     }
 
     std::string TransactionSigner::get_signer_address() const
@@ -394,34 +311,27 @@ namespace midnight::signing_submission
         return is_prefixed_hex_signature(signature);
     }
 
-    std::string TransactionSigner::sr25519_sign(const std::vector<uint8_t> &message)
+    std::string TransactionSigner::ed25519_sign(const std::vector<uint8_t> &message)
     {
         if (!kHasSodium)
         {
-            return deterministic_fallback_signature(message, keypair_.private_key);
+            throw std::runtime_error("Cannot sign: libsodium crypto is unavailable");
         }
 
         midnight::crypto::Ed25519Signer::PrivateKey private_key{};
         if (!hex_to_fixed_bytes(keypair_.private_key, private_key.data(), private_key.size()))
         {
-            return deterministic_fallback_signature(message, keypair_.private_key);
+            throw std::invalid_argument("Cannot sign: private key hex is invalid");
         }
 
-        try
-        {
-            auto signature = midnight::crypto::Ed25519Signer::sign_message(
-                message.data(),
-                message.size(),
-                private_key);
-            return "0x" + midnight::crypto::Ed25519Signer::signature_to_hex(signature);
-        }
-        catch (...)
-        {
-            return deterministic_fallback_signature(message, keypair_.private_key);
-        }
+        auto signature = midnight::crypto::Ed25519Signer::sign_message(
+            message.data(),
+            message.size(),
+            private_key);
+        return "0x" + midnight::crypto::Ed25519Signer::signature_to_hex(signature);
     }
 
-    bool TransactionSigner::sr25519_verify(const std::vector<uint8_t> &message,
+    bool TransactionSigner::ed25519_verify(const std::vector<uint8_t> &message,
                                            const std::string &signature) const
     {
         if (!kHasSodium)
@@ -453,16 +363,16 @@ namespace midnight::signing_submission
     }
 
     // ============================================================================
-    // FinallityVoteSigner Implementation
+    // FinalityVoteSigner Implementation
     // ============================================================================
 
-    FinallityVoteSigner::FinallityVoteSigner(const Keypair &voter_keypair)
+    FinalityVoteSigner::FinalityVoteSigner(const Keypair &voter_keypair)
         : keypair_(voter_keypair)
     {
         voter_address_ = KeyManager::derive_address(keypair_);
     }
 
-    std::string FinallityVoteSigner::sign_vote(uint32_t block_height,
+    std::string FinalityVoteSigner::sign_vote(uint32_t block_height,
                                                const std::string &block_hash)
     {
         // Construct vote message: height || hash
@@ -481,7 +391,7 @@ namespace midnight::signing_submission
         return ed25519_sign(vote_message);
     }
 
-    FinalityVote FinallityVoteSigner::create_vote(uint32_t block_height,
+    FinalityVote FinalityVoteSigner::create_vote(uint32_t block_height,
                                                   const std::string &block_hash)
     {
         FinalityVote vote;
@@ -494,7 +404,7 @@ namespace midnight::signing_submission
         return vote;
     }
 
-    bool FinallityVoteSigner::verify_vote(const FinalityVote &vote) const
+    bool FinalityVoteSigner::verify_vote(const FinalityVote &vote) const
     {
         if (vote.signature.empty())
         {
@@ -532,27 +442,19 @@ namespace midnight::signing_submission
         }
     }
 
-    std::string FinallityVoteSigner::ed25519_sign(const std::vector<uint8_t> &message)
+    std::string FinalityVoteSigner::ed25519_sign(const std::vector<uint8_t> &message)
     {
         midnight::crypto::Ed25519Signer::PrivateKey private_key{};
         if (!hex_to_fixed_bytes(keypair_.private_key, private_key.data(), private_key.size()))
         {
-            return "0x" + std::string(128, 'f');
+            throw std::invalid_argument("Cannot sign: private key hex is invalid");
         }
 
-        try
-        {
-            auto signature = midnight::crypto::Ed25519Signer::sign_message(
-                message.data(),
-                message.size(),
-                private_key);
-            return "0x" + midnight::crypto::Ed25519Signer::signature_to_hex(signature);
-        }
-        catch (...)
-        {
-            // Compatibility fallback for environments without libsodium.
-            return "0x" + std::string(128, 'f');
-        }
+        auto signature = midnight::crypto::Ed25519Signer::sign_message(
+            message.data(),
+            message.size(),
+            private_key);
+        return "0x" + midnight::crypto::Ed25519Signer::signature_to_hex(signature);
     }
 
     // ============================================================================
@@ -614,11 +516,14 @@ namespace midnight::signing_submission
             result.status = SubmissionStatus::SUBMITTED;
             result.submission_timestamp = std::time(nullptr);
 
-            // Cache result
-            submission_cache_[result.transaction_hash] = result;
-            if (!signed_tx.transaction_hash.empty() && signed_tx.transaction_hash != result.transaction_hash)
+            // Cache result with mutex protection
             {
-                submission_cache_[signed_tx.transaction_hash] = result;
+                std::lock_guard<std::mutex> lock(submission_cache_mutex_);
+                submission_cache_[result.transaction_hash] = result;
+                if (!signed_tx.transaction_hash.empty() && signed_tx.transaction_hash != result.transaction_hash)
+                {
+                    submission_cache_[signed_tx.transaction_hash] = result;
+                }
             }
 
             return result;
@@ -646,6 +551,7 @@ namespace midnight::signing_submission
 
     SubmissionResult TransactionSubmitter::get_submission_status(const std::string &tx_hash)
     {
+        std::lock_guard<std::mutex> lock(submission_cache_mutex_);
         auto it = submission_cache_.find(tx_hash);
         if (it != submission_cache_.end())
         {
@@ -1077,3 +983,4 @@ namespace midnight::signing_submission
     }
 
 } // namespace midnight::signing_submission
+

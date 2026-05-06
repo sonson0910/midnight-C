@@ -4,15 +4,56 @@ set(MIDNIGHT_CORE_SOURCES
     core/config.cpp
     core/logger.cpp
     session/session_manager.cpp
+    wallet/shielded_address.cpp
 )
 
 set(MIDNIGHT_PROTOCOL_SOURCES)
 
+# gRPC Protocol Buffers
+if(ENABLE_GRPC)
+    list(APPEND MIDNIGHT_PROTOCOL_SOURCES
+        protocols/grpc/grpc_client.cpp
+        protocols/grpc/grpc_server.cpp
+    )
+
+    # Generate protobuf files from proto
+    find_package(Protobuf REQUIRED)
+
+    set(GRPC_PROTO "${CMAKE_SOURCE_DIR}/proto/midnight.proto")
+    set(GRPC_PB_SRC "${CMAKE_BINARY_DIR}/midnight.pb.cc")
+    set(GRPC_PB_HDR "${CMAKE_BINARY_DIR}/midnight.pb.h")
+    set(GRPC_GRPC_SRC "${CMAKE_BINARY_DIR}/midnight.grpc.pb.cc")
+    set(GRPC_GRPC_HDR "${CMAKE_BINARY_DIR}/midnight.grpc.pb.h")
+
+    add_custom_command(
+        OUTPUT ${GRPC_PB_SRC} ${GRPC_PB_HDR} ${GRPC_GRPC_SRC} ${GRPC_GRPC_HDR}
+        COMMAND ${Protobuf_PROTOC_EXECUTABLE}
+            --proto_path=${CMAKE_SOURCE_DIR}/proto
+            --cpp_out=${CMAKE_BINARY_DIR}
+            --grpc_out=${CMAKE_BINARY_DIR}
+            --plugin=protoc-gen-grpc=${gRPC_GRPCPP_PLUGIN}
+            ${GRPC_PROTO}
+        DEPENDS ${GRPC_PROTO} ${Protobuf_PROTOC_EXECUTABLE} ${gRPC_GRPCPP_PLUGIN}
+        COMMENT "Generating gRPC protobuf files from midnight.proto"
+        VERBATIM
+    )
+
+    # Add generated sources to protocol sources
+    list(APPEND MIDNIGHT_PROTOCOL_SOURCES
+        ${GRPC_PB_SRC}
+        ${GRPC_GRPC_SRC}
+    )
+
+    # Include directories for generated protobuf
+    target_include_directories(midnight-core PRIVATE ${CMAKE_BINARY_DIR})
+endif()
+
 # Protocol implementations
 if(ENABLE_MQTT)
     list(APPEND MIDNIGHT_PROTOCOL_SOURCES
-        protocols/mqtt/mqtt_client.cpp
+        protocols/mqtt/mqtt_protocol.cpp
         protocols/mqtt/mqtt_connection.cpp
+        protocols/mqtt/mqtt_client.cpp
     )
 endif()
 
@@ -26,14 +67,12 @@ endif()
 if(ENABLE_HTTP)
     list(APPEND MIDNIGHT_PROTOCOL_SOURCES
         protocols/http/http_client.cpp
-        protocols/http/http_request.cpp
     )
 endif()
 
 if(ENABLE_WEBSOCKET)
     list(APPEND MIDNIGHT_PROTOCOL_SOURCES
         protocols/websocket/ws_client.cpp
-        protocols/websocket/ws_connection.cpp
     )
 endif()
 
@@ -48,6 +87,7 @@ if(ENABLE_BLOCKCHAIN)
         network/transaction_confirmation.cpp
         network/indexer_client.cpp
         network/indexer_subscription.cpp
+        network/graphql_subscription.cpp
         network/substrate_rpc.cpp
     )
 endif()
@@ -57,6 +97,8 @@ set(MIDNIGHT_CRYPTO_SOURCES)
 if(ENABLE_BLOCKCHAIN)
     list(APPEND MIDNIGHT_CRYPTO_SOURCES
         crypto/ed25519_signer.cpp
+        crypto/state_encryption.cpp
+        crypto/merkle_tree.cpp
     )
 endif()
 
@@ -76,6 +118,8 @@ if(ENABLE_BLOCKCHAIN)
         wallet/bech32m.cpp
         wallet/wallet_facade.cpp
         wallet/wallet_services.cpp
+        wallet/transaction_balancer.cpp
+        errors/wallet_errors.cpp
     )
 endif()
 
@@ -131,6 +175,16 @@ add_library(midnight-core
     ${MIDNIGHT_BLOCKCHAIN_SOURCES}
 )
 
+# Suppress Windows SDK intrinsic conflicts for compact_contracts.cpp
+# These errors occur due to conflicts between Windows SDK winnt.h and MSVC intrinsics
+if(WIN32)
+    set_source_files_properties(
+        src/compact-contracts/compact_contracts.cpp
+        APPEND
+        PROPERTY COMPILE_OPTIONS "/wd2371;/wd2733;/wd2116"
+    )
+endif()
+
 if(WIN32 AND BUILD_SHARED_LIBS)
     # Ensure an import library is generated for examples linking against the DLL.
     set_target_properties(midnight-core PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
@@ -155,6 +209,24 @@ endif()
 # Link dependencies
 find_package(OpenSSL QUIET)
 find_package(Sodium QUIET)
+
+# Handle jsoncpp linking
+# The jsoncpp subdirectory creates jsoncpp_static target (static library)
+set(JSONCPP_LIBRARY jsoncpp_static)
+if(NOT TARGET ${JSONCPP_LIBRARY})
+    # Fallback: try alternative target names
+    if(TARGET jsoncpp_lib)
+        set(JSONCPP_LIBRARY jsoncpp_lib)
+    elseif(TARGET JsonCpp::JsonCpp)
+        set(JSONCPP_LIBRARY JsonCpp::JsonCpp)
+    else()
+        # Fallback: try to find the library
+        find_library(JSONCPP_LIBRARY NAMES jsoncpp jsoncpp_lib)
+        if(JSONCPP_LIBRARY)
+            message(STATUS "Found jsoncpp library: ${JSONCPP_LIBRARY}")
+        endif()
+    endif()
+endif()
 
 # Fallback: use pkg-config for libsodium on systems without CMake find module
 if(NOT Sodium_FOUND)
@@ -266,7 +338,7 @@ target_link_libraries(midnight-core
     PUBLIC
         nlohmann_json::nlohmann_json
         fmt::fmt
-        $<$<TARGET_EXISTS:jsoncpp_lib>:jsoncpp_lib>
+        $<$<TARGET_EXISTS:${JSONCPP_LIBRARY}>:${JSONCPP_LIBRARY}>
         $<$<TARGET_EXISTS:JsonCpp::JsonCpp>:JsonCpp::JsonCpp>
         $<$<BOOL:${OPENSSL_FOUND}>:OpenSSL::SSL>
         $<$<BOOL:${OPENSSL_FOUND}>:OpenSSL::Crypto>
@@ -276,6 +348,11 @@ target_link_libraries(midnight-core
         $<$<PLATFORM_ID:Windows>:secur32>
         $<$<PLATFORM_ID:Windows>:bcrypt>
         $<$<PLATFORM_ID:Windows>:iphlpapi>
+    PRIVATE
+        $<$<BOOL:${ENABLE_GRPC}>:grpc++_unsecure>
+        $<$<BOOL:${ENABLE_GRPC}>:grpc Reflection>
+        $<$<BOOL:${ENABLE_GRPC}>:gpr>
+        $<$<BOOL:${ENABLE_GRPC}>:protobuf::libprotobuf>
 )
 
 target_compile_definitions(midnight-core
@@ -298,3 +375,4 @@ endif()
 
 # Set C++ standard
 target_compile_features(midnight-core PUBLIC cxx_std_20)
+

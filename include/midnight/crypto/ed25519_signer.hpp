@@ -60,7 +60,9 @@ namespace midnight::crypto
         /**
          * Sign a message with the private key
          *
-         * @param message The message bytes to sign
+         * @param message The message bytes (as UTF-8 string). For hex-encoded data,
+         *                decode to bytes first and use the byte-array overload.
+         *                Otherwise signatures will NOT match the TypeScript SDK.
          * @param private_key The Ed25519 private key (64 bytes)
          * @return 64-byte Ed25519 signature
          *

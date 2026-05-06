@@ -1,6 +1,7 @@
 #include "midnight/network/indexer_subscription.hpp"
 #include "midnight/core/logger.hpp"
 #include <chrono>
+#include <map>
 
 namespace midnight::network {
 
@@ -23,6 +24,7 @@ IndexerSubscription::IndexerSubscription(IndexerSubscription&& other) noexcept
     , last_state_(std::move(other.last_state_))
     , last_known_balance_(other.last_known_balance_)
     , last_utxo_count_(other.last_utxo_count_)
+    , last_known_utxos_(std::move(other.last_known_utxos_))
 {
     other.running_ = false;
 }
@@ -38,6 +40,7 @@ IndexerSubscription& IndexerSubscription::operator=(IndexerSubscription&& other)
         last_state_ = std::move(other.last_state_);
         last_known_balance_ = other.last_known_balance_;
         last_utxo_count_ = other.last_utxo_count_;
+        last_known_utxos_ = std::move(other.last_known_utxos_);
         other.running_ = false;
     }
     return *this;
@@ -85,10 +88,22 @@ WalletState IndexerSubscription::last_state() const {
     return last_state_;
 }
 
-void IndexerSubscription::poll_loop(uint32_t interval_ms) {
+    void IndexerSubscription::poll_loop(uint32_t interval_ms) {
     while (running_.load()) {
         try {
             IndexerClient indexer(graphql_url_);
+
+            // ═══════════════════════════════════════════════════════════════
+            // IMPORTANT: Indexer HTTP GraphQL does NOT support direct UTXO queries.
+            // The "transactions" endpoint iterates ALL transactions, filtering
+            // client-side by address. This is slow but functional.
+            //
+            // For PRODUCTION real-time UTXO tracking, use WebSocket subscriptions:
+            //   subscription { unshieldedTransactions(address: "mn_addr_preview...") { ... } }
+            //
+            // This polling loop is a WORKAROUND for demonstration purposes.
+            // ═══════════════════════════════════════════════════════════════
+
             auto ws = indexer.query_wallet_state(address_);
 
             uint64_t new_balance = 0;
@@ -131,21 +146,43 @@ void IndexerSubscription::poll_loop(uint32_t interval_ms) {
                 auto utxos = indexer.query_utxos(address_);
 
                 std::vector<wallet::UtxoWithMeta> created;
-                for (const auto& utxo : utxos) {
-                    wallet::UtxoWithMeta meta;
-                    meta.utxo_hash = utxo.tx_hash + ":" + std::to_string(utxo.output_index);
-                    meta.output_index = utxo.output_index;
-                    meta.amount = utxo.amount;
-                    meta.token_type = "NIGHT";
-                    meta.tx_hash = utxo.tx_hash;
-                    meta.ctime = std::chrono::system_clock::now();
-                    created.push_back(meta);
-                }
-
-                std::vector<wallet::UtxoWithMeta> spent; // TODO: diff with previous state
+                std::vector<wallet::UtxoWithMeta> spent;
 
                 {
                     std::lock_guard<std::mutex> lock(mutex_);
+
+                    // Build map of current UTXOs
+                    std::map<std::string, wallet::UtxoWithMeta> current_utxos;
+                    for (const auto& utxo : utxos) {
+                        wallet::UtxoWithMeta meta;
+                        meta.utxo_hash = utxo.tx_hash + ":" + std::to_string(utxo.output_index);
+                        meta.output_index = utxo.output_index;
+                        meta.amount = utxo.amount;
+                        meta.token_type = "NIGHT";
+                        meta.tx_hash = utxo.tx_hash;
+                        meta.ctime = std::chrono::system_clock::now();
+                        current_utxos[meta.utxo_hash] = meta;
+                    }
+
+                    // Diff: find newly created UTXOs (in current but not in last)
+                    for (const auto& [key, meta] : current_utxos) {
+                        if (last_known_utxos_.find(key) == last_known_utxos_.end()) {
+                            created.push_back(meta);
+                        }
+                    }
+
+                    // Diff: find spent UTXOs (in last but not in current)
+                    for (const auto& [key, meta] : last_known_utxos_) {
+                        if (current_utxos.find(key) == current_utxos.end()) {
+                            spent.push_back(meta);
+                        }
+                    }
+
+                    // Update tracked UTXOs
+                    last_known_utxos_ = std::move(current_utxos);
+                }
+
+                if (!created.empty() || !spent.empty()) {
                     for (auto& cb : tx_callbacks_) {
                         try {
                             cb(created, spent);

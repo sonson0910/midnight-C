@@ -1,0 +1,21 @@
+# ninja log v7
+1	61	7997279051059308	fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-mkdir	fd13b40b63bc4326
+1	61	7997279051059308	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/fmt-subbuild/fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-mkdir	fd13b40b63bc4326
+61	1514	7997279065586446	fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-download	dd717f45ea363619
+61	1514	7997279065586446	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/fmt-subbuild/fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-download	dd717f45ea363619
+1514	1570	7997279066145144	fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-update	58b5d2b20f5e358a
+1514	1570	7997279066145144	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/fmt-subbuild/fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-update	58b5d2b20f5e358a
+1570	1650	7997279066936516	fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-patch	91807c66457eb4ea
+1570	1650	7997279066936516	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/fmt-subbuild/fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-patch	91807c66457eb4ea
+1650	1749	7997279067926535	fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-configure	f0e4d6b1b046312b
+1650	1749	7997279067926535	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/fmt-subbuild/fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-configure	f0e4d6b1b046312b
+1749	1812	7997279068566525	fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-build	5dc24d49371c2359
+1749	1812	7997279068566525	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/fmt-subbuild/fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-build	5dc24d49371c2359
+1812	1875	7997279069196517	fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-install	b4fc6d07313f34a1
+1812	1875	7997279069196517	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/fmt-subbuild/fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-install	b4fc6d07313f34a1
+1875	1934	7997279069788342	fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-test	13ea1070a1cbdfa1
+1875	1934	7997279069788342	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/fmt-subbuild/fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-test	13ea1070a1cbdfa1
+1934	2019	7997279070628302	CMakeFiles/fmt-populate-complete	be3176732750ab2b
+1934	2019	7997279070628302	fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-done	be3176732750ab2b
+1934	2019	7997279070628302	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/fmt-subbuild/CMakeFiles/fmt-populate-complete	be3176732750ab2b
+1934	2019	7997279070628302	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/fmt-subbuild/fmt-populate-prefix/src/fmt-populate-stamp/fmt-populate-done	be3176732750ab2b

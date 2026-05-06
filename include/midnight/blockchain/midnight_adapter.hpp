@@ -51,7 +51,9 @@ namespace midnight::blockchain
         uint32_t output_index;                        // Output index in transaction
         std::string address;                          // Recipient address
         uint64_t amount;                              // Amount in basic units
+        std::string token_type = "NIGHT";            // Token type: "NIGHT", "DUST", etc.
         std::map<std::string, uint64_t> multi_assets; // Multi-assets: {asset_id -> amount}
+        uint32_t block_height = 0;                    // Block height (optional)
     };
 
     /**

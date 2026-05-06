@@ -38,6 +38,14 @@ struct SerializedTransaction {
 
     /// Serialize from JSON TX representation
     static SerializedTransaction from_json(const json& tx_json);
+
+    /// Create from raw bytes
+    static SerializedTransaction from_bytes(const std::vector<uint8_t>& data);
+
+    /// Build a proper SCALE-encoded Substrate extrinsic for Midnight pallet.
+    /// Wraps midnight_tx_hex in the midnight.sendMnTransaction call structure:
+    ///   Extrinsic = [compact(length)][pallet_idx(0x58)][call_idx(0x00)][compact(bytes_len)][midnight_bytes]
+    static SerializedTransaction make_midnight_extrinsic(const std::string& midnight_tx_hex);
 };
 
 // ─── Submission Service ─────────────────────────────────────

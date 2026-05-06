@@ -8,6 +8,11 @@ int main()
 
     midnight::protocols::mqtt::MqttClient mqtt_client;
 
+    // Set message callback first
+    mqtt_client.set_message_callback([](const std::string& topic, const std::string& payload) {
+        std::cout << "Received on " << topic << ": " << payload << std::endl;
+    });
+
     // Connect to broker
     mqtt_client.connect("mqtt.example.com", 1883);
 
@@ -16,14 +21,12 @@ int main()
         midnight::g_logger->info("Connected to MQTT broker");
 
         // Publish message
-        mqtt_client.publish("midnight/sensor/temperature", "25.5", 1);
+        mqtt_client.publish("midnight/sensor/temperature", "25.5",
+                           midnight::protocols::mqtt::QoS::AT_LEAST_ONCE);
 
         // Subscribe to topic
         mqtt_client.subscribe("midnight/control/commands",
-                              [](const std::string &topic, const std::string &payload)
-                              {
-                                  std::cout << "Received on " << topic << ": " << payload << std::endl;
-                              });
+                             midnight::protocols::mqtt::QoS::AT_MOST_ONCE);
     }
     else
     {

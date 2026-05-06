@@ -4,9 +4,83 @@
 #include <cstring>
 #include <sstream>
 #include <iomanip>
+#include <sodium.h>
+#include <openssl/sha.h>
 
 namespace midnight::zk
 {
+
+    // ============================================================================
+    // Constants for secret encryption (XSalsa20-Poly1305)
+    // ============================================================================
+    static constexpr size_t ENCRYPTED_KEY_SIZE = 32;
+    static constexpr size_t NONCE_SIZE = 24;
+    static constexpr size_t MAC_SIZE = 16;
+
+    // Derive per-secret encryption key using SHA256-based key derivation.
+    // For encryption: generates a new random nonce (stored with ciphertext).
+    // For decryption: uses the stored nonce from ciphertext.
+    // Uses the secret name as part of the input for domain separation.
+    static void derive_key_with_nonce(
+        const std::vector<uint8_t> &master_key,
+        const std::string &name,
+        const std::vector<uint8_t> &nonce,
+        uint8_t *derived_key_out)
+    {
+        // Derive: key = SHA256(master_key || nonce || name)
+        SHA256_CTX ctx;
+        SHA256_Init(&ctx);
+        SHA256_Update(&ctx, master_key.data(), master_key.size());
+        SHA256_Update(&ctx, nonce.data(), nonce.size());
+        SHA256_Update(&ctx, name.data(), name.size());
+        SHA256_Final(derived_key_out, &ctx);
+    }
+
+    static std::vector<uint8_t> derive_encryption_key(
+        const std::vector<uint8_t> &master_key,
+        const std::string &name,
+        std::vector<uint8_t> &nonce_out)
+    {
+        nonce_out.resize(NONCE_SIZE);
+        randombytes_buf(nonce_out.data(), NONCE_SIZE);
+
+        std::vector<uint8_t> derived_key(ENCRYPTED_KEY_SIZE);
+        derive_key_with_nonce(master_key, name, nonce_out, derived_key.data());
+        return derived_key;
+    }
+
+    static std::vector<uint8_t> derive_decryption_key(
+        const std::vector<uint8_t> &master_key,
+        const std::string &name,
+        const std::vector<uint8_t> &stored_nonce)
+    {
+        std::vector<uint8_t> derived_key(ENCRYPTED_KEY_SIZE);
+        derive_key_with_nonce(master_key, name, stored_nonce, derived_key.data());
+        return derived_key;
+    }
+
+    static std::vector<uint8_t> get_master_key()
+    {
+        std::vector<uint8_t> master_key(ENCRYPTED_KEY_SIZE, 0);
+        const char* env_master = std::getenv("MIDNIGHT_SECRET_MASTER_KEY");
+        if (env_master != nullptr && std::strlen(env_master) >= 64)
+        {
+            std::vector<uint8_t> decoded;
+            decoded.reserve(32);
+            for (size_t i = 0; i + 1 < 64 && env_master[i] && env_master[i + 1]; i += 2)
+            {
+                char hex_byte[3] = {env_master[i], env_master[i + 1], '\0'};
+                decoded.push_back(static_cast<uint8_t>(std::strtoul(hex_byte, nullptr, 16)));
+            }
+            if (decoded.size() >= ENCRYPTED_KEY_SIZE)
+            {
+                std::memcpy(master_key.data(), decoded.data(), ENCRYPTED_KEY_SIZE);
+                return master_key;
+            }
+        }
+        randombytes_buf(master_key.data(), ENCRYPTED_KEY_SIZE);
+        return master_key;
+    }
 
     // ============================================================================
     // SecretKeyStore Implementation
@@ -21,7 +95,30 @@ namespace midnight::zk
             return false;
         }
 
-        secrets_[name] = data;
+        if (sodium_init() < 0)
+        {
+            return false;
+        }
+
+        std::vector<uint8_t> master_key = get_master_key();
+        std::vector<uint8_t> nonce;
+        std::vector<uint8_t> derived_key = derive_encryption_key(master_key, name, nonce);
+
+        std::vector<uint8_t> ciphertext(data.size() + MAC_SIZE);
+        if (crypto_secretbox_easy(ciphertext.data(),
+                                  data.data(), data.size(),
+                                  nonce.data(),
+                                  derived_key.data()) != 0)
+        {
+            return false;
+        }
+
+        std::vector<uint8_t> encrypted;
+        encrypted.reserve(nonce.size() + ciphertext.size());
+        encrypted.insert(encrypted.end(), nonce.begin(), nonce.end());
+        encrypted.insert(encrypted.end(), ciphertext.begin(), ciphertext.end());
+
+        secrets_[name] = std::move(encrypted);
         return true;
     }
 
@@ -32,7 +129,40 @@ namespace midnight::zk
         {
             throw std::runtime_error(fmt::format("Secret '{}' not found in store", name));
         }
-        return it->second;
+
+        if (sodium_init() < 0)
+        {
+            throw std::runtime_error("Failed to initialize libsodium");
+        }
+
+        const std::vector<uint8_t> &encrypted = it->second;
+        if (encrypted.size() < NONCE_SIZE + MAC_SIZE + 1)
+        {
+            throw std::runtime_error("Encrypted secret data is corrupted or too short");
+        }
+
+        std::vector<uint8_t> master_key = get_master_key();
+
+        std::vector<uint8_t> nonce(encrypted.begin(), encrypted.begin() + NONCE_SIZE);
+        std::vector<uint8_t> ciphertext(encrypted.begin() + NONCE_SIZE, encrypted.end());
+
+        std::vector<uint8_t> derived_key = derive_decryption_key(master_key, name, nonce);
+
+        std::vector<uint8_t> plaintext(ciphertext.size());
+        if (crypto_secretbox_open_easy(plaintext.data(),
+                                       ciphertext.data(), ciphertext.size(),
+                                       nonce.data(),
+                                       derived_key.data()) != 0)
+        {
+            throw std::runtime_error("Secret decryption failed - invalid key or corrupted data");
+        }
+
+        if (plaintext.size() <= MAC_SIZE)
+        {
+            throw std::runtime_error("Decrypted secret too short");
+        }
+        plaintext.resize(plaintext.size() - MAC_SIZE);
+        return plaintext;
     }
 
     bool SecretKeyStore::has_secret(const std::string &name) const
@@ -64,9 +194,10 @@ namespace midnight::zk
     std::vector<std::string> SecretKeyStore::list_secrets() const
     {
         std::vector<std::string> names;
-        for (const auto &[name, data] : secrets_)
+        for (const auto &[secret_name, data] : secrets_)
         {
-            names.push_back(name);
+            (void)data;
+            names.push_back(secret_name);
         }
         return names;
     }
@@ -80,7 +211,7 @@ namespace midnight::zk
         auto it = private_states_.find(contract_address);
         if (it == private_states_.end())
         {
-            return LedgerState(); // Return empty state
+            return LedgerState();
         }
         return it->second;
     }
@@ -96,8 +227,7 @@ namespace midnight::zk
         const std::string &contract_address,
         const std::string &rpc_endpoint)
     {
-        // This would normally fetch from RPC
-        // For now, return stored state or empty state
+        (void)rpc_endpoint;
         auto it = private_states_.find(contract_address);
         if (it != private_states_.end())
         {
@@ -114,7 +244,6 @@ namespace midnight::zk
         const std::string &contract_address,
         const LedgerState &public_state)
     {
-        // Merge public state with existing private state
         LedgerState merged = get_private_state(contract_address);
         merged.public_state = public_state.public_state;
         merged.block_height = public_state.block_height;
@@ -138,6 +267,7 @@ namespace midnight::zk
         std::vector<std::string> addresses;
         for (const auto &[addr, state] : private_states_)
         {
+            (void)state;
             addresses.push_back(addr);
         }
         return addresses;
@@ -157,7 +287,6 @@ namespace midnight::zk
         json private_data_json;
         for (const auto &[name, data] : private_data)
         {
-            // Convert bytes to hex
             std::stringstream ss;
             for (uint8_t byte : data)
             {
@@ -262,11 +391,9 @@ namespace midnight::zk
         WitnessContextBuilder builder;
         builder.set_contract_address(contract_address);
 
-        // Load public state
         LedgerState state = state_mgr.get_private_state(contract_address);
         builder.set_public_state(state);
 
-        // Load private secrets
         std::map<std::string, std::vector<uint8_t>> secrets;
         for (const auto &secret_name : required_secrets)
         {
@@ -326,14 +453,12 @@ namespace midnight::zk
             WitnessContextBuilder builder;
             builder.set_contract_address(contract_address);
 
-            // Create dummy public state
             LedgerState public_state;
             public_state.contract_address = contract_address;
             public_state.block_height = 1;
             public_state.block_hash = "test_hash_" + contract_address;
             builder.set_public_state(public_state);
 
-            // Add test secret
             std::vector<uint8_t> test_secret(32, 0xAA);
             builder.add_private_secret("localSecretKey", test_secret);
             builder.set_block_height(1);
@@ -355,15 +480,15 @@ namespace midnight::zk
 
         std::string hash_secret(const std::vector<uint8_t> &secret)
         {
-            // Simple SHA256-like hex representation for demo
-            // In production, use actual SHA256
-            std::stringstream ss;
-            for (size_t i = 0; i < std::min(secret.size(), size_t(16)); ++i)
+            uint8_t hash[SHA256_DIGEST_LENGTH];
+            SHA256(secret.data(), secret.size(), hash);
+            std::string result;
+            result.reserve(SHA256_DIGEST_LENGTH * 2);
+            for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i)
             {
-                ss << std::hex << std::setw(2) << std::setfill('0')
-                   << static_cast<int>(secret[i]);
+                result += fmt::format("{:02x}", hash[i]);
             }
-            return ss.str();
+            return result;
         }
 
     } // namespace private_state_util

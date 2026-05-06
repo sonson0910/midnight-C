@@ -15,10 +15,8 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
-
-#ifndef _WIN32
-#include <sys/wait.h>
-#endif
+#include <sstream>
+#include <iomanip>
 
 namespace midnight::util
 {

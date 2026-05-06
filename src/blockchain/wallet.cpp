@@ -3,7 +3,9 @@
 #include "midnight/core/logger.hpp"
 #include "midnight/core/common_utils.hpp"
 #include "midnight/crypto/ed25519_signer.hpp"
+#include "midnight/crypto/state_encryption.hpp"
 #include <array>
+#include <vector>
 #include <vector>
 #include <sstream>
 #include <iomanip>
@@ -12,6 +14,7 @@
 #include <cctype>
 #include <limits>
 #include <stdexcept>
+#include <fstream>
 
 #if defined(MIDNIGHT_ENABLE_OPENSSL_CRYPTO) && MIDNIGHT_ENABLE_OPENSSL_CRYPTO
 #include <openssl/evp.h>
@@ -177,6 +180,12 @@ namespace midnight::blockchain
             }
             return out;
         }
+
+        std::vector<uint8_t> pbkdf2_derive_bytes(const std::string &password, const std::string &salt)
+        {
+            const std::string pbkdf2_salt = "mnemonic" + salt;
+            return pbkdf2_hmac_sha512_bytes(password, pbkdf2_salt, 2048, 64);
+        }
 #endif
 
         Bip32Node derive_master_node_from_seed(const std::vector<uint8_t> &seed)
@@ -253,9 +262,11 @@ namespace midnight::blockchain
     {
         wallet_type_ = WalletType::MNEMONIC;
 
-        std::ostringstream msg;
-        msg << "Creating wallet from mnemonic (" << mnemonic.length() / 15 << " words)";
-        midnight::g_logger->info(msg.str());
+        const size_t word_count = std::count(mnemonic.begin(), mnemonic.end(), ' ') + 1;
+        if (midnight::g_logger)
+        {
+            midnight::g_logger->info("Creating wallet from mnemonic");
+        }
 
         const std::string normalized_mnemonic = normalize_words(mnemonic);
         if (normalized_mnemonic.empty())
@@ -264,14 +275,17 @@ namespace midnight::blockchain
         }
 
         // BIP39 seed: PBKDF2-HMAC-SHA512(mnemonic, "mnemonic" + passphrase, 2048, 64 bytes)
-        extended_private_key_ = pbkdf2_derive(normalized_mnemonic, passphrase);
+        extended_private_key_.assign(pbkdf2_derive_bytes(normalized_mnemonic, passphrase));
 
         addresses_.clear();
         balances_.clear();
 
         // Generate primary address
         generate_address(0, 0, 0);
-        midnight::g_logger->info("Wallet created successfully");
+        if (midnight::g_logger)
+        {
+            midnight::g_logger->info("Wallet created successfully");
+        }
     }
 
     void Wallet::create_from_xprv(const std::string &xprv, const std::string &passphrase)
@@ -289,53 +303,154 @@ namespace midnight::blockchain
             auto maybe_seed = hex_decode(xprv);
             if (maybe_seed.size() == 64)
             {
-                extended_private_key_ = hex_encode(maybe_seed.data(), maybe_seed.size());
+                extended_private_key_.assign(std::move(maybe_seed));
             }
             else
             {
-                extended_private_key_ = pbkdf2_derive(xprv, passphrase);
+                extended_private_key_.assign(pbkdf2_derive_bytes(xprv, passphrase));
             }
         }
         catch (const std::invalid_argument &)
         {
-            extended_private_key_ = pbkdf2_derive(xprv, passphrase);
+            extended_private_key_.assign(pbkdf2_derive_bytes(xprv, passphrase));
         }
 
         addresses_.clear();
         balances_.clear();
 
-        std::ostringstream msg;
-        msg << "Creating wallet from extended private key: " << xprv.substr(0, std::min<size_t>(20, xprv.size())) << "...";
-        midnight::g_logger->info(msg.str());
+        if (midnight::g_logger)
+        {
+            midnight::g_logger->info("Creating wallet from extended private key");
+        }
 
         generate_address(0, 0, 0);
     }
 
     void Wallet::load(const std::string &wallet_path, const std::string &passphrase)
     {
-        std::ostringstream msg;
-        msg << "Loading wallet from: " << wallet_path;
-        midnight::g_logger->info(msg.str());
+        if (midnight::g_logger) {
+            midnight::g_logger->info("Loading wallet from: " + wallet_path);
+        }
 
-        // In production, would:
-        // 1. Read encrypted JSON from file
-        // 2. Decrypt with passphrase
-        // 3. Extract extended private key
-        // 4. Regenerate addresses from derivation paths
-        (void)passphrase;
+        std::ifstream file(wallet_path, std::ios::binary);
+        if (!file.is_open()) {
+            throw std::runtime_error("Cannot open wallet file: " + wallet_path);
+        }
+
+        std::vector<uint8_t> encrypted_data(
+            (std::istreambuf_iterator<char>(file)),
+            std::istreambuf_iterator<char>());
+
+        if (encrypted_data.empty()) {
+            throw std::runtime_error("Wallet file is empty: " + wallet_path);
+        }
+
+        if (passphrase.empty()) {
+            extended_private_key_.assign(encrypted_data);
+            if (extended_private_key_.size() != 64) {
+                throw std::runtime_error("Invalid wallet file: expected 64-byte seed");
+            }
+        } else {
+            // Decrypt using state encryption
+            auto decrypted = midnight::crypto::EncryptedState::decrypt(encrypted_data, passphrase);
+            if (!decrypted.has_value()) {
+                throw std::runtime_error("Failed to decrypt wallet: invalid password or corrupted file");
+            }
+            std::istringstream iss(*decrypted, std::ios::binary);
+
+            uint32_t magic;
+            iss.read(reinterpret_cast<char*>(&magic), 4);
+            if (magic != 0x4D574C4C) { // 'MWLL'
+                throw std::runtime_error("Invalid wallet file format");
+            }
+
+            uint32_t version;
+            iss.read(reinterpret_cast<char*>(&version), 4);
+            if (version != 1) {
+                throw std::runtime_error("Unsupported wallet format version");
+            }
+
+            uint32_t seed_len;
+            iss.read(reinterpret_cast<char*>(&seed_len), 4);
+            if (seed_len != 64) {
+                throw std::runtime_error("Invalid seed length in wallet file");
+            }
+
+            std::vector<uint8_t> seed(64);
+            iss.read(reinterpret_cast<char*>(seed.data()), 64);
+            extended_private_key_.assign(seed);
+
+            uint32_t addr_count;
+            iss.read(reinterpret_cast<char*>(&addr_count), 4);
+            addresses_.clear();
+            for (uint32_t i = 0; i < addr_count; ++i) {
+                uint32_t len;
+                iss.read(reinterpret_cast<char*>(&len), 4);
+                std::string addr(len, '\0');
+                iss.read(addr.data(), len);
+                addresses_.push_back(addr);
+            }
+        }
+
+        wallet_type_ = WalletType::EXTENDED_KEY;
+        if (midnight::g_logger) {
+            midnight::g_logger->info("Wallet loaded: " + std::to_string(addresses_.size()) + " address(es)");
+        }
     }
 
     void Wallet::save(const std::string &wallet_path, const std::string &passphrase)
     {
-        std::ostringstream msg;
-        msg << "Saving wallet to: " << wallet_path;
-        midnight::g_logger->info(msg.str());
+        if (midnight::g_logger) {
+            midnight::g_logger->info("Saving wallet to: " + wallet_path);
+        }
 
-        // In production, would:
-        // 1. Create JSON structure with wallet metadata
-        // 2. Encrypt extended private key with passphrase
-        // 3. Write to file with proper permissions
-        (void)passphrase;
+        if (extended_private_key_.empty()) {
+            throw std::runtime_error("Cannot save: wallet seed is empty");
+        }
+
+        std::ofstream file(wallet_path, std::ios::binary);
+        if (!file.is_open()) {
+            throw std::runtime_error("Cannot create wallet file: " + wallet_path);
+        }
+
+        if (passphrase.empty()) {
+            // Save raw seed (unencrypted) - NOT recommended for production
+            if (midnight::g_logger) {
+                midnight::g_logger->warn("Saving wallet WITHOUT encryption - this is insecure");
+            }
+            auto seed = extended_private_key_.bytes();
+            file.write(reinterpret_cast<const char*>(seed.data()), seed.size());
+        } else {
+            // Encrypt state and save with format header
+            std::ostringstream oss(std::ios::binary);
+
+            uint32_t magic = 0x4D574C4C; // 'MWLL'
+            uint32_t version = 1;
+            uint32_t seed_len = 64;
+
+            oss.write(reinterpret_cast<const char*>(&magic), 4);
+            oss.write(reinterpret_cast<const char*>(&version), 4);
+            oss.write(reinterpret_cast<const char*>(&seed_len), 4);
+
+            auto seed = extended_private_key_.bytes();
+            oss.write(reinterpret_cast<const char*>(seed.data()), 64);
+
+            uint32_t addr_count = static_cast<uint32_t>(addresses_.size());
+            oss.write(reinterpret_cast<const char*>(&addr_count), 4);
+            for (const auto &addr : addresses_) {
+                uint32_t len = static_cast<uint32_t>(addr.size());
+                oss.write(reinterpret_cast<const char*>(&len), 4);
+                oss.write(addr.data(), len);
+            }
+
+            std::string plaintext = oss.str();
+            auto encrypted = midnight::crypto::EncryptedState::create(plaintext, passphrase);
+            file.write(reinterpret_cast<const char*>(encrypted.data()), encrypted.size());
+        }
+
+        if (midnight::g_logger) {
+            midnight::g_logger->info("Wallet saved successfully");
+        }
     }
 
     std::string Wallet::get_address() const
@@ -361,18 +476,43 @@ namespace midnight::blockchain
 
     std::string Wallet::sign_transaction(const std::string &tx_hex)
     {
-        midnight::g_logger->debug("Signing transaction");
+        if (midnight::g_logger)
+        {
+            midnight::g_logger->debug("Signing transaction");
+        }
 
         if (extended_private_key_.empty())
         {
             throw std::runtime_error("Cannot sign: wallet seed is not initialized");
         }
 
+        // Validate tx_hex format before attempting to sign
+        std::string tx_normalized = tx_hex;
+        if (tx_normalized.rfind("0x", 0) == 0 || tx_normalized.rfind("0X", 0) == 0)
+        {
+            tx_normalized = tx_normalized.substr(2);
+        }
+        if (tx_normalized.empty() || (tx_normalized.size() % 2) != 0)
+        {
+            throw std::invalid_argument("Invalid tx_hex: must be a non-empty hex string (optionally prefixed with 0x)");
+        }
+        for (char c : tx_normalized)
+        {
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+            {
+                throw std::invalid_argument("Invalid tx_hex: contains non-hex character");
+            }
+        }
+
 #if defined(MIDNIGHT_ENABLE_SODIUM) && MIDNIGHT_ENABLE_SODIUM
         // Use Ed25519 signing via the wallet's derived private key
         try
         {
-            const auto seed = decode_seed_hex_or_throw(extended_private_key_);
+            const auto &seed = extended_private_key_.bytes();
+            if (seed.size() != 64)
+            {
+                throw std::runtime_error("Wallet seed must be 64 bytes");
+            }
             // Derive signing key from m/0/0/0 (primary spending key)
             const auto key_payload = derive_role_payload(seed, 0, 0, 0);
 
@@ -387,13 +527,19 @@ namespace midnight::blockchain
         }
         catch (const std::exception &e)
         {
-            midnight::g_logger->error("Ed25519 transaction signing failed: " + std::string(e.what()));
+            if (midnight::g_logger)
+            {
+                midnight::g_logger->error("Ed25519 transaction signing failed: " + std::string(e.what()));
+            }
             throw;
         }
 #else
         // Fallback: produce a clearly-marked stub signature when crypto is unavailable.
-        midnight::g_logger->warn("Wallet::sign_transaction: libsodium unavailable, returning stub signature");
-        return "stub_sig_" + tx_hex.substr(0, std::min<size_t>(32, tx_hex.size()));
+        if (midnight::g_logger)
+        {
+            midnight::g_logger->warn("Wallet::sign_transaction: libsodium unavailable — throwing instead of returning stub signature");
+        }
+        throw std::runtime_error("Cannot sign transaction: libsodium crypto is unavailable");
 #endif
     }
 
@@ -441,7 +587,11 @@ namespace midnight::blockchain
         uint32_t address_index = 0;
         parse_derivation_path(derivation_path, account, role, address_index);
 
-        const auto seed = decode_seed_hex_or_throw(extended_private_key_);
+        const auto &seed = extended_private_key_.bytes();
+        if (seed.size() != 64)
+        {
+            throw std::runtime_error("Wallet seed must be 64 bytes");
+        }
         const auto payload = derive_role_payload(seed, account, role, address_index);
         return bech32m_encode(role_to_hrp(role), payload);
     }

@@ -11,120 +11,205 @@
 
 namespace midnight::network
 {
-    namespace
+
+    // ─── URL Parsing ─────────────────────────────────────────────
+
+    NetworkClient::ParsedEndpoint NetworkClient::parse_url(const std::string &url) const
     {
-        struct ParsedEndpoint
-        {
-            std::string host_and_path;
-            bool use_tls = false;
-        };
+        ParsedEndpoint result;
+        std::string rest = url;
 
-        ParsedEndpoint parse_endpoint_scheme(const std::string &base_url)
-        {
-            ParsedEndpoint parsed;
-            parsed.host_and_path = base_url;
-
-            if (base_url.rfind("https://", 0) == 0)
-            {
-                parsed.use_tls = true;
-                parsed.host_and_path = base_url.substr(8);
-                return parsed;
-            }
-
-            if (base_url.rfind("http://", 0) == 0)
-            {
-                parsed.use_tls = false;
-                parsed.host_and_path = base_url.substr(7);
-                return parsed;
-            }
-
-            // Treat websocket endpoints as HTTP(S) transport for JSON-RPC POSTs.
-            if (base_url.rfind("wss://", 0) == 0)
-            {
-                parsed.use_tls = true;
-                parsed.host_and_path = base_url.substr(6);
-                return parsed;
-            }
-
-            if (base_url.rfind("ws://", 0) == 0)
-            {
-                parsed.use_tls = false;
-                parsed.host_and_path = base_url.substr(5);
-                return parsed;
-            }
-
-            if (base_url.find("://") != std::string::npos)
-            {
-                parsed.host_and_path = base_url.substr(base_url.find("://") + 3);
-            }
-
-            return parsed;
+        // Detect scheme
+        if (rest.rfind("https://", 0) == 0) {
+            result.use_tls = true;
+            result.port = 443;
+            rest = rest.substr(8);
+        } else if (rest.rfind("http://", 0) == 0) {
+            result.use_tls = false;
+            result.port = 80;
+            rest = rest.substr(7);
+        } else if (rest.rfind("wss://", 0) == 0) {
+            result.use_tls = true;
+            result.port = 443;
+            rest = rest.substr(6);
+        } else if (rest.rfind("ws://", 0) == 0) {
+            result.use_tls = false;
+            result.port = 80;
+            rest = rest.substr(5);
         }
 
-        std::string normalize_joined_path(const std::string &base_path, const std::string &path)
-        {
-            std::string normalized_base = base_path.empty() ? "/" : base_path;
-            if (normalized_base.front() != '/')
-            {
-                normalized_base.insert(normalized_base.begin(), '/');
-            }
-            while (normalized_base.size() > 1 && normalized_base.back() == '/')
-            {
-                normalized_base.pop_back();
-            }
+        // Extract host (and optional port)
+        size_t slash_pos = rest.find('/');
+        size_t colon_pos = rest.find(':');
 
-            if (path.empty() || path == "/")
-            {
-                return normalized_base;
+        std::string host_part;
+        if (slash_pos != std::string::npos && colon_pos != std::string::npos) {
+            if (colon_pos < slash_pos) {
+                host_part = rest.substr(0, colon_pos);
+                result.port = static_cast<uint16_t>(std::stoi(rest.substr(colon_pos + 1, slash_pos - colon_pos - 1)));
+                result.path_prefix = rest.substr(slash_pos);
+            } else {
+                host_part = rest.substr(0, slash_pos);
+                result.path_prefix = rest.substr(slash_pos);
             }
-
-            std::string normalized_path = path;
-            if (normalized_path.front() != '/')
-            {
-                normalized_path.insert(normalized_path.begin(), '/');
-            }
-
-            if (normalized_path == normalized_base ||
-                (normalized_base != "/" && normalized_path.rfind(normalized_base + "/", 0) == 0))
-            {
-                return normalized_path;
-            }
-
-            if (normalized_base == "/")
-            {
-                return normalized_path;
-            }
-
-            return normalized_base + normalized_path;
+        } else if (colon_pos != std::string::npos) {
+            host_part = rest.substr(0, colon_pos);
+            result.port = static_cast<uint16_t>(std::stoi(rest.substr(colon_pos + 1)));
+        } else if (slash_pos != std::string::npos) {
+            host_part = rest.substr(0, slash_pos);
+            result.path_prefix = rest.substr(slash_pos);
+        } else {
+            host_part = rest;
         }
-    } // namespace
+
+        result.host = host_part;
+        return result;
+    }
+
+    // ─── Constructor / Destructor ────────────────────────────────
 
     NetworkClient::NetworkClient(const std::string &base_url, uint32_t timeout_ms)
         : base_url_(base_url), timeout_ms_(timeout_ms)
     {
-        midnight::g_logger->info("NetworkClient created: " + base_url);
-
-        // Validate URL format
-        if (base_url.empty())
-        {
+        if (base_url.empty()) {
             throw std::invalid_argument("Base URL cannot be empty");
         }
+        midnight::g_logger->info("NetworkClient created: " + base_url);
     }
 
     NetworkClient::~NetworkClient() = default;
 
+    // ─── Header Management ──────────────────────────────────────
+
+    void NetworkClient::set_header(const std::string &header_name, const std::string &header_value)
+    {
+        {
+            std::lock_guard<std::mutex> lock(headers_mutex_);
+            headers_[header_name] = header_value;
+        }
+        // Logger call OUTSIDE the lock
+        if (midnight::g_logger) {
+            midnight::g_logger->debug("Set header: " + header_name);
+        }
+    }
+
+    void NetworkClient::clear_headers()
+    {
+        std::lock_guard<std::mutex> lock(headers_mutex_);
+        headers_.clear();
+    }
+
+    // ─── JSON Request Helpers ───────────────────────────────────
+
+    // Helper to build httplib::Headers from stored headers map
+    static httplib::Headers build_headers(const std::map<std::string, std::string> &hdrs) {
+        httplib::Headers result;
+        for (const auto &kv : hdrs) {
+            result.insert({kv.first, kv.second});
+        }
+        return result;
+    }
+
+    template<typename ClientT>
+    std::string NetworkClient::do_post(ClientT &cli, const std::string &path,
+                                      const std::string &body, const std::string &content_type)
+    {
+        httplib::Headers hdrs;
+        {
+            std::lock_guard<std::mutex> lock(headers_mutex_);
+            hdrs = build_headers(headers_);
+        }
+
+        auto res = cli.Post(path, hdrs, body, content_type);
+
+        if (!res) {
+            std::ostringstream oss;
+            oss << "HTTP request failed: ";
+            if (res.error() != httplib::Error::Success) {
+                oss << httplib::to_string(res.error());
+            } else {
+                oss << "unknown";
+            }
+            std::string error = oss.str();
+            midnight::g_logger->error(error);
+            throw std::runtime_error(error);
+        }
+
+        if (res->status != 200 && res->status != 201) {
+            std::ostringstream oss;
+            oss << "HTTP " << res->status << ": " << res->body;
+            midnight::g_logger->error(oss.str());
+            throw std::runtime_error(oss.str());
+        }
+
+        return res->body;
+    }
+
+    template<typename ClientT>
+    std::string NetworkClient::do_get(ClientT &cli, const std::string &path)
+    {
+        httplib::Headers hdrs;
+        {
+            std::lock_guard<std::mutex> lock(headers_mutex_);
+            hdrs = build_headers(headers_);
+        }
+
+        auto res = cli.Get(path, hdrs);
+
+        if (!res) {
+            std::ostringstream oss;
+            oss << "HTTP GET failed: ";
+            if (res.error() != httplib::Error::Success) {
+                oss << httplib::to_string(res.error());
+            } else {
+                oss << "unknown";
+            }
+            std::string error = oss.str();
+            midnight::g_logger->error(error);
+            throw std::runtime_error(error);
+        }
+
+        if (res->status != 200) {
+            std::ostringstream oss;
+            oss << "HTTP GET " << res->status << ": " << res->body;
+            midnight::g_logger->error(oss.str());
+            throw std::runtime_error(oss.str());
+        }
+
+        return res->body;
+    }
+
     json NetworkClient::post_json(const std::string &path, const json &payload)
     {
         std::string body = payload.dump();
-        std::string response_body = http_post(path, body, "application/json");
 
-        try
-        {
+        midnight::g_logger->debug("HTTP POST " + base_url_ + path +
+                                  " (" + std::to_string(body.length()) + " bytes)");
+
+        ParsedEndpoint ep = parse_url(base_url_);
+        std::string request_path = ep.path_prefix.empty() ? "/" :
+                                  (ep.path_prefix.back() == '/' ? ep.path_prefix + path :
+                                   ep.path_prefix + path);
+
+        try {
+            std::string response_body;
+            if (ep.use_tls) {
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+                httplib::SSLClient cli(ep.host, ep.port);
+                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
+                response_body = do_post(cli, request_path, body, "application/json");
+#else
+                throw std::runtime_error("HTTPS not supported — compile with OpenSSL");
+#endif
+            } else {
+                httplib::Client cli(ep.host, ep.port);
+                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
+                response_body = do_post(cli, request_path, body, "application/json");
+            }
+
             return json::parse(response_body);
-        }
-        catch (const json::exception &e)
-        {
-            std::string error = "Failed to parse JSON response: " + std::string(e.what());
+        } catch (const json::parse_error &e) {
+            std::string error = "JSON parse error: " + std::string(e.what());
             midnight::g_logger->error(error);
             throw std::runtime_error(error);
         }
@@ -132,300 +217,62 @@ namespace midnight::network
 
     json NetworkClient::get_json(const std::string &path)
     {
-        std::string response_body = http_get(path);
+        midnight::g_logger->debug("HTTP GET " + base_url_ + path);
 
-        try
-        {
+        ParsedEndpoint ep = parse_url(base_url_);
+        std::string request_path = ep.path_prefix.empty() ? path :
+                                  (ep.path_prefix.back() == '/' ? ep.path_prefix + path :
+                                   ep.path_prefix + path);
+
+        try {
+            std::string response_body;
+            if (ep.use_tls) {
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+                httplib::SSLClient cli(ep.host, ep.port);
+                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
+                response_body = do_get(cli, request_path);
+#else
+                throw std::runtime_error("HTTPS not supported — compile with OpenSSL");
+#endif
+            } else {
+                httplib::Client cli(ep.host, ep.port);
+                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
+                response_body = do_get(cli, request_path);
+            }
+
             return json::parse(response_body);
-        }
-        catch (const json::exception &e)
-        {
-            std::string error = "Failed to parse JSON response: " + std::string(e.what());
+        } catch (const json::parse_error &e) {
+            std::string error = "JSON parse error: " + std::string(e.what());
             midnight::g_logger->error(error);
             throw std::runtime_error(error);
         }
     }
 
-    void NetworkClient::set_header(const std::string &header_name, const std::string &header_value)
-    {
-        // Store custom headers for future requests - not yet persisted
-        midnight::g_logger->debug("Set header: " + header_name + ": " + header_value);
-    }
-
     bool NetworkClient::is_connected() const
     {
-        try
-        {
-            // Parse URL to get host
-            ParsedEndpoint parsed = parse_endpoint_scheme(base_url_);
-            std::string url = parsed.host_and_path;
-            bool is_https = parsed.use_tls;
+        ParsedEndpoint ep = parse_url(base_url_);
+        midnight::g_logger->debug("Connectivity probe: " + ep.host + ":" + std::to_string(ep.port));
 
-            // Extract host and port
-            std::string host = url;
-            std::string request_path = "/";
-            if (url.find('/') != std::string::npos)
-            {
-                host = url.substr(0, url.find('/'));
-                request_path = url.substr(url.find('/'));
-            }
-
-            // Check if host has port
-            uint16_t port = is_https ? 443 : 80;
-            if (host.find(':') != std::string::npos)
-            {
-                port = std::stoul(host.substr(host.find(':') + 1));
-                host = host.substr(0, host.find(':'));
-            }
-
-            request_path = normalize_joined_path(request_path, "/");
-
-            midnight::g_logger->debug("Checking connectivity to: " + host + ":" + std::to_string(port));
-            const char *rpc_probe_payload = "{\"jsonrpc\":\"2.0\",\"method\":\"system_chain\",\"params\":[],\"id\":1}";
-
-            // Probe endpoint with GET first, then POST for RPC/GraphQL endpoints.
-            if (is_https)
-            {
+        try {
+            if (ep.use_tls) {
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-                httplib::SSLClient cli(host, port);
+                httplib::SSLClient cli(ep.host, ep.port);
                 cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
-
-                auto get_res = cli.Get(request_path.c_str());
-                if (get_res)
-                {
-                    return true;
-                }
-
-                auto post_res = cli.Post(request_path.c_str(), rpc_probe_payload, "application/json");
-                if (post_res)
-                {
-                    return true;
-                }
-
-                if (request_path != "/")
-                {
-                    post_res = cli.Post("/", rpc_probe_payload, "application/json");
-                    if (post_res)
-                    {
-                        return true;
-                    }
-                }
-
-                midnight::g_logger->debug("Connectivity probe failed for HTTPS endpoint");
-                return false;
+                auto res = cli.Get(ep.path_prefix.empty() ? "/" : ep.path_prefix.c_str());
+                return static_cast<bool>(res);
 #else
-                midnight::g_logger->warn("HTTPS not supported - OpenSSL required");
+                midnight::g_logger->warn("HTTPS probe skipped — OpenSSL unavailable");
                 return false;
 #endif
-            }
-            else
-            {
-                httplib::Client cli(host, port);
+            } else {
+                httplib::Client cli(ep.host, ep.port);
                 cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
-
-                auto get_res = cli.Get(request_path.c_str());
-                if (get_res)
-                {
-                    return true;
-                }
-
-                auto post_res = cli.Post(request_path.c_str(), rpc_probe_payload, "application/json");
-                if (post_res)
-                {
-                    return true;
-                }
-
-                if (request_path != "/")
-                {
-                    post_res = cli.Post("/", rpc_probe_payload, "application/json");
-                    if (post_res)
-                    {
-                        return true;
-                    }
-                }
-
-                midnight::g_logger->debug("Connectivity probe failed for HTTP endpoint");
-                return false;
+                auto res = cli.Get(ep.path_prefix.empty() ? "/" : ep.path_prefix.c_str());
+                return static_cast<bool>(res);
             }
-        }
-        catch (const std::exception &e)
-        {
-            midnight::g_logger->warn("Connectivity check failed: " + std::string(e.what()));
+        } catch (const std::exception &e) {
+            midnight::g_logger->warn("Connectivity probe failed: " + std::string(e.what()));
             return false;
-        }
-    }
-
-    std::string NetworkClient::http_post(
-        const std::string &path,
-        const std::string &body,
-        const std::string &content_type)
-    {
-        std::ostringstream msg;
-        msg << "HTTP POST " << base_url_ << path << " (" << body.length() << " bytes)";
-        midnight::g_logger->debug(msg.str());
-
-        try
-        {
-            // Parse URL
-            ParsedEndpoint parsed = parse_endpoint_scheme(base_url_);
-            std::string url = parsed.host_and_path;
-            bool is_https = parsed.use_tls;
-
-            // Extract host and port
-            std::string host = url;
-            std::string request_path = "/";
-
-            if (url.find('/') != std::string::npos)
-            {
-                host = url.substr(0, url.find('/'));
-                request_path = url.substr(url.find('/'));
-            }
-
-            uint16_t port = is_https ? 443 : 80;
-            if (host.find(':') != std::string::npos)
-            {
-                port = std::stoul(host.substr(host.find(':') + 1));
-                host = host.substr(0, host.find(':'));
-            }
-
-            request_path = normalize_joined_path(request_path, path);
-
-            msg.str("");
-            msg << "POST " << host << ":" << port << request_path;
-            midnight::g_logger->debug(msg.str());
-
-            // Make HTTP request
-            if (is_https)
-            {
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-                httplib::SSLClient cli(host, port);
-                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
-
-                auto res = cli.Post(
-                    request_path.c_str(),
-                    body,
-                    content_type.c_str());
-
-                if (!res || res->status != 200)
-                {
-                    std::string error = "HTTP error: " + std::to_string(res ? res->status : 0);
-                    midnight::g_logger->error(error);
-                    throw std::runtime_error(error);
-                }
-
-                return res->body;
-#else
-                throw std::runtime_error("HTTPS not supported - OpenSSL required");
-#endif
-            }
-            else
-            {
-                httplib::Client cli(host, port);
-                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
-
-                auto res = cli.Post(
-                    request_path.c_str(),
-                    body,
-                    content_type.c_str());
-
-                if (!res || res->status != 200)
-                {
-                    std::string error = "HTTP error: " + std::to_string(res ? res->status : 0);
-                    midnight::g_logger->error(error);
-                    throw std::runtime_error(error);
-                }
-
-                return res->body;
-            }
-        }
-        catch (const std::exception &e)
-        {
-            msg.str("");
-            msg << "HTTP POST failed: " << e.what();
-            midnight::g_logger->error(msg.str());
-            throw;
-        }
-    }
-
-    std::string NetworkClient::http_get(const std::string &path)
-    {
-        std::ostringstream msg;
-        msg << "HTTP GET " << base_url_ << path;
-        midnight::g_logger->debug(msg.str());
-
-        try
-        {
-            // Parse URL (same logic as http_post)
-            ParsedEndpoint parsed = parse_endpoint_scheme(base_url_);
-            std::string url = parsed.host_and_path;
-            bool is_https = parsed.use_tls;
-
-            std::string host = url;
-            std::string request_path = "/";
-
-            if (url.find('/') != std::string::npos)
-            {
-                host = url.substr(0, url.find('/'));
-                request_path = url.substr(url.find('/'));
-            }
-
-            uint16_t port = is_https ? 443 : 80;
-            if (host.find(':') != std::string::npos)
-            {
-                port = std::stoul(host.substr(host.find(':') + 1));
-                host = host.substr(0, host.find(':'));
-            }
-
-            request_path = normalize_joined_path(request_path, path);
-
-            msg.str("");
-            msg << "GET " << host << ":" << port << request_path;
-            midnight::g_logger->debug(msg.str());
-
-            // Make HTTP request
-            if (is_https)
-            {
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-                httplib::SSLClient cli(host, port);
-                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
-
-                auto res = cli.Get(request_path.c_str());
-
-                if (!res || res->status != 200)
-                {
-                    std::string error = "HTTP error: " + std::to_string(res ? res->status : 0);
-                    midnight::g_logger->error(error);
-                    throw std::runtime_error(error);
-                }
-
-                return res->body;
-#else
-                throw std::runtime_error("HTTPS not supported - OpenSSL required");
-#endif
-            }
-            else
-            {
-                httplib::Client cli(host, port);
-                cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
-
-                auto res = cli.Get(request_path.c_str());
-
-                if (!res || res->status != 200)
-                {
-                    std::string error = "HTTP error: " + std::to_string(res ? res->status : 0);
-                    midnight::g_logger->error(error);
-                    throw std::runtime_error(error);
-                }
-
-                return res->body;
-            }
-        }
-        catch (const std::exception &e)
-        {
-            msg.str("");
-            msg << "HTTP GET failed: " << e.what();
-            midnight::g_logger->error(msg.str());
-            throw;
         }
     }
 

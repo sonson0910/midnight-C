@@ -66,6 +66,7 @@ midnight-correct.json
 my-test-wallet.json
 node_modules/
 wallet_preview.txt
+.wallet_preview.txt
 
 # Security-sensitive files (seeds, keys, secrets)
 seed_*.hex

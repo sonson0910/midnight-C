@@ -4,6 +4,7 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <chrono>
 
 namespace midnight::blockchain
 {

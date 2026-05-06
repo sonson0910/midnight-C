@@ -4,17 +4,17 @@
 
 
 # Configuration directories and files
-SourceDirectory: /media/son/Projects1/venera/midnight/night_fund/.cmake-build/manual/_deps/jsoncpp-src
-BuildDirectory: /media/son/Projects1/venera/midnight/night_fund/.cmake-build/manual/_deps/jsoncpp-build
+SourceDirectory: D:/venera/midnight/night_fund/.cmake-build/manual/_deps/jsoncpp-src
+BuildDirectory: D:/venera/midnight/night_fund/.cmake-build/manual/_deps/jsoncpp-build
 
 # Where to place the cost data store
 CostDataFile: 
 
 # Site is something like machine.domain, i.e. pragmatic.crd
-Site: son-ubuntu
+Site: PC-SON
 
 # Build name is osname-revision-compiler, i.e. Linux-2.4.2-2smp-c++
-BuildName: Linux-c++
+BuildName: Win32-ninja
 
 # Subprojects
 LabelsForSubprojects: 
@@ -27,8 +27,8 @@ SubmitInactivityTimeout:
 NightlyStartTime: 01:23:45 UTC
 
 # Commands for the build/test/submit cycle
-ConfigureCommand: "/usr/bin/cmake" "/media/son/Projects1/venera/midnight/night_fund/.cmake-build/manual/_deps/jsoncpp-src"
-MakeCommand: /usr/bin/cmake --build . --config "${CTEST_CONFIGURATION_TYPE}"
+ConfigureCommand: "C:/Users/Admin/anaconda3/Lib/site-packages/cmake/data/bin/cmake.exe" "D:/venera/midnight/night_fund/.cmake-build/manual/_deps/jsoncpp-src"
+MakeCommand: C:\Users\Admin\anaconda3\Lib\site-packages\cmake\data\bin\cmake.exe --build . --config "${CTEST_CONFIGURATION_TYPE}"
 DefaultCTestConfigurationType: Release
 
 # version control
@@ -63,8 +63,8 @@ UpdateOptions:
 UpdateType: 
 
 # Compiler info
-Compiler: /usr/bin/c++
-CompilerVersion: 15.2.0
+Compiler: C:/msys64/ucrt64/bin/c++.exe
+CompilerVersion: 15.1.0
 
 # Dynamic analysis (MemCheck)
 PurifyCommand: 
@@ -81,7 +81,7 @@ MemoryCheckCommandOptions:
 MemoryCheckSuppressionFile: 
 
 # Coverage
-CoverageCommand: /usr/bin/gcov
+CoverageCommand: C:/msys64/ucrt64/bin/gcov.exe
 CoverageExtraFlags: -l
 
 # Testing options

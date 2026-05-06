@@ -1,0 +1,21 @@
+# ninja log v7
+2	93	7997279133515456	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-mkdir	7695136022f73330
+2	93	7997279133515456	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-mkdir	7695136022f73330
+93	1869	7997279151281207	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-download	abf0029f1b61aa4d
+93	1869	7997279151281207	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-download	abf0029f1b61aa4d
+1870	1971	7997279152301203	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-update	b535fe887653e7eb
+1870	1971	7997279152301203	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-update	b535fe887653e7eb
+1972	2040	7997279153011200	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-patch	fae609abd13025c2
+1972	2040	7997279153011200	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-patch	fae609abd13025c2
+2040	2243	7997279154701196	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-configure	4bbf1bf54c049986
+2040	2243	7997279154701196	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-configure	4bbf1bf54c049986
+2243	2398	7997279156571729	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-build	515f90d74b8484fc
+2243	2398	7997279156571729	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-build	515f90d74b8484fc
+2398	2508	7997279157671725	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-install	51392bc81d7d3d75
+2398	2508	7997279157671725	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-install	51392bc81d7d3d75
+2508	2750	7997279159771730	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-test	3ad5098a6d87f051
+2508	2750	7997279159771730	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-test	3ad5098a6d87f051
+2750	2951	7997279162101705	CMakeFiles/cpp-httplib-populate-complete	14abaa2d69a09c24
+2750	2951	7997279162101705	cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-done	14abaa2d69a09c24
+2750	2951	7997279162101705	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/cpp-httplib-subbuild/CMakeFiles/cpp-httplib-populate-complete	14abaa2d69a09c24
+2750	2951	7997279162101705	D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/cpp-httplib-subbuild/cpp-httplib-populate-prefix/src/cpp-httplib-populate-stamp/cpp-httplib-populate-done	14abaa2d69a09c24

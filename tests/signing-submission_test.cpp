@@ -181,7 +181,7 @@ TEST_F(SigningSubmissionTest, CreateVote_ValidVote_CreatesSignedVote)
     auto keypair = KeyManager::generate_ed25519_key();
     ASSERT_TRUE(keypair.has_value());
 
-    FinallityVoteSigner voter(*keypair);
+    FinalityVoteSigner voter(*keypair);
 
     auto vote = voter.create_vote(1000, "0x" + std::string(64, 'a'));
 
@@ -199,7 +199,7 @@ TEST_F(SigningSubmissionTest, VerifyVote_ValidVote_ReturnsTrue)
     auto keypair = KeyManager::generate_ed25519_key();
     ASSERT_TRUE(keypair.has_value());
 
-    FinallityVoteSigner voter(*keypair);
+    FinalityVoteSigner voter(*keypair);
 
     auto vote = voter.create_vote(1000, "0x" + std::string(64, 'a'));
     bool verified = voter.verify_vote(vote);

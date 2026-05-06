@@ -1,0 +1,15 @@
+# This is a generated file and its contents are an internal implementation detail.
+# The download step will be re-executed if anything in this file changes.
+# No other meaning or use of this file is supported.
+
+method=git
+command=C:/Users/Admin/anaconda3/Lib/site-packages/cmake/data/bin/cmake.exe;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/grpc-subbuild/grpc-populate-prefix/tmp/grpc-populate-gitclone.cmake
+source_dir=D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps/grpc-src
+work_dir=D:/venera/midnight/night_fund/.cmake-build/proof-server-test/_deps
+repository=https://github.com/grpc/grpc.git
+remote=origin
+init_submodules=TRUE
+recurse_submodules=--recursive
+submodules=third_party/zlib third_party/gflags third_party/abseil-cpp third_party/protobuf
+CMP0097=NEW
+      

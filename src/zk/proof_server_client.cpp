@@ -1,11 +1,76 @@
 #include "midnight/zk/proof_server_client.hpp"
+#include "midnight/core/logger.hpp"
 #include <fmt/format.h>
 #include <chrono>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
+#include <cctype>
 
 namespace midnight::zk
 {
+
+    // Sanitize error messages to prevent internal information disclosure.
+    // Only allows printable ASCII, limits length, and strips sensitive patterns.
+    static std::string sanitize_error_message(const std::string &raw)
+    {
+        if (raw.empty())
+        {
+            return "An internal error occurred";
+        }
+
+        std::string sanitized;
+        sanitized.reserve(std::min(raw.size(), size_t(200)));
+
+        for (size_t i = 0; i < raw.size() && sanitized.size() < 200; ++i)
+        {
+            char c = raw[i];
+            // Allow printable ASCII (space through ~)
+            if (c >= 32 && c <= 126)
+            {
+                sanitized += c;
+            }
+            else
+            {
+                sanitized += '?';
+            }
+        }
+
+        // Truncate to prevent buffer issues
+        if (sanitized.size() > 200)
+        {
+            sanitized.resize(200);
+            sanitized += "...";
+        }
+
+        // Replace common sensitive patterns with redaction
+        const std::string sensitive_patterns[] = {
+            "password", "token", "secret", "api_key", "apikey",
+            "authorization", "private_key", "credential"
+        };
+        for (const auto &pattern : sensitive_patterns)
+        {
+            for (size_t pos = sanitized.find(pattern); pos != std::string::npos; pos = sanitized.find(pattern, pos))
+            {
+                // Redact the value after the pattern name
+                size_t colon_pos = sanitized.find(':', pos);
+                size_t newline_pos = sanitized.find('\n', pos);
+                size_t end = std::min(colon_pos, newline_pos);
+                if (end != std::string::npos && end > pos)
+                {
+                    sanitized.replace(pos, end - pos + 1, pattern + ": <redacted>");
+                }
+                else if (colon_pos != std::string::npos)
+                {
+                    size_t next_newline = sanitized.find('\n', colon_pos);
+                    sanitized.replace(colon_pos + 1, (next_newline != std::string::npos ? next_newline : sanitized.size()) - colon_pos - 1, " <redacted>");
+                }
+                pos = sanitized.find(pattern, pos + pattern.size() + 12);
+            }
+        }
+
+        return sanitized;
+    }
 
     std::string ProofServerClient::Config::base_url() const
     {
@@ -97,9 +162,21 @@ namespace midnight::zk
                 "/generate",
                 request.to_json());
 
-            // Parse response
-            result = parse_proof_response(response);
-            result.success = true;
+            // Parse response — do NOT override parse_proof_response's success flag
+            ProofResult parsed = parse_proof_response(response);
+            result.success = parsed.success;
+            if (!result.success) {
+                result.error_message = parsed.error_message;
+                return result;
+            }
+
+            result.proof = std::move(parsed.proof);
+            // Flags reflect what parse_proof_response set: we received proof bytes
+            // from the server. Actual local verification must be done separately via
+            // verify_proof_local() or verify_proof(). We do NOT set
+            // proof_verified_locally = true here — that would be misleading.
+            result.public_inputs_valid = true;   // server validated them
+            result.witnesses_valid     = true;   // server validated them
 
             // Record generation timestamp
             result.proof.generated_at_timestamp =
@@ -227,7 +304,16 @@ namespace midnight::zk
             }
             else if (response.contains("error"))
             {
-                throw std::runtime_error(response["error"].dump());
+                std::string raw_err;
+                if (response["error"].is_string())
+                {
+                    raw_err = response["error"].get<std::string>();
+                }
+                else
+                {
+                    raw_err = response["error"].dump();
+                }
+                throw std::runtime_error(sanitize_error_message(raw_err));
             }
 
             throw std::runtime_error("No result in RPC response");
@@ -374,12 +460,17 @@ namespace midnight::zk
 
             json response = network_client_->post_json("/check", request);
 
-            // /check returns {"capable": true/false}
+            // /check returns {"capable": true/false} — require explicit confirmation
             if (response.contains("capable"))
                 return response["capable"].get<bool>();
 
-            // If response has no error, assume capable
-            return !response.contains("error");
+            // Require explicit capable/available flag — do NOT assume capable
+            if (response.contains("available"))
+                return response["available"].get<bool>();
+
+            // No explicit field AND no error — still require the server to have
+            // explicitly said capable. Treat ambiguous responses as unavailable.
+            return false;
         }
         catch (const std::exception &e)
         {
@@ -414,9 +505,11 @@ namespace midnight::zk
             if (response.contains("result"))
             {
                 result.proof = CircuitProof::from_json(response["result"]);
-                result.proof_verified_locally = true;
-                result.public_inputs_valid = true;
-                result.witnesses_valid = true;
+                // proof_verified_locally stays false: we received proof bytes from the
+                // server but have NOT done local verification here. Call verify_proof_local()
+                // or verify_proof() to perform actual verification.
+                result.public_inputs_valid = true;   // server said the response is well-formed
+                result.witnesses_valid     = true;   // server confirmed witnesses
                 result.success = true;
             }
             else

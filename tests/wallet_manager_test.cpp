@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <thread>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -202,8 +203,17 @@ TEST(WalletManagerTest, ListAndRemoveAliases)
     EXPECT_TRUE(std::find(aliases.begin(), aliases.end(), "alpha01") != aliases.end());
     EXPECT_TRUE(std::find(aliases.begin(), aliases.end(), "beta02") != aliases.end());
 
-    ASSERT_TRUE(midnight::blockchain::WalletManager::remove_wallet("alpha01", wallet_store.string(), &error))
-        << error;
+    // Retry remove on Windows - Windows sometimes holds file handles briefly after write
+    bool removed = false;
+    std::string remove_error;
+    for (int retry = 0; retry < 5 && !removed; ++retry) {
+        if (retry > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        removed = midnight::blockchain::WalletManager::remove_wallet(
+            "alpha01", wallet_store.string(), &remove_error);
+    }
+    ASSERT_TRUE(removed) << "Failed to remove wallet alias: " << remove_error;
 
     const auto removed_seed = midnight::blockchain::WalletManager::load_seed_hex("alpha01", wallet_store.string(), &error);
     EXPECT_FALSE(removed_seed.has_value());

@@ -35,5 +35,15 @@ target_include_directories(midnight-tests
         ${CMAKE_SOURCE_DIR}/include
 )
 
+# Include directories for dependencies
+find_path(JSONCPP_INCLUDE_DIR json/json.h
+    HINTS ${CMAKE_BINARY_DIR}/_deps/jsoncpp-src/include
+)
+
+target_include_directories(midnight-tests
+    PRIVATE
+        ${JSONCPP_INCLUDE_DIR}
+)
+
 # Add tests
 add_test(NAME core_tests COMMAND midnight-tests)

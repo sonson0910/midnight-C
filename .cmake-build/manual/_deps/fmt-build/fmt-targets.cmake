@@ -7,7 +7,7 @@ if(CMAKE_VERSION VERSION_LESS "3.0.0")
    message(FATAL_ERROR "CMake >= 3.0.0 required")
 endif()
 cmake_policy(PUSH)
-cmake_policy(VERSION 3.0.0...3.29)
+cmake_policy(VERSION 3.0.0...4.1)
 #----------------------------------------------------------------
 # Generated CMake target import file.
 #----------------------------------------------------------------
@@ -47,12 +47,11 @@ unset(_cmake_expected_targets)
 
 
 # Create imported target fmt::fmt
-add_library(fmt::fmt SHARED IMPORTED)
+add_library(fmt::fmt STATIC IMPORTED)
 
 set_target_properties(fmt::fmt PROPERTIES
-  INTERFACE_COMPILE_DEFINITIONS "FMT_SHARED"
   INTERFACE_COMPILE_FEATURES "cxx_std_11"
-  INTERFACE_INCLUDE_DIRECTORIES "/media/son/Projects1/venera/midnight/night_fund/build_ninja_cppfix/_deps/fmt-src/include"
+  INTERFACE_INCLUDE_DIRECTORIES "D:/venera/midnight/night_fund/.cmake-build/manual/_deps/fmt-src/include"
 )
 
 # Create imported target fmt::fmt-header-only
@@ -61,14 +60,14 @@ add_library(fmt::fmt-header-only INTERFACE IMPORTED)
 set_target_properties(fmt::fmt-header-only PROPERTIES
   INTERFACE_COMPILE_DEFINITIONS "FMT_HEADER_ONLY=1"
   INTERFACE_COMPILE_FEATURES "cxx_std_11"
-  INTERFACE_INCLUDE_DIRECTORIES "/media/son/Projects1/venera/midnight/night_fund/build_ninja_cppfix/_deps/fmt-src/include"
+  INTERFACE_INCLUDE_DIRECTORIES "D:/venera/midnight/night_fund/.cmake-build/manual/_deps/fmt-src/include"
 )
 
-# Import target "fmt::fmt" for configuration "Release"
-set_property(TARGET fmt::fmt APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)
+# Import target "fmt::fmt" for configuration "Debug"
+set_property(TARGET fmt::fmt APPEND PROPERTY IMPORTED_CONFIGURATIONS DEBUG)
 set_target_properties(fmt::fmt PROPERTIES
-  IMPORTED_LOCATION_RELEASE "/media/son/Projects1/venera/midnight/night_fund/.cmake-build/manual/lib/libfmt.so.11.1.4"
-  IMPORTED_SONAME_RELEASE "libfmt.so.11"
+  IMPORTED_LINK_INTERFACE_LANGUAGES_DEBUG "CXX"
+  IMPORTED_LOCATION_DEBUG "D:/venera/midnight/night_fund/.cmake-build/manual/lib/libfmtd.a"
   )
 
 # This file does not depend on other imported targets which have

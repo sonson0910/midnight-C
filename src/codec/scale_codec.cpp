@@ -124,16 +124,18 @@ namespace midnight::codec
         // Period must be power of 2, clamped to [4, 65536]
         uint64_t clamped = std::max(uint64_t(4), std::min(uint64_t(65536), period));
 
-        // Round to nearest power of 2
+        // Round up to nearest power of 2
         uint64_t p = 4;
         while (p < clamped)
             p <<= 1;
 
         // quantize_factor = max(1, period / 4096)
         uint64_t quantize_factor = std::max(uint64_t(1), p / 4096);
-        uint64_t phase = (current_block % p) / quantize_factor * quantize_factor;
 
-        // calced_period_log2
+        // Phase within the period, quantized
+        uint64_t phase = (current_block % p) / quantize_factor;
+
+        // period_log2: log2(p), clamped so period_log2 - 1 fits in 4 bits
         uint16_t period_log2 = 0;
         uint64_t tmp = p;
         while (tmp > 1)
@@ -141,11 +143,14 @@ namespace midnight::codec
             period_log2++;
             tmp >>= 1;
         }
+        // period_log2 ranges 2-16, nibble stores (period_log2 - 1), max 15
+        uint8_t nibble = static_cast<uint8_t>(std::min(uint8_t(15), static_cast<uint8_t>(period_log2 - 1)));
 
-        // Encoded as u16 LE: low nibble = period_log2 - 1, high 12 bits = phase / quantize_factor
-        uint16_t encoded = static_cast<uint16_t>(
-            std::min(uint16_t(15), static_cast<uint16_t>(period_log2 - 1)) |
-            ((phase / quantize_factor) << 4));
+        // Phase clamped to 12 bits (max 4095) to prevent overflow
+        uint16_t phase_clamped = static_cast<uint16_t>(std::min(phase, uint64_t(0x0FFF)));
+
+        // Encoded as u16 LE: low nibble = period_log2 - 1, high 12 bits = phase
+        uint16_t encoded = nibble | (phase_clamped << 4);
 
         encode_u16_le(encoded);
     }

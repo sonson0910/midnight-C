@@ -1,12 +1,12 @@
 # Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
-# file Copyright.txt or https://cmake.org/licensing for details.
+# file LICENSE.rst or https://cmake.org/licensing for details.
 
 cmake_minimum_required(VERSION ${CMAKE_VERSION}) # this file comes with cmake
 
 # Make file names absolute:
 #
-get_filename_component(filename "/media/son/Projects1/venera/midnight/night_fund/.cmake-build/manual/_deps/nlohmann_json-subbuild/nlohmann_json-populate-prefix/src/json.tar.xz" ABSOLUTE)
-get_filename_component(directory "/media/son/Projects1/venera/midnight/night_fund/.cmake-build/manual/_deps/nlohmann_json-src" ABSOLUTE)
+get_filename_component(filename "D:/venera/midnight/night_fund/.cmake-build/manual/_deps/nlohmann_json-subbuild/nlohmann_json-populate-prefix/src/json.tar.xz" ABSOLUTE)
+get_filename_component(directory "D:/venera/midnight/night_fund/.cmake-build/manual/_deps/nlohmann_json-src" ABSOLUTE)
 
 message(VERBOSE "extracting...
      src='${filename}'
@@ -28,8 +28,8 @@ file(MAKE_DIRECTORY "${ut_dir}")
 
 # Extract it:
 #
-message(VERBOSE "extracting... [tar xfz]")
-execute_process(COMMAND ${CMAKE_COMMAND} -E tar xfz ${filename} 
+message(VERBOSE "extracting... [tar xf]")
+execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf ${filename} 
   WORKING_DIRECTORY ${ut_dir}
   RESULT_VARIABLE rv
 )
