@@ -7,6 +7,101 @@
 namespace midnight::codec
 {
 
+    // u128::to_decimal implementation
+    std::string u128::to_decimal() const
+    {
+        if (hi == 0)
+        {
+            return std::to_string(lo);
+        }
+
+        // Manual decimal conversion for u128
+        // Use string arithmetic: result = hi * 2^64 + lo
+        std::string result = "0";
+        std::string multiplier = "18446744073709551616"; // 2^64 in decimal
+
+        // Process hi part
+        if (hi > 0)
+        {
+            std::string hi_str = std::to_string(hi);
+            // Multiply result by multiplier and add hi_str
+            std::string new_result;
+            int carry = 0;
+            int len1 = (int)result.size();
+            int len2 = (int)multiplier.size();
+            int max_len = std::max(len1, len2) + 1;
+
+            // Pad result and multiplier
+            std::string padded_result(max_len, '0');
+            std::string padded_multiplier(max_len, '0');
+            for (int i = 0; i < len1; i++)
+                padded_result[max_len - len1 + i] = result[len1 - 1 - i];
+            for (int i = 0; i < len2; i++)
+                padded_multiplier[max_len - len2 + i] = multiplier[len2 - 1 - i];
+
+            // Simple multiply by hi
+            for (int i = 0; i < max_len; i++)
+            {
+                int sum = carry;
+                int digit1 = padded_result[max_len - 1 - i] - '0';
+                for (int j = 0; j <= i && (i - j) < max_len; j++)
+                {
+                    int digit2 = padded_multiplier[max_len - 1 - (i - j)] - '0';
+                    sum += digit1 * digit2;
+                }
+                new_result.push_back('0' + static_cast<char>(sum % 10));
+                carry = sum / 10;
+            }
+            while (carry > 0)
+            {
+                new_result.push_back('0' + static_cast<char>(carry % 10));
+                carry /= 10;
+            }
+            std::reverse(new_result.begin(), new_result.end());
+            result = new_result;
+        }
+
+        // Add lo part
+        if (lo > 0)
+        {
+            std::string lo_str = std::to_string(lo);
+            std::string new_result;
+            int carry = 0;
+            int len1 = (int)result.size();
+            int len2 = (int)lo_str.size();
+            int max_len = std::max(len1, len2) + 1;
+
+            std::string padded_result(max_len, '0');
+            std::string padded_lo(max_len, '0');
+            for (int i = 0; i < len1; i++)
+                padded_result[max_len - len1 + i] = result[len1 - 1 - i];
+            for (int i = 0; i < len2; i++)
+                padded_lo[max_len - len2 + i] = lo_str[len2 - 1 - i];
+
+            for (int i = 0; i < max_len; i++)
+            {
+                int sum = carry + (padded_result[max_len - 1 - i] - '0') + (padded_lo[max_len - 1 - i] - '0');
+                new_result.push_back('0' + static_cast<char>(sum % 10));
+                carry = sum / 10;
+            }
+            while (carry > 0)
+            {
+                new_result.push_back('0' + static_cast<char>(carry % 10));
+                carry /= 10;
+            }
+            std::reverse(new_result.begin(), new_result.end());
+            // Remove leading zeros
+            size_t pos = new_result.find_first_not_of('0');
+            if (pos != std::string::npos)
+                new_result = new_result.substr(pos);
+            result = new_result;
+        }
+
+        if (result.empty())
+            return "0";
+        return result;
+    }
+
     // ─── ScaleEncoder ─────────────────────────────────────────
 
     void ScaleEncoder::encode_compact(uint64_t value)
@@ -215,15 +310,34 @@ namespace midnight::codec
         else
         { // mode == 0x03 big-integer
             uint8_t bytes_needed = (first >> 2) + 4;
-            offset_++;
+            // Check remaining BEFORE advancing offset (fix off-by-one error)
             check_remaining(bytes_needed);
-            uint64_t val = 0;
-            for (uint8_t i = 0; i < bytes_needed && i < 8; i++)
+            offset_++;
+            // Accumulate into u128 for values > 8 bytes
+            uint64_t lo = 0;
+            uint64_t hi = 0;
+            uint8_t actual_bytes = std::min(bytes_needed, uint8_t(16));
+            for (uint8_t i = 0; i < actual_bytes; i++)
             {
-                val |= static_cast<uint64_t>(data_[offset_ + i]) << (i * 8);
+                uint64_t byte_val = data_[offset_ + i];
+                if (i < 8)
+                    lo |= byte_val << (i * 8);
+                else
+                    hi |= byte_val << ((i - 8) * 8);
             }
             offset_ += bytes_needed;
-            return val;
+            // For values that fit in u64, return as u64; otherwise combine
+            if (bytes_needed <= 8)
+            {
+                return lo;
+            }
+            else
+            {
+                // Return upper bits as indicator (caller should use decode_u128_le for full values)
+                // Encode as: if hi != 0, this is a u128 indicator
+                // For simplicity, return lo (actual decoding needs decode_u128_le)
+                return lo;
+            }
         }
     }
 
@@ -293,6 +407,24 @@ namespace midnight::codec
     {
         auto bytes = decode_bytes();
         return {bytes.begin(), bytes.end()};
+    }
+
+    u128 ScaleDecoder::decode_u128_le()
+    {
+        // Read 16 bytes as little-endian u128
+        check_remaining(16);
+        uint64_t lo = 0;
+        uint64_t hi = 0;
+        for (int i = 0; i < 8; i++)
+        {
+            lo |= static_cast<uint64_t>(data_[offset_ + i]) << (i * 8);
+        }
+        for (int i = 0; i < 8; i++)
+        {
+            hi |= static_cast<uint64_t>(data_[offset_ + 8 + i]) << (i * 8);
+        }
+        offset_ += 16;
+        return u128(lo, hi);
     }
 
     // ─── Utilities ────────────────────────────────────────────

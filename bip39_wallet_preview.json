@@ -1,0 +1,23 @@
+{
+  "wallet": {
+    "name": "bip39_wallet",
+    "version": "1.1",
+    "created": "2026-05-12T11:32:09.103026",
+    "network": "preview",
+    "derivation_path": "m/44'/2400'/account'/role/index",
+    "entropy_bits": 256,
+    "mnemonic": "correct stress husband chunk smile canal chief exile arctic armed invite truth fog manage short orange name moment camp hundred flight idle unit grocery",
+    "mnemonic_word_count": 24,
+    "seed": "3a7557902408bdf781ed509aa911264bbd00e12b2196f4f738d7b842fca3ceb6d133ea22c1116a307cc3edde7310cf7a3e331b39a9d14a4b4bc73165b82944bb",
+    "keys": {
+      "unshielded": "45b3e86a89eb8525e2ce292d650ebe9db9c91fed7122b60c8b2488e4ef3e77dc",
+      "shielded": "a3fe2cbe50f59f46d3e1b2b9d6b732ee0d56728508f18c506755565f14bf4ee8",
+      "dust": "f45f0ee453c718d04235c64ed4c3d4e1e644499006413ba2b24eca8023abf253"
+    },
+    "addresses": {
+      "unshielded": "mn_addr_preview1qgke7s65fawzjtckw9ykk2r47nkuuj8ldwy3tvrytyjywfme7wlwqpq9dpa",
+      "shielded": "mn_shield-addr_preview1qe2pthd7ztnz7lsrczkksuk7jghwfgssdqapjdpc8292etjw332ys780qak",
+      "dust": "mn_dust_preview1q730saezncuvdqs34ce8dfs75u8nygjvsqeqnhg4jfm9gqgat7ffsy4k3pl"
+    }
+  }
+}

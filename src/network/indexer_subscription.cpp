@@ -157,8 +157,8 @@ WalletState IndexerSubscription::last_state() const {
                         wallet::UtxoWithMeta meta;
                         meta.utxo_hash = utxo.tx_hash + ":" + std::to_string(utxo.output_index);
                         meta.output_index = utxo.output_index;
-                        meta.amount = utxo.amount;
-                        meta.token_type = "NIGHT";
+                        meta.amount = utxo.value;
+                        meta.token_type = utxo.token_type.empty() ? "NIGHT" : utxo.token_type;
                         meta.tx_hash = utxo.tx_hash;
                         meta.ctime = std::chrono::system_clock::now();
                         current_utxos[meta.utxo_hash] = meta;

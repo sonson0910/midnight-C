@@ -357,7 +357,14 @@ std::vector<uint8_t> decode_dust(const std::string& address) {
         throw std::runtime_error("Not a Midnight dust address (expected mn_dust HRP)");
     }
 
-    return result.data;
+    // result.data = SCALE-encoded bytes: [prefix_byte][32-byte scalar]
+    // prefix_byte = 0x73 for 32-byte values (SCALE big-integer mode)
+    // The actual dust scalar is the remaining 32 bytes.
+    if (result.data.size() < 33) {
+        throw std::runtime_error("Invalid dust address: SCALE data too short");
+    }
+
+    return std::vector<uint8_t>(result.data.begin() + 1, result.data.end());
 }
 
 } // namespace address

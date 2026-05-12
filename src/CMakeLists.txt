@@ -92,11 +92,16 @@ if(ENABLE_BLOCKCHAIN)
     )
 endif()
 
-# Crypto support (Ed25519, CBOR, etc.)
+# Crypto support (Ed25519, ECDSA, SR25519, BLS, BIP340, etc.)
 set(MIDNIGHT_CRYPTO_SOURCES)
 if(ENABLE_BLOCKCHAIN)
     list(APPEND MIDNIGHT_CRYPTO_SOURCES
         crypto/ed25519_signer.cpp
+        crypto/bip340_signer.cpp
+        crypto/sr25519_signer.cpp
+        crypto/ecdsa_signer.cpp
+        crypto/bls_signer.cpp
+        crypto/key_encryption.cpp
         crypto/state_encryption.cpp
         crypto/merkle_tree.cpp
     )
@@ -123,11 +128,12 @@ if(ENABLE_BLOCKCHAIN)
     )
 endif()
 
-# Transaction builder (Substrate extrinsics)
+# Transaction builder (Substrate extrinsics + Midnight transaction)
 set(MIDNIGHT_TX_SOURCES)
 if(ENABLE_BLOCKCHAIN)
     list(APPEND MIDNIGHT_TX_SOURCES
         tx/extrinsic_builder.cpp
+        tx/midnight_transaction.cpp
     )
 endif()
 

@@ -256,10 +256,12 @@ std::vector<UtxoWithMeta> WalletFacade::select_coins(
                       });
             break;
         case CoinSelectionStrategy::RandomImprove: {
-            // Fisher-Yates shuffle for random selection
+            // Fisher-Yates shuffle for random selection using crypto-secure random
+            // Fix: was using std::rand() which is not cryptographically secure
             std::vector<UtxoWithMeta> shuffled = candidates;
             for (size_t i = shuffled.size() - 1; i > 0; --i) {
-                size_t j = std::rand() % (i + 1);
+                // Use libsodium's crypto-secure randombytes_uniform for unbiased random index
+                size_t j = randombytes_uniform(i + 1);
                 if (j != i) std::swap(shuffled[i], shuffled[j]);
             }
             // Accumulate random UTXOs until target is reached
@@ -353,7 +355,8 @@ TransferResult WalletFacade::sign_transaction(TransferResult& tx_result) const {
     }
 
     auto sig = night_key_.sign(hash_bytes);
-    tx_result.tx_hash += ":signed:" + to_hex(sig);
+    // Store signature separately from tx_hash (fix: was appending to tx_hash)
+    tx_result.tx_signature = to_hex(sig);
     return tx_result;
 }
 
@@ -396,6 +399,11 @@ TransferResult WalletFacade::build_transfer(
             change_utxo.amount = change;
             change_utxo.token_type = token;
             change_utxo.ctime = std::chrono::system_clock::now();
+            // Fix: Populate all required fields for change UTXO
+            change_utxo.receiver_address = night_addr_;
+            change_utxo.tx_hash = "";  // Will be set when transaction is finalized
+            change_utxo.output_index = 0;  // Will be set when transaction is finalized
+            change_utxo.utxo_hash = "";  // Will be set when transaction is finalized
             result.change_outputs.push_back(change_utxo);
         }
     }
@@ -441,7 +449,8 @@ TransferResult WalletFacade::build_transfer(
     std::vector<uint8_t> tx_bytes(tx_str.begin(), tx_str.end());
     result.tx_hash = sha256_hex_internal(tx_bytes);
     result.success = true;
-    result.fee_estimate = 1000; // Placeholder
+    // TODO: Replace hardcoded fee_estimate with fee from ProtocolParams (min_fee_a, min_fee_b, max_tx_size)
+    result.fee_estimate = 1000;
 
     for (const auto& input : result.inputs_used) {
         state_.unshielded.pending_coins.push_back(input);
@@ -530,6 +539,7 @@ SubmissionEvent WalletFacade::submit_transaction(const TransferResult& tx_result
 FeeEstimation WalletFacade::calculate_transaction_fee(const TransferResult& tx) const {
     FeeEstimation fee;
     // Simplified: each input costs ~500, each output costs ~200
+    // TODO: Replace with ProtocolParams-based calculation: min_fee_a * tx_size + min_fee_b
     fee.tx_fee = tx.inputs_used.size() * 500 + tx.change_outputs.size() * 200;
     fee.total_fee = fee.tx_fee + 500; // Balancing TX overhead
     return fee;
@@ -538,6 +548,7 @@ FeeEstimation WalletFacade::calculate_transaction_fee(const TransferResult& tx) 
 FeeEstimation WalletFacade::estimate_transaction_fee(const std::vector<TokenTransfer>& outputs) const {
     FeeEstimation fee;
     // Simplified: estimate based on output count
+    // TODO: Replace with ProtocolParams-based calculation: min_fee_a * estimated_tx_size + min_fee_b
     fee.tx_fee = outputs.size() * 700;
     fee.total_fee = fee.tx_fee + 500;
     return fee;
@@ -685,6 +696,7 @@ FeeEstimation WalletFacade::estimate_registration(const std::vector<UtxoWithMeta
     FeeEstimation fee;
     uint64_t total_night = 0;
     for (const auto& u : night_utxos) total_night += u.amount;
+    // TODO: Replace with ProtocolParams-based calculation: min_fee_a * tx_size + min_fee_b
     fee.tx_fee = night_utxos.size() * 500 + 200;
     fee.total_fee = fee.tx_fee + 500;
     fee.dust_generation_rate = total_night / 1000;
@@ -1320,6 +1332,7 @@ BalancingRecipe WalletFacade::init_swap(
 
     // Optional fee payment
     if (pay_fees) {
+        // TODO: Replace 200 with fee from ProtocolParams (min_fee_a * tx_size + min_fee_b)
         json fee_tx = create_balancing_tx(combined, dust_addr_, 200, ttl);
         fee_tx["balancing_type"] = "swap_fee";
         combined = merge_transactions(combined, fee_tx);
@@ -1563,12 +1576,31 @@ bool WalletFacade::restore_from_encrypted(
     }
     
     // 3. Restore from JSON
-    *this = restore(*json_state);
-    
+    auto restored = restore(*json_state);
+    // Copy state and keys only (not mutexes)
+    hd_wallet_ = std::move(restored.hd_wallet_);
+    night_key_ = std::move(restored.night_key_);
+    night_internal_key_ = std::move(restored.night_internal_key_);
+    dust_key_ = std::move(restored.dust_key_);
+    zswap_key_ = std::move(restored.zswap_key_);
+    metadata_key_ = std::move(restored.metadata_key_);
+    night_addr_ = std::move(restored.night_addr_);
+    dust_addr_ = std::move(restored.dust_addr_);
+    shielded_addr_ = std::move(restored.shielded_addr_);
+    indexer_url_ = std::move(restored.indexer_url_);
+    network_ = restored.network_;
+    cleared_ = restored.cleared_;
+    running_ = restored.running_;
+    coin_strategy_ = restored.coin_strategy_;
+    state_ = std::move(restored.state_);
+    submission_service_ = std::move(restored.submission_service_);
+    proving_service_ = std::move(restored.proving_service_);
+    pending_tx_service_ = std::move(restored.pending_tx_service_);
+
     if (midnight::g_logger) {
         midnight::g_logger->info("WalletFacade restored from encrypted state");
     }
-    
+
     return true;
 }
 
@@ -1795,7 +1827,7 @@ void WalletFacade::sync() {
                 UtxoWithMeta meta;
                 meta.utxo_hash = utxo.tx_hash + ":" + std::to_string(utxo.output_index);
                 meta.output_index = utxo.output_index;
-                meta.amount = utxo.amount;
+                meta.amount = utxo.value;
                 meta.token_type = utxo.token_type.empty() ? "NIGHT" : utxo.token_type;
                 meta.tx_hash = utxo.tx_hash;
                 meta.ctime = std::chrono::system_clock::now();

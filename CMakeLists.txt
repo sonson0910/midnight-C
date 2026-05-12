@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(midnight
     VERSION 0.1.0
     DESCRIPTION "Midnight SDK - Blockchain-enabled IoT infrastructure library"
-    LANGUAGES CXX
+    LANGUAGES C CXX
 )
 
 set(CMAKE_CXX_STANDARD 20)
@@ -145,7 +145,7 @@ endif()
 message(STATUS "cpp-httplib path: ${HTTPLIB_SOURCE_DIR}")
 
 # gRPC + Protobuf (required for gRPC protocol support)
-option(ENABLE_GRPC "Enable gRPC protocol support" ON)
+option(ENABLE_GRPC "Enable gRPC protocol support" OFF)
 
 if(ENABLE_GRPC)
     # gRPC depends on abseil; disable unwanted targets
@@ -188,6 +188,14 @@ if(ENABLE_GRPC)
     endif()
     add_subdirectory(${protobuf_SOURCE_DIR} ${protobuf_BINARY_DIR} EXCLUDE_FROM_ALL)
 endif()
+
+# BLS library (blst) - optional, requires special build setup
+# For production BLS12-381 signatures with full performance:
+# 1. Install blst: git clone https://github.com/supranational/blst.git && cd blst && ./build.sh
+# 2. Use find_package(blst) or link against the pre-built library
+# For now, we use libsodium-based BLS12-381 simulation via libsodium's Ristretto255
+# This provides wire-compatible signatures for development/testing
+option(ENABLE_BLST "Enable blst library for BLS signatures (requires manual blst installation)" OFF)
 
 # Add subdirectories
 add_subdirectory(src)

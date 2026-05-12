@@ -31,6 +31,7 @@ namespace midnight::utxo_transactions
     {
         std::string outpoint; // Previous TX hash + index
         std::string address;  // Sender address
+        uint32_t output_index; // Output index in the previous transaction
 
         // Amount is ENCRYPTED - only commitment visible on-chain
         std::string amount_commitment; // Pedersen commitment hiding amount
@@ -97,21 +98,32 @@ namespace midnight::utxo_transactions
     };
 
     /**
-     * UTXO Set Entry
+     * UTXO Set Entry (matches Midnight SDK schema)
      */
     struct Utxo
     {
+        // Transaction and output identifiers
         std::string tx_hash;   // Transaction creating this UTXO
-        uint32_t output_index; // Which output in transaction
+        uint32_t output_index = 0; // Which output in transaction
 
-        std::string address;           // Recipient
-        std::string amount_commitment; // Encrypted amount
+        // Output data (matches SDK unshieldedCreatedOutputs)
+        std::string address;           // Owner/recipient (UnshieldedAddress Bech32m)
+        std::string token_type;        // Hex-encoded token type (default: NIGHT = 0x00)
+        std::string value;             // String representation of amount (supports BigInt up to 16 bytes)
+        std::string intent_hash;       // Hex-encoded intent hash
+        uint64_t ctime = 0;           // Creation timestamp
+        bool registered_for_dust = false; // Whether registered for dust generation
 
+        // Commitment data (on-chain visible)
+        std::string amount_commitment; // Encrypted amount (Pedersen commitment)
+
+        // Confirmation status
         uint32_t confirmed_height = 0; // Block height where confirmed
         uint32_t finality_depth = 0;   // GRANDPA finality depth
 
+        // Spent status
         bool is_spent = false;
-        std::string spending_tx_hash; // If spent
+        std::string spending_tx_hash; // If spent, the spending transaction hash
     };
 
     /**
@@ -168,6 +180,8 @@ namespace midnight::utxo_transactions
     public:
         virtual ~IIndexerProvider() = default;
         virtual Json::Value execute_query(const std::string &query) = 0;
+        virtual Json::Value execute_query_with_vars(const std::string &query,
+                                                   const std::map<std::string, Json::Value> &variables) = 0;
     };
 
     /**
@@ -191,6 +205,8 @@ namespace midnight::utxo_transactions
                                         uint32_t timeout_ms = 8000);
 
         Json::Value execute_query(const std::string &query) override;
+        Json::Value execute_query_with_vars(const std::string &query,
+                                            const std::map<std::string, Json::Value> &variables) override;
 
     private:
         std::string indexer_url_;
@@ -254,8 +270,9 @@ namespace midnight::utxo_transactions
 
         /**
          * Check if UTXO is spent
+         * @return std::nullopt if UTXO not found, true if spent, false if unspent
          */
-        bool is_spent(const std::string &tx_hash, uint32_t output_index);
+        std::optional<bool> is_spent(const std::string &tx_hash, uint32_t output_index);
 
         /**
          * Synchronize local account state with on-chain
@@ -267,11 +284,56 @@ namespace midnight::utxo_transactions
          */
         std::optional<TransactionBuilderContext> create_builder_context() const;
 
+        /**
+         * Verify UTXOs exist and are unspent
+         * @param inputs List of inputs to verify
+         * @return true if all inputs refer to valid unspent UTXOs
+         */
+        bool verify_inputs_unspent(const std::vector<UtxoInput> &inputs);
+
+        /**
+         * Reserve UTXOs for a pending transaction
+         * @param inputs UTXOs to reserve
+         * @param tx_hash Transaction hash (used as reservation ID)
+         * @param ttl_ms Time-to-live in milliseconds
+         * @return true if all UTXOs were successfully reserved
+         */
+        bool reserve_utxos(const std::vector<UtxoInput> &inputs,
+                          const std::string &tx_hash,
+                          uint64_t ttl_ms);
+
+        /**
+         * Release reserved UTXOs (on transaction failure/cancellation)
+         * @param tx_hash Transaction hash (reservation ID)
+         */
+        void release_reserved_utxos(const std::string &tx_hash);
+
+        /**
+         * Check if a specific UTXO outpoint is currently reserved
+         * @param outpoint The outpoint key (tx_hash:output_index)
+         * @param exclude_tx_hash Optional tx hash to exclude from check (for self-check)
+         * @return true if UTXO is reserved by any transaction
+         */
+        bool is_reserved(const std::string &outpoint, const std::string &exclude_tx_hash = "") const;
+
+        /**
+         * Get current time in milliseconds (for TTL calculations)
+         */
+        static uint64_t get_current_time_ms();
+
     private:
         std::string indexer_url_;
         std::string rpc_url_;
         std::shared_ptr<IIndexerProvider> indexer_provider_;
         std::shared_ptr<INodeProvider> node_provider_;
+
+        // UTXO Reservation state (thread-safe in production)
+        mutable std::map<std::string, std::pair<std::string, uint64_t>> reserved_utxos_; // outpoint -> (tx_hash, expiry_ms)
+
+        /**
+         * Clean up expired reservations
+         */
+        void cleanup_expired_reservations();
     };
 
     /**
@@ -293,6 +355,12 @@ namespace midnight::utxo_transactions
         explicit TransactionBuilder(const TransactionBuilderContext &context);
 
         /**
+         * Constructor with typed context and UTXO manager (for duplicate detection)
+         */
+        TransactionBuilder(const TransactionBuilderContext &context,
+                         std::shared_ptr<UtxoSetManager> utxo_set_manager);
+
+        /**
          * Replace current builder context
          */
         void set_context(const TransactionBuilderContext &context);
@@ -304,6 +372,7 @@ namespace midnight::utxo_transactions
 
         /**
          * Add input to transaction
+         * @throws std::invalid_argument if input is duplicate
          */
         void add_input(const UtxoInput &input);
 
@@ -352,15 +421,29 @@ namespace midnight::utxo_transactions
          */
         Transaction get_working_transaction() const;
 
+        /**
+         * Check if an input is a duplicate of an existing input
+         * @param input The input to check
+         * @return true if duplicate exists
+         */
+        bool has_duplicate_input(const UtxoInput &input) const;
+
     private:
         Transaction tx_;
         TransactionBuilderContext context_;
         bool fees_manually_set_ = false;
+        std::shared_ptr<UtxoSetManager> utxo_set_manager_;
 
         /**
          * Compute blake2_256 hash of transaction
          */
         std::string compute_hash();
+
+        /**
+         * Verify input against UTXO set (existence + unspent status)
+         * @return true if verified, false if verification failed
+         */
+        bool verify_input_utxo(const UtxoInput &input);
     };
 
     /**
@@ -413,9 +496,19 @@ namespace midnight::utxo_transactions
     {
     public:
         /**
+         * Default constructor with no UTXO set manager (limited validation)
+         */
+        TransactionValidator() = default;
+
+        /**
+         * Constructor with UTXO set manager for full validation
+         */
+        explicit TransactionValidator(std::shared_ptr<UtxoSetManager> utxo_set_manager);
+
+        /**
          * Validate complete transaction
          */
-        static bool validate_transaction(const Transaction &tx);
+        bool validate_transaction(const Transaction &tx);
 
         /**
          * Validate inputs
@@ -423,31 +516,39 @@ namespace midnight::utxo_transactions
          * - Signatures correct
          * - Witnesses valid
          */
-        static bool validate_inputs(const Transaction &tx);
+        bool validate_inputs(const Transaction &tx);
 
         /**
          * Validate outputs
          * - All commitments well-formed
          * - At least 1 output
          */
-        static bool validate_outputs(const Transaction &tx);
+        bool validate_outputs(const Transaction &tx);
 
         /**
          * Validate DUST accounting
          */
-        static bool validate_dust_accounting(const Transaction &tx);
+        bool validate_dust_accounting(const Transaction &tx);
 
         /**
          * Validate proofs (zk-SNARKs)
          */
-        static bool validate_proofs(const Transaction &tx);
+        bool validate_proofs(const Transaction &tx);
 
         /**
          * Validate signature
          */
-        static bool validate_signature(const Transaction &tx);
+        bool validate_signature(const Transaction &tx);
+
+        /**
+         * Get the last validation error message
+         */
+        std::string get_last_error() const;
 
     private:
+        std::shared_ptr<UtxoSetManager> utxo_set_manager_;
+        std::string last_error_;
+
         static constexpr size_t MAX_TX_SIZE = 32 * 1024; // 32 KB
         static constexpr uint32_t MAX_INPUTS = 256;
         static constexpr uint32_t MAX_OUTPUTS = 256;

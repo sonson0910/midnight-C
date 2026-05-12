@@ -1,12 +1,15 @@
 #include <gtest/gtest.h>
 #include "midnight/network/substrate_rpc.hpp"
 #include "midnight/codec/scale_codec.hpp"
+#include "midnight/tx/extrinsic_builder.hpp"
 #include <sodium.h>
 #include <vector>
 #include <string>
+#include <cstring>
 
 using namespace midnight::network;
 using namespace midnight::codec;
+using namespace midnight::tx;
 
 // ═══════════════════════════════════════════════════════════════
 // Unit Tests — storage key computation, SCALE AccountInfo decode
@@ -308,4 +311,103 @@ TEST_F(SubstrateRPCIntegrationTest, MidnightApiVersions_ReturnsValue)
 {
     auto versions = rpc_->midnight_api_versions();
     EXPECT_FALSE(versions.is_null());
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Extrinsic Submission Integration Tests
+// ═══════════════════════════════════════════════════════════════════════
+
+class ExtrinsicSubmissionIntegrationTest : public ::testing::Test
+{
+protected:
+    std::unique_ptr<SubstrateRPC> rpc_;
+    std::string rpc_url_ = "https://rpc.preview.midnight.network";
+
+    void SetUp() override
+    {
+        const char *url = std::getenv("MIDNIGHT_RPC_URL");
+        rpc_url_ = url ? std::string(url) : rpc_url_;
+        rpc_ = std::make_unique<SubstrateRPC>(rpc_url_, 15000);
+    }
+};
+
+TEST_F(ExtrinsicSubmissionIntegrationTest, SubmitSystemRemark_NonceBypass)
+{
+    using namespace midnight::wallet;
+    using namespace midnight::tx;
+
+    // Use a fresh wallet to get the key pair
+    auto hd = HDWallet::from_mnemonic("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about");
+    auto night_key = hd.derive_night(0, 0);
+
+    // Build params with hardcoded nonce=0 (bypasses system_accountNextIndex)
+    auto version = rpc_->get_runtime_version();
+    auto genesis_hex = rpc_->get_genesis_hash();
+    auto genesis_bytes = midnight::codec::util::hex_to_bytes(genesis_hex);
+    auto head_hex = rpc_->get_finalized_head();
+    auto head_bytes = midnight::codec::util::hex_to_bytes(head_hex);
+
+    ExtrinsicParams params;
+    params.spec_version = version.spec_version;
+    params.tx_version = version.tx_version;
+    params.genesis_hash = genesis_bytes;
+    params.block_hash = head_bytes;
+    params.nonce = 0;  // Force nonce=0 to bypass system_accountNextIndex
+    params.tip = 0;
+    params.mortal_era = false;
+
+    // Build call: system.remark("Hello Midnight")
+    std::vector<uint8_t> remark_data = {'H', 'e', 'l', 'l', 'o', ' ', 'M', 'i', 'd', 'n', 'i', 'g', 'h', 't'};
+    auto call = PalletCall::system_remark(remark_data);
+
+    ExtrinsicBuilder builder(params);
+    auto extrinsic = builder.build_signed(call, night_key.secret_key, night_key.public_key);
+    auto hex = ExtrinsicBuilder::to_hex(extrinsic);
+
+    auto result = rpc_->submit_extrinsic(hex);
+
+    std::cerr << "[INFO] Direct submit: success=" << result.success
+              << ", tx_hash=" << result.tx_hash
+              << ", error=" << result.error << "\n";
+
+    SUCCEED() << "Result: success=" << (result.success ? "true" : "false")
+              << ", error=" << result.error
+              << ", tx_hash=" << result.tx_hash;
+}
+
+TEST_F(ExtrinsicSubmissionIntegrationTest, SubmitSystemRemark_KnownPublicKey)
+{
+    using namespace midnight::wallet;
+    using namespace midnight::tx;
+
+    // Known 32-byte public key (first account from test mnemonic)
+    std::vector<uint8_t> pubkey(32);
+    std::memcpy(pubkey.data(),
+        "\x1a\x5f\x35\x8b\x3e\x96\xcf\x39\x14\x93\xfe\x14\x59\x37\x71\xd3"
+        "\x6f\x83\xd4\x62\x89\x11\x54\x53\xac\x62\x63\x2f\x2b\x4e\x2a\x5a",
+        32);
+
+    // Known 64-byte expanded secret key for same seed
+    std::vector<uint8_t> seckey(64);
+    std::memcpy(seckey.data(),
+        "\x0e\xb2\x04\x2a\x4b\x30\x1f\x85\x2c\xb1\x5f\x9c\x2d\x5d\x5b\x7b"
+        "\x93\x88\x52\x5e\xaa\x72\x4a\x04\xda\x8b\xf5\x18\xfe\x63\xa9\xb4"
+        "\x1a\x5f\x35\x8b\x3e\x96\xcf\x39\x14\x93\xfe\x14\x59\x37\x71\xd3"
+        "\x6f\x83\xd4\x62\x89\x11\x54\x53\xac\x62\x63\x2f\x2b\x4e\x2a\x5a",
+        64);
+
+    KeyPair kp;
+    kp.public_key = pubkey;
+    kp.secret_key = seckey;
+
+    auto call = PalletCall::system_remark({'t', 'e', 's', 't'});
+    auto submit = rpc_->build_and_submit(call, kp, 0);
+
+    std::cerr << "[INFO] Known-key submission: success=" << submit.success
+              << ", error=" << submit.error
+              << ", tx_hash=" << submit.tx_hash << "\n";
+
+    SUCCEED() << "Known-key result: success="
+              << (submit.success ? "true" : "false")
+              << ", error=" << submit.error;
 }

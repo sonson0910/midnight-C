@@ -119,6 +119,10 @@ TEST(HDWalletTest, KeyPair_SignVerify)
     auto wallet = HDWallet::from_mnemonic(mnemonic);
     auto key = wallet.derive_night(0, 0);
 
+    // secret_key is the 64-byte Ed25519 expanded_sk (seed || SHA512(seed)[32:])
+    ASSERT_EQ(key.secret_key.size(), 64u);
+    ASSERT_EQ(key.public_key.size(), 32u);
+
     std::vector<uint8_t> msg = {0x48, 0x65, 0x6C, 0x6C, 0x6F}; // "Hello"
     auto sig = key.sign(msg);
     EXPECT_EQ(sig.size(), 64u);
@@ -136,9 +140,9 @@ TEST(HDWalletTest, AddressFormat)
     auto wallet = HDWallet::from_mnemonic(mnemonic);
     auto key = wallet.derive_night(0, 0);
 
-    // Address = 0x + 64 hex chars (32 bytes)
-    EXPECT_EQ(key.address.substr(0, 2), "0x");
-    EXPECT_EQ(key.address.size(), 66u);
+    // Address is Bech32m with mn_addr_preview1 prefix (74 chars)
+    EXPECT_EQ(key.address.substr(0, 16), "mn_addr_preview1");
+    EXPECT_EQ(key.address.size(), 74u);
 }
 
 TEST(HDWalletTest, KeySizes)
@@ -148,8 +152,8 @@ TEST(HDWalletTest, KeySizes)
     auto wallet = HDWallet::from_mnemonic(mnemonic);
     auto key = wallet.derive_night(0, 0);
 
-    EXPECT_EQ(key.secret_key.size(), 64u);
-    EXPECT_EQ(key.public_key.size(), 32u);
+    EXPECT_EQ(key.secret_key.size(), 64u);  // 64-byte expanded_sk
+    EXPECT_EQ(key.public_key.size(), 32u);  // 32-byte Ed25519 public key
 }
 
 // ─── Official SDK Compatibility Tests ─────────────────────

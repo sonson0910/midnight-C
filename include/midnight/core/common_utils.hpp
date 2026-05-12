@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
+#include <stdexcept>
 
 namespace midnight::util
 {
@@ -25,11 +26,6 @@ namespace midnight::util
     // Hex Utilities
     // ============================================================================
 
-    /**
-     * @brief Strip "0x" or "0X" prefix from hex string
-     * @param value Input string potentially prefixed with 0x
-     * @return String without hex prefix
-     */
     inline std::string strip_hex_prefix(const std::string &value)
     {
         if (value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0)
@@ -39,18 +35,12 @@ namespace midnight::util
         return value;
     }
 
-    /**
-     * @brief Check if a string contains only valid hex characters
-     * @param value String to check (without 0x prefix)
-     * @return true if valid hex string with even length
-     */
     inline bool is_hex_string(const std::string &value)
     {
         if (value.empty() || (value.size() % 2) != 0)
         {
             return false;
         }
-
         for (char c : value)
         {
             if (!std::isxdigit(static_cast<unsigned char>(c)))
@@ -58,43 +48,58 @@ namespace midnight::util
                 return false;
             }
         }
-
         return true;
     }
 
-    /**
-     * @brief Convert a single hex character to its integer value (0-15)
-     * @param c Hex character
-     * @return Integer value, or -1 if invalid
-     */
     inline int hex_nibble(char c)
     {
         if (c >= '0' && c <= '9')
         {
             return c - '0';
         }
-
         const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (lower >= 'a' && lower <= 'f')
         {
             return 10 + (lower - 'a');
         }
-
         return -1;
+    }
+
+    inline std::string bytes_to_hex(const std::vector<uint8_t> &bytes)
+    {
+        static const char *kHex = "0123456789abcdef";
+        std::string encoded;
+        encoded.reserve(bytes.size() * 2);
+        for (uint8_t byte : bytes)
+        {
+            encoded.push_back(kHex[(byte >> 4) & 0x0F]);
+            encoded.push_back(kHex[byte & 0x0F]);
+        }
+        return encoded;
+    }
+
+    inline std::vector<uint8_t> hex_to_bytes(const std::string &hex_str)
+    {
+        if (hex_str.size() % 2 != 0) {
+            throw std::runtime_error("Invalid hex string: odd length");
+        }
+        std::vector<uint8_t> result;
+        result.reserve(hex_str.size() / 2);
+        for (size_t i = 0; i < hex_str.size(); i += 2) {
+            int hi = hex_nibble(hex_str[i]);
+            int lo = hex_nibble(hex_str[i + 1]);
+            if (hi < 0 || lo < 0) {
+                throw std::runtime_error("Invalid hex string: non-hex character");
+            }
+            result.push_back(static_cast<uint8_t>((hi << 4) | lo));
+        }
+        return result;
     }
 
     // ============================================================================
     // Shell Utilities
     // ============================================================================
 
-    /**
-     * @brief Safely quote a string for shell command interpolation
-     * @param value String to quote
-     * @return Shell-safe quoted string
-     *
-     * On Unix: uses single-quote wrapping with proper escaping
-     * On Windows: uses double-quote wrapping with proper escaping
-     */
     inline std::string quote_shell_arg(const std::string &value)
     {
 #ifdef _WIN32
@@ -132,16 +137,9 @@ namespace midnight::util
 #endif
     }
 
-    /**
-     * @brief Run a shell command and capture its stdout output
-     * @param command Shell command to run
-     * @param[out] exit_code Exit code of the command
-     * @return Captured stdout as string
-     */
     inline std::string run_command_capture(const std::string &command, int &exit_code)
     {
         std::string output;
-
 #ifdef _WIN32
         FILE *pipe = _popen(command.c_str(), "r");
 #else
@@ -152,13 +150,11 @@ namespace midnight::util
             exit_code = -1;
             return output;
         }
-
         std::array<char, 512> buffer{};
         while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr)
         {
             output += buffer.data();
         }
-
 #ifdef _WIN32
         exit_code = _pclose(pipe);
 #else
@@ -172,24 +168,9 @@ namespace midnight::util
             exit_code = status;
         }
 #endif
-
         return output;
     }
 
-    // ============================================================================
-    // JSON Utilities
-    // ============================================================================
-
-    /**
-     * @brief Extract the first JSON object from raw command output
-     *
-     * Finds the first '{' and last '}' in the output string and returns
-     * the substring between them (inclusive). Useful for parsing output
-     * from bridge scripts that may include non-JSON preamble/postamble.
-     *
-     * @param raw_output Raw command output
-     * @return Extracted JSON payload, or the original string if no braces found
-     */
     inline std::string extract_json_payload(const std::string &raw_output)
     {
         const auto first = raw_output.find('{');
@@ -201,64 +182,25 @@ namespace midnight::util
         return raw_output.substr(first, last - first + 1);
     }
 
-    // ============================================================================
-    // String Utilities
-    // ============================================================================
-
-    /**
-     * @brief Copy a std::string into a fixed C buffer with null termination
-     * @param input Source string
-     * @param output Destination C buffer
-     * @param capacity Size of destination buffer
-     */
     inline void copy_string_to_c_buffer(const std::string &input, char *output, size_t capacity)
     {
         if (output == nullptr || capacity == 0)
         {
             return;
         }
-
         const size_t copy_len = std::min(input.size(), capacity - 1);
         std::memcpy(output, input.data(), copy_len);
         output[copy_len] = '\0';
     }
 
-    /**
-     * @brief Return a lowercased copy of a string
-     * @param value Input string
-     * @return Lowercased copy
-     */
     inline std::string to_lower_copy(std::string value)
     {
         std::transform(
             value.begin(),
             value.end(),
             value.begin(),
-            [](unsigned char ch)
-            { return static_cast<char>(std::tolower(ch)); });
+            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
         return value;
-    }
-
-    // ============================================================================
-    // Bytes-to-Hex Encoding
-    // ============================================================================
-
-    /**
-     * @brief Convert a byte vector to a lowercase hex string (no prefix)
-     * @param bytes Input byte vector
-     * @return Lowercase hex string without 0x prefix
-     */
-    inline std::string bytes_to_hex(const std::vector<uint8_t> &bytes)
-    {
-        static const char *kHex = "0123456789abcdef";
-        std::string encoded;
-        encoded.reserve(bytes.size() * 2);
-        for (uint8_t byte : bytes)
-        {
-            encoded.push_back(kHex[(byte >> 4) & 0x0F]);
-            encoded.push_back(kHex[byte & 0x0F]);
-        }
-        return encoded;
     }
 
     // ============================================================================
@@ -369,20 +311,5 @@ namespace midnight::util
         }
 
     } // namespace bech32m
-
-    // ============================================================================
-    // JSON Bridge Utilities
-    // ============================================================================
-
-    /**
-     * @brief Convert nlohmann::json to Json::Value (jsoncpp)
-     * @param input nlohmann::json value to convert
-     * @return Equivalent Json::Value
-     *
-     * Requires both <nlohmann/json.hpp> and <json/json.h> to be included
-     * by the translation unit. This is intentionally NOT included in
-     * common_utils.hpp to avoid forcing all consumers to pull in both
-     * JSON libraries. Include this header AND the JSON headers yourself.
-     */
 
 } // namespace midnight::util

@@ -29,22 +29,28 @@ namespace midnight::wallet
             return words;
         }
 
-        static uint32_t polymod(const std::vector<uint32_t>& values)
+        static uint32_t polymod(const std::vector<uint8_t>& values)
         {
+            // Fixed: Match bech32m.cpp reference implementation exactly
+            // polymod takes uint8_t values (5-bit words), not uint32_t
             static const uint32_t GEN[5] = {0x3B6A57B2, 0x26508E6D, 0x1EA119FA, 0x3D4233DD, 0x2A1462B3};
             uint32_t chk = 1;
             for (auto v : values) {
-                uint32_t top = chk >> 25;
+                uint8_t top = static_cast<uint8_t>(chk >> 25);
                 chk = ((chk & 0x1FFFFFF) << 5) ^ v;
-                for (int i = 0; i < 5; ++i)
-                    if ((top >> i) & 1) chk ^= GEN[i];
+                if (top & 1) chk ^= GEN[0];
+                if (top & 2) chk ^= GEN[1];
+                if (top & 4) chk ^= GEN[2];
+                if (top & 8) chk ^= GEN[3];
+                if (top & 16) chk ^= GEN[4];
             }
             return chk;
         }
 
-        static std::vector<uint32_t> expand_hrp(const std::string& hrp)
+        static std::vector<uint8_t> expand_hrp(const std::string& hrp)
         {
-            std::vector<uint32_t> ret;
+            // Fixed: Return uint8_t to match bech32m.cpp reference
+            std::vector<uint8_t> ret;
             for (unsigned char c : hrp) ret.push_back(c >> 5);
             ret.push_back(0);
             for (unsigned char c : hrp) ret.push_back(c & 31);
@@ -54,8 +60,9 @@ namespace midnight::wallet
         // Bech32m encode: hrp + data (5-bit words already converted)
         static std::string encode_raw(const std::string& hrp, const std::vector<uint8_t>& words_in)
         {
-            std::vector<uint32_t> values = expand_hrp(hrp);
-            std::vector<uint32_t> all_values = values;
+            // Fixed: Use uint8_t consistently to match bech32m.cpp reference
+            std::vector<uint8_t> values = expand_hrp(hrp);
+            std::vector<uint8_t> all_values = values;
             for (auto w : words_in) all_values.push_back(w);
             all_values.insert(all_values.end(), {0, 0, 0, 0, 0, 0});
 

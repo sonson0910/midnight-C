@@ -1,406 +1,402 @@
 #pragma once
 
-#include "midnight/network/indexer_client.hpp"
-#include "midnight/wallet/wallet_facade.hpp"
+/**********************************************************
+ * Midnight Network API - GraphQL Subscriptions
+ *
+ * Header chứa đầy đủ các class và struct cho:
+ * - GraphQLSubscriptions: Low-level subscription client
+ * - GraphQLSubscriptionClient: Core WebSocket implementation
+ * - RealtimeIndexerClient: High-level UTXO real-time client
+ *
+ * WebSocket Subprotocol:
+ *   Midnight Indexer uses graphql-transport-ws protocol (not graphql-ws)
+ *   - connection_init: Send auth token if required
+ *   - subscribe: Subscribe to GraphQL operations
+ *   - next: Receive subscription data
+ *   - complete: Subscription completed
+ *   - ka: Keep-alive ping/pong
+ *
+ * Endpoint: wss://<host>:<port>/api/v4/graphql/ws
+ **********************************************************/
+
 #include <nlohmann/json.hpp>
 #include <string>
-#include <functional>
-#include <thread>
-#include <atomic>
-#include <mutex>
 #include <vector>
-#include <queue>
+#include <functional>
+#include <mutex>
+#include <atomic>
+#include <thread>
 #include <condition_variable>
+#include <queue>
+#include <optional>
+#include <unordered_map>
+#include <unordered_set>
+#include <chrono>
 
-namespace midnight::network {
+#include "midnight/network/indexer_client.hpp"
 
-using json = nlohmann::json;
+namespace midnight::network
+{
 
-/**
- * @brief UTXO with metadata, matches TypeScript SDK UtxoWithMeta
- */
-struct UtxoEvent {
-    std::string utxo_hash;      // tx_hash:output_index
-    std::string tx_hash;
-    uint32_t output_index = 0;
-    uint64_t amount = 0;
-    std::string token_type = "NIGHT";
-    std::string owner;
-    int64_t ctime = 0;          // Unix timestamp
-    bool is_spent = false;
-};
+    using json = nlohmann::json;
 
-/**
- * @brief Unshielded transaction event from WebSocket subscription
- */
-struct UnshieldedTxEvent {
-    uint64_t transaction_id = 0;  // For sync progress tracking (applied_id)
-    std::vector<UtxoEvent> created;
-    std::vector<UtxoEvent> spent;
-};
+    // ═══════════════════════════════════════════════════════════
+    // UTXO Event Types
+    // ═══════════════════════════════════════════════════════════
 
-/**
- * @brief Callback types for real-time events
- */
-using UnshieldedTxCallback = std::function<void(const UnshieldedTxEvent&)>;
-using ProgressCallback = std::function<void(uint64_t highest_transaction_id)>;
-using BalanceCallback = std::function<void(const std::string& token_type, uint64_t total_balance)>;
-using ConnectionCallback = std::function<void(bool connected, const std::string& message)>;
-using ErrorCallback = std::function<void(const std::string& error)>;
+    struct UtxoEvent {
+        std::string utxo_hash;
+        std::string tx_hash;
+        uint32_t output_index = 0;
+        uint64_t amount = 0;
+        std::string token_type = "NIGHT";
+        std::string owner;
+        bool is_spent = false;
+        int64_t ctime = 0;
+    };
 
-/**
- * @brief GraphQL WebSocket Subscription Client
- *
- * Implements the "graphql-ws" protocol for real-time subscriptions
- * to Midnight Indexer events.
- *
- * Protocol:
- *   1. Connect to ws://.../graphql
- *   2. Send: {"type":"connection_init","payload":{}}
- *   3. Receive: {"type":"connection_ack"}
- *   4. Send: {"id":"1","type":"subscribe","payload":{"query":"subscription {...}"}}
- *   5. Receive: {"id":"1","type":"next","payload":{"data":{...}}}
- *   6. On disconnect: {"type":"complete","id":"1"}
- *
- * Supported subscriptions:
- *   - unshieldedTransactions(address: "Bech32m") → UTXO creation/spending
- *   - shieldedTransactions(sessionId: "...") → Shielded TX events
- *   - dustLedgerEvents(id: ...) → DUST generation events
- *   - blocks(offset: {hash: "0x..."}) → New blocks
- *
- * @code
- *   GraphQLSubscriptionClient client(
- *       "wss://indexer.preview.midnight.network/api/v4/graphql",
- *       "wss://indexer.preview.midnight.network/api/v4/graphql"  // HTTP base for HTTP fallback
- *   );
- *
- *   client.on_connection([](bool ok, const std::string& msg) {
- *       std::cout << "Connected: " << ok << std::endl;
- *   });
- *
- *   client.on_unshielded_tx([](const UnshieldedTxEvent& evt) {
- *       for (auto& u : evt.created) {
- *           std::cout << "UTXO created: " << u.amount << " " << u.token_type << std::endl;
- *       }
- *   });
- *
- *   client.on_balance_change([](const std::string& token, uint64_t bal) {
- *       std::cout << token << " balance: " << bal << std::endl;
- *   });
- *
- *   // Subscribe to UTXO changes for an address
- *   std::string addr = "mn_addr_preview...";
- *   client.subscribe_unshielded_transactions(addr);
- *
- *   client.run();  // blocking message loop
- *   // or use start_async() for non-blocking
- * @endcode
- */
-class GraphQLSubscriptionClient {
-public:
-    /**
-     * @brief Construct subscription client
-     * @param ws_url WebSocket URL (wss://indexer.../api/v4/graphql)
-     * @param http_base HTTP base URL for health checks (https://indexer.../api/v4)
-     */
-    GraphQLSubscriptionClient(const std::string& ws_url, const std::string& http_base = "");
+    struct UnshieldedTxEvent {
+        uint64_t transaction_id = 0;
+        std::vector<UtxoEvent> created;
+        std::vector<UtxoEvent> spent;
+    };
 
-    ~GraphQLSubscriptionClient();
+    // ═══════════════════════════════════════════════════════════
+    // WebSocket Message Types
+    // ═══════════════════════════════════════════════════════════
 
-    // Non-copyable
-    GraphQLSubscriptionClient(const GraphQLSubscriptionClient&) = delete;
-    GraphQLSubscriptionClient& operator=(const GraphQLSubscriptionClient&) = delete;
-    GraphQLSubscriptionClient(GraphQLSubscriptionClient&&) noexcept;
-    GraphQLSubscriptionClient& operator=(GraphQLSubscriptionClient&&) noexcept;
+    enum class GqlWsMessageType
+    {
+        CONNECTION_INIT,
+        CONNECTION_ACK,
+        CONNECTION_ERROR,
+        CONNECTION_TERMINATE,
+        SUBSCRIBE,
+        NEXT,
+        ERROR,
+        COMPLETE
+    };
 
-    // ─────────────────────────────────────────────
-    // Connection management
-    // ─────────────────────────────────────────────
+    struct GqlWsMessage
+    {
+        GqlWsMessageType type;
+        json payload;
+        std::optional<std::string> id;
 
-    /**
-     * @brief Connect and start message loop
-     * @param timeout_ms Connection timeout
-     * @return true if connected successfully
-     */
-    bool connect(int timeout_ms = 10000);
+        static GqlWsMessage parse(const std::string &raw);
+        std::string serialize() const;
+    };
 
-    /**
-     * @brief Disconnect and stop message loop
-     */
-    void disconnect();
+    // ═══════════════════════════════════════════════════════════
+    // Block and Transaction Updates
+    // ═══════════════════════════════════════════════════════════
 
-    /**
-     * @brief Check if connected
-     */
-    bool is_connected() const { return connected_.load(); }
+    struct BlockUpdate
+    {
+        std::string hash;
+        uint64_t height = 0;
+        std::string timestamp;
+        std::string author;
+        std::string protocol_version;
+        std::string parent_hash;
+        uint32_t tx_count = 0;
+    };
 
-    /**
-     * @brief Run blocking message loop (call from dedicated thread)
-     *        Returns when disconnected.
-     */
-    void run();
+    struct UnshieldedOutput
+    {
+        std::string owner;
+        std::string value;
+        std::string token_type;
+        std::string intent_hash;
+        uint32_t output_index = 0;
+        uint64_t block_height = 0;
+    };
 
-    /**
-     * @brief Start background thread for message loop
-     */
-    void start_async();
+    struct TransactionUpdate
+    {
+        std::string id;
+        std::string hash;
+        std::string status;
+        std::vector<std::string> segment_ids;
+        std::vector<bool> segment_success;
+        std::vector<UnshieldedOutput> created_outputs;
+        std::vector<UnshieldedOutput> spent_outputs;
+    };
 
-    /**
-     * @brief Stop background thread
-     */
-    void stop_async();
+    struct ContractActionUpdate
+    {
+        std::string address;
+        std::string action_type;
+        std::string entry_point;
+        json state;
+        json zswap_state;
+        std::vector<json> unshielded_balances;
+    };
 
-    // ─────────────────────────────────────────────
-    // Event callbacks
-    // ─────────────────────────────────────────────
+    struct DustLedgerEvent
+    {
+        std::string id;
+        std::string cardano_reward_address;
+        std::string midnight_address;
+        std::string event_type;
+        std::string amount;
+        uint64_t block_height = 0;
+    };
 
-    /** @brief Called when connection state changes */
-    void on_connection(ConnectionCallback cb);
+    struct ZswapLedgerEvent
+    {
+        std::string id;
+        std::string shielded_address;
+        std::string event_type;
+        std::string amount;
+        std::string token_type;
+        uint64_t block_height = 0;
+    };
 
-    /** @brief Called on any error */
-    void on_error(ErrorCallback cb);
+    // ═══════════════════════════════════════════════════════════
+    // Callback Types
+    // ═══════════════════════════════════════════════════════════
 
-    /** @brief Called on unshielded transaction events */
-    void on_unshielded_tx(UnshieldedTxCallback cb);
+    using ConnectionCallback = std::function<void(bool ok, const std::string& msg)>;
+    using ErrorCallback = std::function<void(const std::string& error)>;
+    using UnshieldedTxCallback = std::function<void(const UnshieldedTxEvent& evt)>;
+    using BalanceCallback = std::function<void(const std::string& token, uint64_t balance)>;
+    using ProgressCallback = std::function<void(uint64_t highest_transaction_id)>;
 
-    /** @brief Called when balance changes */
-    void on_balance_change(BalanceCallback cb);
+    // ═══════════════════════════════════════════════════════════
+    // GraphQLSubscriptions (legacy interface)
+    // ═══════════════════════════════════════════════════════════
 
-    /** @brief Called on UnshieldedTransactionsProgress events */
-    void on_progress_change(ProgressCallback cb);
+    class GraphQLSubscriptions
+    {
+    public:
+        explicit GraphQLSubscriptions(const std::string &ws_url,
+                                    const std::string &graphql_http_url = "");
+        ~GraphQLSubscriptions();
 
-    // ─────────────────────────────────────────────
-    // Subscription management
-    // ─────────────────────────────────────────────
+        GraphQLSubscriptions(const GraphQLSubscriptions &) = delete;
+        GraphQLSubscriptions &operator=(const GraphQLSubscriptions &) = delete;
+        GraphQLSubscriptions(GraphQLSubscriptions &&) = delete;
+        GraphQLSubscriptions &operator=(GraphQLSubscriptions &&) = delete;
 
-    /**
-     * @brief Subscribe to unshielded transactions for an address
-     *        Uses WebSocket subscription: unshieldedTransactions(address: "Bech32m")
-     *
-     * This is the PRIMARY method for UTXO tracking — both initial sync and real-time.
-     * Matches the TypeScript SDK approach: WebSocket subscription handles EVERYTHING.
-     * HTTP is NEVER used for UTXO data.
-     *
-     * Behavior:
-     *   - transactionId = null → server streams ALL historical txs (for initial sync)
-     *   - transactionId = N    → server streams from tx N+1 (for resume)
-     *
-     * Event sequence during initial sync:
-     *   1. Multiple UnshieldedTransactionsProgress events → tracking catch-up progress
-     *   2. First UnshieldedTransaction event → sync is now complete (historical done)
-     *   3. Subsequent UnshieldedTransaction events → real-time updates
-     *
-     * @param address Bech32m encoded Midnight address (mn_addr_preview...)
-     * @param from_transaction_id Resume from this tx ID (0 = sync from genesis)
-     * @return subscription ID, empty on failure
-     */
-    std::string subscribe_unshielded_transactions(const std::string& address,
-                                                 uint64_t from_transaction_id = 0);
+        bool connect(const std::string &viewing_key = "");
+        void disconnect();
+        bool is_connected() const { return connected_.load(); }
 
-    /**
-     * @brief Unsubscribe from unshielded transactions
-     */
-    bool unsubscribe(const std::string& subscription_id);
+        std::string subscribe_blocks();
+        std::string subscribe_contract_actions(const std::string &address);
+        std::string subscribe_unshielded_transactions(const std::string &address);
+        std::string subscribe_shielded_transactions(const std::string &session_id);
+        std::string subscribe_dust_events(const std::string &cardano_address);
+        std::string subscribe_zswap_events(const std::string &shielded_address);
+        void unsubscribe(const std::string &subscription_id);
 
-    /**
-     * @brief Get current known balance for a token type
-     */
-    uint64_t current_balance(const std::string& token_type = "NIGHT") const;
+        void on_block(std::function<void(const BlockUpdate &)> callback);
+        void on_unshielded_transaction(std::function<void(const TransactionUpdate &)> callback);
+        void on_shielded_transaction(std::function<void(const TransactionUpdate &)> callback);
+        void on_contract_action(std::function<void(const ContractActionUpdate &)> callback);
+        void on_dust_event(std::function<void(const DustLedgerEvent &)> callback);
+        void on_zswap_event(std::function<void(const ZswapLedgerEvent &)> callback);
+        void on_error(std::function<void(const std::string &)> callback);
 
-    /**
-     * @brief Get current UTXO count
-     */
-    size_t current_utxo_count() const;
+        void start();
+        void stop();
 
-    /**
-     * @brief Get last known state
-     */
-    WalletState last_state() const;
+    private:
+        std::string ws_url_;
+        std::string http_url_;
+        std::atomic<bool> connected_{false};
+        std::atomic<bool> running_{false};
+        std::string session_id_;
+        uint32_t subscription_counter_ = 0;
 
-private:
-    void message_loop_();
-    bool send_ws_message(const std::string& msg);
-    void handle_ws_message(const std::string& msg);
-    void handle_connection_ack();
-    void handle_subscription_data(const json& payload);
-    void handle_subscription_error(const json& payload);
-    void handle_subscription_complete(const std::string& id);
-    void handle_ka(); // keep-alive / pong
-    std::string next_subscription_id();
+        std::mutex callback_mutex_;
+        std::function<void(const BlockUpdate &)> on_block_callback_;
+        std::function<void(const TransactionUpdate &)> on_unshielded_tx_callback_;
+        std::function<void(const TransactionUpdate &)> on_shielded_tx_callback_;
+        std::function<void(const ContractActionUpdate &)> on_contract_action_callback_;
+        std::function<void(const DustLedgerEvent &)> on_dust_event_callback_;
+        std::function<void(const ZswapLedgerEvent &)> on_zswap_event_callback_;
+        std::function<void(const std::string &)> on_error_callback_;
 
-    // GraphQL-ws protocol helpers
-    void send_connection_init();
-    void send_subscribe(const std::string& id, const std::string& query, const json& variables = json::object());
+        std::mutex socket_mutex_;
+        std::condition_variable socket_cv_;
+        std::queue<std::string> message_queue_;
+        std::thread reader_thread_;
+        std::thread writer_thread_;
 
-    // UTXO parsing helpers
-    void parse_unshielded_transaction_event(const json& data);
-    uint64_t parse_amount(const json& val);
+        std::string next_id();
+        void reader_loop();
+        void writer_loop();
+        void process_message(const std::string &raw);
+        void handle_message(const GqlWsMessage &msg);
+        bool send_message(const GqlWsMessage &msg);
+        bool ws_send(const std::string &data);
+        std::optional<std::string> ws_receive();
 
-    std::string ws_url_;
-    std::string http_base_;
+        void *ws_handle_ = nullptr;
+        bool ws_connect();
+        void ws_disconnect();
+    };
 
-    // cpp-httplib ws::WebSocketClient for real WebSocket connections (PImpl)
-    struct WsImpl;
-    std::unique_ptr<WsImpl> ws_impl_;
+    // ═══════════════════════════════════════════════════════════
+    // GraphQLSubscriptionClient (Core Implementation)
+    // ═══════════════════════════════════════════════════════════
 
-    std::atomic<bool> connected_{false};
-    std::atomic<bool> running_{false};
+    class GraphQLSubscriptionClient
+    {
+    public:
+        explicit GraphQLSubscriptionClient(const std::string& ws_url,
+                                            const std::string& http_base = "");
+        ~GraphQLSubscriptionClient();
 
-    std::thread loop_thread_;
-    std::mutex mutex_;
-    std::condition_variable cv_;
-    std::queue<std::string> message_queue_;
+        GraphQLSubscriptionClient(GraphQLSubscriptionClient&& other) noexcept;
+        GraphQLSubscriptionClient& operator=(GraphQLSubscriptionClient&& other) noexcept;
 
-    uint32_t subscription_counter_ = 0;
-    std::map<std::string, std::string> active_subscriptions_;  // id → query
+        /**
+         * @brief Connect with optional authentication token
+         *
+         * Midnight Indexer may require authentication via token in connection_init.
+         * If auth_token is provided, it will be sent in the connection_init payload.
+         *
+         * @param timeout_ms Connection timeout in milliseconds
+         * @param auth_token Optional auth token for connection_init payload
+         * @return true if connected successfully
+         */
+        bool connect(int timeout_ms = 30000, const std::string& auth_token = "");
 
-    // Event callbacks
-    ConnectionCallback conn_cb_;
-    ErrorCallback error_cb_;
-    UnshieldedTxCallback utxo_cb_;
-    BalanceCallback balance_cb_;
-    ProgressCallback progress_cb_;
+        /**
+         * @brief Connect with authentication token (convenience overload)
+         *
+         * @param auth_token Auth token to send in connection_init payload
+         * @param timeout_ms Connection timeout in milliseconds
+         * @return true if connected successfully
+         */
+        bool connect(const std::string& auth_token, int timeout_ms = 30000);
 
-    // Current state (updated by subscription events)
-    std::atomic<uint64_t> night_balance_{0};
-    std::atomic<uint64_t> dust_balance_{0};
-    std::atomic<size_t> utxo_count_{0};
+        void disconnect();
+        bool is_connected() const { return connected_.load(); }
 
-    mutable std::mutex state_mutex_;
-    WalletState last_state_;
+        void run();
+        void start_async();
+        void stop_async();
 
-    // HTTP fallback (for initial state)
-    std::string graphql_http_url_;
-};
+        // Subscription methods
+        std::string subscribe_unshielded_transactions(const std::string& address,
+                                                      uint64_t from_transaction_id = 0);
+        bool unsubscribe(const std::string& subscription_id);
 
-/**
- * @brief Real-time indexer subscription with WebSocket + HTTP fallback
- *
- * Combines WebSocket subscriptions for real-time updates with
- * HTTP GraphQL queries for initial state and robustness.
- *
- * This is the recommended client for wallet applications.
- *
- * @code
- *   RealtimeIndexerClient client(
- *       "wss://indexer.preview.midnight.network/api/v4/graphql",
- *       "https://indexer.preview.midnight.network/api/v4/graphql"
- *   );
- *
- *   // Start with initial state query
- *   client.init_state("mn_addr_preview...");
- *
- *   // Subscribe for real-time updates
- *   client.subscribe("mn_addr_preview...");
- *
- *   // Event handlers
- *   client.on_balance([](auto token, auto bal) { ... });
- *   client.on_utxo([](auto& evt) { ... });
- *
- *   // Run message loop
- *   client.run();
- * @endcode
- */
-class RealtimeIndexerClient {
-public:
-    RealtimeIndexerClient(const std::string& ws_url, const std::string& graphql_url);
+        // State queries
+        uint64_t current_balance(const std::string& token_type) const;
+        size_t current_utxo_count() const;
+        WalletState last_state() const;
 
-    ~RealtimeIndexerClient();
+        // Callback setters
+        void on_connection(ConnectionCallback cb);
+        void on_error(ErrorCallback cb);
+        void on_unshielded_tx(UnshieldedTxCallback cb);
+        void on_balance_change(BalanceCallback cb);
+        void on_progress_change(ProgressCallback cb);
 
-    /**
-     * @brief Initialize state from HTTP query (call before subscribe)
-     *        This is the HTTP fallback for initial state.
-     */
-    void init_state(const std::string& address);
+    private:
+        // WebSocket implementation (pimpl)
+        struct WsImpl;
+        std::unique_ptr<WsImpl> ws_impl_;
 
-    /**
-     * @brief Subscribe for real-time UTXO updates
-     * @param address Bech32m Midnight address
-     * @return true on success
-     */
-    bool subscribe(const std::string& address);
+        std::string ws_url_;
+        std::string http_base_;
 
-    /**
-     * @brief Subscribe with transaction ID for resumption
-     *        Pass the last applied_id to avoid re-processing historical txs.
-     * @param address Bech32m Midnight address
-     * @param applied_id Resume from this transaction ID
-     * @return true on success
-     */
-    bool subscribe_resume(const std::string& address, uint64_t applied_id);
+        std::atomic<bool> connected_{false};
+        std::atomic<bool> running_{false};
+        std::string session_id_;
 
-    /**
-     * @brief Unsubscribe
-     */
-    void unsubscribe();
+        uint32_t subscription_counter_ = 0;
+        std::mutex mutex_;
+        std::unordered_map<std::string, std::string> active_subscriptions_;
+        std::queue<std::string> message_queue_;
 
-    /**
-     * @brief Run blocking loop
-     */
-    void run();
+        std::thread loop_thread_;
+        std::condition_variable cv_;
 
-    /**
-     * @brief Start async loop
-     */
-    void start();
+        // Callbacks
+        ConnectionCallback conn_cb_;
+        ErrorCallback error_cb_;
+        UnshieldedTxCallback utxo_cb_;
+        BalanceCallback balance_cb_;
+        ProgressCallback progress_cb_;
 
-    /**
-     * @brief Stop async loop
-     */
-    void stop();
+        // State tracking
+        mutable std::mutex state_mutex_;
+        WalletState last_state_;  // in midnight::network namespace
 
-    /**
-     * @brief Check if subscribed
-     */
-    bool is_subscribed() const { return subscribed_.load(); }
+        std::string graphql_http_url_;
 
-    /**
-     * @brief Get last known state
-     */
-    WalletState last_state() const;
+        // Balance tracking
+        std::atomic<uint64_t> night_balance_{0};
+        std::atomic<uint64_t> dust_balance_{0};
+        std::atomic<size_t> utxo_count_{0};
 
-    /**
-     * @brief Get current balance
-     */
-    uint64_t balance(const std::string& token = "NIGHT") const;
+        // Internal methods
+        void message_loop_();
+        bool send_ws_message(const std::string& msg);
+        void handle_ws_message(const std::string& msg);
+        void handle_connection_ack();
+        void handle_subscription_data(const json& payload);
+        void handle_subscription_error(const json& payload);
+        void handle_subscription_complete(const std::string& id);
+        void handle_ka();
+        std::string next_subscription_id();
+        void send_connection_init(const std::string& auth_token = "");
+        void send_subscribe(const std::string& id, const std::string& query, const json& variables);
+        void parse_unshielded_transaction_event(const json& data);
+        uint64_t parse_amount(const json& val);
+    };
 
-    /**
-     * @brief Register balance change callback
-     */
-    void on_balance(BalanceCallback cb);
+    // ═══════════════════════════════════════════════════════════
+    // RealtimeIndexerClient (High-Level UTXO Client)
+    // ═══════════════════════════════════════════════════════════
 
-    /**
-     * @brief Register UTXO event callback
-     */
-    void on_utxo(UnshieldedTxCallback cb);
+    class RealtimeIndexerClient
+    {
+    public:
+        RealtimeIndexerClient(const std::string& ws_url,
+                             const std::string& graphql_url);
+        ~RealtimeIndexerClient();
 
-    /**
-     * @brief Register sync progress callback (UnshieldedTransactionsProgress events)
-     */
-    void on_progress(ProgressCallback cb);
+        void init_state(const std::string& address);
+        bool subscribe(const std::string& address);
+        bool subscribe_resume(const std::string& address, uint64_t applied_id);
+        void unsubscribe();
 
-    /**
-     * @brief Register connection callback
-     */
-    void on_connection(ConnectionCallback cb);
+        void start();
+        void stop();
+        void run();
 
-private:
-    void on_ws_balance(const std::string& token, uint64_t bal);
-    void on_ws_utxo(const UnshieldedTxEvent& evt);
+        WalletState last_state() const;
+        uint64_t balance(const std::string& token) const;
 
-    GraphQLSubscriptionClient ws_client_;
-    std::string address_;
-    std::atomic<bool> subscribed_{false};
-    mutable std::mutex state_mutex_;
-    WalletState state_;
+        void on_balance(BalanceCallback cb);
+        void on_utxo(UnshieldedTxCallback cb);
+        void on_connection(ConnectionCallback cb);
+        void on_progress(ProgressCallback cb);
 
-    BalanceCallback balance_cb_;
-    UnshieldedTxCallback utxo_cb_;
-    ConnectionCallback conn_cb_;
-    ProgressCallback progress_cb_;
+    private:
+        GraphQLSubscriptionClient ws_client_;
+        std::string address_;
+        std::atomic<bool> subscribed_{false};
+        std::atomic<bool> running_{false};
+        std::thread loop_thread_;
 
-    std::thread loop_thread_;
-    std::atomic<bool> running_{false};
-};
+        mutable std::mutex state_mutex_;
+        WalletState state_;  // in midnight::network namespace
+
+        BalanceCallback balance_cb_;
+        UnshieldedTxCallback utxo_cb_;
+        ConnectionCallback conn_cb_;
+        ProgressCallback progress_cb_;
+
+        void on_ws_balance(const std::string& token, uint64_t bal);
+        void on_ws_utxo(const UnshieldedTxEvent& evt);
+    };
 
 } // namespace midnight::network

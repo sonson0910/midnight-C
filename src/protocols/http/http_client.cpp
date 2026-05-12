@@ -9,84 +9,70 @@ namespace midnight::protocols::http
     class HttpClientImpl
     {
     public:
-        explicit HttpClientImpl(bool ssl_verify) : ssl_verify_(ssl_verify) {}
+        explicit HttpClientImpl(bool ssl_verify, std::chrono::seconds default_timeout)
+            : ssl_verify_(ssl_verify), default_timeout_(default_timeout) {}
 
         template<typename ClientT>
         HttpResponse do_request(ClientT& cli, const std::string& path, HttpMethod method,
                               const std::string& body,
-                              const httplib::Headers& req_headers)
+                              const httplib::Headers& req_headers,
+                              std::chrono::seconds timeout)
         {
-            if (method == HttpMethod::Get) {
-                auto res = cli.Get(path.c_str(), req_headers);
-                if (!res) {
-                    if (midnight::g_logger) midnight::g_logger->error("HTTP GET failed");
-                    return HttpResponse{0, "", {{"error", "HTTP request failed"}}};
-                }
-                if (midnight::g_logger) midnight::g_logger->debug("HTTP " + std::to_string(res->status) + " " + path);
-                return HttpResponse{res->status, res->body, {}};
-            } else if (method == HttpMethod::Post) {
-                auto res = cli.Post(path.c_str(), req_headers, body, "application/json");
-                if (!res) {
-                    if (midnight::g_logger) midnight::g_logger->error("HTTP POST failed");
-                    return HttpResponse{0, "", {{"error", "HTTP request failed"}}};
-                }
-                if (midnight::g_logger) midnight::g_logger->debug("HTTP " + std::to_string(res->status) + " " + path);
-                return HttpResponse{res->status, res->body, {}};
-            } else if (method == HttpMethod::Put) {
-                auto res = cli.Put(path.c_str(), req_headers, body, "application/json");
-                if (!res) {
-                    if (midnight::g_logger) midnight::g_logger->error("HTTP PUT failed");
-                    return HttpResponse{0, "", {{"error", "HTTP request failed"}}};
-                }
-                if (midnight::g_logger) midnight::g_logger->debug("HTTP " + std::to_string(res->status) + " " + path);
-                return HttpResponse{res->status, res->body, {}};
-            } else if (method == HttpMethod::Delete) {
-                auto res = cli.Delete(path.c_str(), req_headers);
-                if (!res) {
-                    if (midnight::g_logger) midnight::g_logger->error("HTTP DELETE failed");
-                    return HttpResponse{0, "", {{"error", "HTTP request failed"}}};
-                }
-                if (midnight::g_logger) midnight::g_logger->debug("HTTP " + std::to_string(res->status) + " " + path);
-                return HttpResponse{res->status, res->body, {}};
-            } else if (method == HttpMethod::Patch) {
-                auto res = cli.Patch(path.c_str(), req_headers, body, "application/json");
-                if (!res) {
-                    if (midnight::g_logger) midnight::g_logger->error("HTTP PATCH failed");
-                    return HttpResponse{0, "", {{"error", "HTTP request failed"}}};
-                }
-                if (midnight::g_logger) midnight::g_logger->debug("HTTP " + std::to_string(res->status) + " " + path);
-                return HttpResponse{res->status, res->body, {}};
-            } else if (method == HttpMethod::Head) {
-                auto res = cli.Head(path.c_str(), req_headers);
-                if (!res) {
-                    if (midnight::g_logger) midnight::g_logger->error("HTTP HEAD failed");
-                    return HttpResponse{0, "", {{"error", "HTTP request failed"}}};
-                }
-                if (midnight::g_logger) midnight::g_logger->debug("HTTP " + std::to_string(res->status) + " " + path);
-                return HttpResponse{res->status, "", {}};
-            } else {
-                auto res = cli.Get(path.c_str(), req_headers);
+            // Apply per-request timeout if provided
+            if (timeout.count() > 0) {
+                cli.set_read_timeout(timeout.count(), 0);
+                cli.set_connection_timeout(timeout.count(), 0);
+            }
+
+            auto make_response = [&](const httplib::Result& res) -> HttpResponse {
                 if (!res) {
                     if (midnight::g_logger) midnight::g_logger->error("HTTP request failed");
                     return HttpResponse{0, "", {{"error", "HTTP request failed"}}};
                 }
-                if (midnight::g_logger) midnight::g_logger->debug("HTTP " + std::to_string(res->status) + " " + path);
-                return HttpResponse{res->status, res->body, {}};
+                // Populate response headers from httplib response
+                std::map<std::string, std::string> resp_headers;
+                for (const auto& hdr : res.value().headers) {
+                    resp_headers[hdr.first] = hdr.second;
+                }
+                if (midnight::g_logger) midnight::g_logger->debug(
+                    "HTTP " + std::to_string(res->status) + " " + path);
+                return HttpResponse{res->status, res->body, std::move(resp_headers)};
+            };
+
+            if (method == HttpMethod::Get) {
+                return make_response(cli.Get(path.c_str(), req_headers));
+            } else if (method == HttpMethod::Post) {
+                return make_response(cli.Post(path.c_str(), req_headers, body, "application/json"));
+            } else if (method == HttpMethod::Put) {
+                return make_response(cli.Put(path.c_str(), req_headers, body, "application/json"));
+            } else if (method == HttpMethod::Delete) {
+                return make_response(cli.Delete(path.c_str(), req_headers));
+            } else if (method == HttpMethod::Patch) {
+                return make_response(cli.Patch(path.c_str(), req_headers, body, "application/json"));
+            } else if (method == HttpMethod::Head) {
+                return make_response(cli.Head(path.c_str(), req_headers));
             }
+            return make_response(cli.Get(path.c_str(), req_headers));
         }
 
         HttpResponse send_request(const std::string& url, HttpMethod method,
                                 const std::string& body,
-                                const std::map<std::string, std::string>& headers);
+                                const std::map<std::string, std::string>& headers,
+                                std::chrono::seconds timeout = std::chrono::seconds(0));
 
     private:
         bool ssl_verify_;
+        std::chrono::seconds default_timeout_;
     };
 
     HttpResponse HttpClientImpl::send_request(const std::string& url, HttpMethod method,
                                             const std::string& body,
-                                            const std::map<std::string, std::string>& headers)
+                                            const std::map<std::string, std::string>& headers,
+                                            std::chrono::seconds timeout)
     {
+        // Use per-request timeout if provided, otherwise fall back to default
+        if (timeout.count() == 0) timeout = default_timeout_;
+
         std::string scheme_host;
         int port = 80;
         std::string path;
@@ -130,28 +116,29 @@ namespace midnight::protocols::http
         if (use_tls) {
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
             httplib::SSLClient cli(scheme_host, port);
-            cli.set_connection_timeout(30, 0);
-            cli.set_read_timeout(60, 0);
+            cli.set_connection_timeout(timeout.count(), 0);
+            cli.set_read_timeout(timeout.count(), 0);
 
             if (!ssl_verify_) {
                 cli.enable_server_certificate_verification(false);
             }
 
-            return do_request(cli, path, method, body, req_headers);
+            return do_request(cli, path, method, body, req_headers, timeout);
 #else
             return HttpResponse{0, "", {{"error", "HTTPS not supported — compile with OpenSSL"}}};
 #endif
         } else {
             httplib::Client cli(scheme_host, port);
-            cli.set_connection_timeout(30, 0);
-            cli.set_read_timeout(60, 0);
-            return do_request(cli, path, method, body, req_headers);
+            cli.set_connection_timeout(timeout.count(), 0);
+            cli.set_read_timeout(timeout.count(), 0);
+            return do_request(cli, path, method, body, req_headers, timeout);
         }
     }
 
     HttpClient::HttpClient()
-        : pImpl_(std::make_unique<HttpClientImpl>(true))
+        : pImpl_(std::make_unique<HttpClientImpl>(true, std::chrono::seconds(60)))
         , ssl_verify_(true)
+        , default_timeout_(std::chrono::seconds(60))
     {
     }
 
@@ -159,9 +146,10 @@ namespace midnight::protocols::http
 
     HttpResponse HttpClient::send_request(const std::string &url, HttpMethod method,
                                          const std::string &body,
-                                         const std::map<std::string, std::string> &headers)
+                                         const std::map<std::string, std::string> &headers,
+                                         std::chrono::seconds timeout)
     {
-        return pImpl_->send_request(url, method, body, headers);
+        return pImpl_->send_request(url, method, body, headers, timeout);
     }
 
     HttpResponse HttpClient::get(const std::string &url)
@@ -187,7 +175,13 @@ namespace midnight::protocols::http
     void HttpClient::set_ssl_verify(bool verify)
     {
         ssl_verify_ = verify;
-        pImpl_ = std::make_unique<HttpClientImpl>(verify);
+        pImpl_ = std::make_unique<HttpClientImpl>(verify, default_timeout_);
+    }
+
+    void HttpClient::set_default_timeout(std::chrono::seconds timeout)
+    {
+        default_timeout_ = timeout;
+        pImpl_ = std::make_unique<HttpClientImpl>(ssl_verify_, timeout);
     }
 
 } // namespace midnight::protocols::http

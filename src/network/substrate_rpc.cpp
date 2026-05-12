@@ -210,24 +210,21 @@ namespace midnight::network
             info.sufficients = dec.decode_u32_le();
 
             // AccountData: free, reserved, frozen (u128 each)
-            // Read as u64 + skip upper u64 (assuming values fit in u64)
-            info.free = dec.decode_u64_le();
-            dec.decode_u64_le(); // upper 64 bits
-            info.reserved = dec.decode_u64_le();
-            dec.decode_u64_le(); // upper 64 bits
-            info.frozen = dec.decode_u64_le();
-            dec.decode_u64_le(); // upper 64 bits
+            // FIX: Read as proper u128 to support balances >= 2^64
+            info.free = dec.decode_u128_le();
+            info.reserved = dec.decode_u128_le();
+            info.frozen = dec.decode_u128_le();
         }
         catch (const std::exception &e)
         {
             midnight::g_logger->warn(
-                "AccountInfo decode partial: " + std::string(e.what()));
+                "AccountInfo decode failed: " + std::string(e.what()));
         }
 
         return info;
     }
 
-    uint64_t SubstrateRPC::get_free_balance(const std::string &account_id_hex)
+    midnight::codec::u128 SubstrateRPC::get_free_balance(const std::string &account_id_hex)
     {
         return get_account_info(account_id_hex).free;
     }

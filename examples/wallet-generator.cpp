@@ -334,8 +334,11 @@ namespace midnight::wallet
 
         /**
          * Export wallet to JSON
+         * @param wallet Wallet to export
+         * @param include_sensitive If true, includes mnemonic/seed and private key
+         * @param sensitive_type "mnemonic" to save mnemonic, "private_key" to save private key, "both" for both
          */
-        static std::string export_to_json(const Wallet &wallet, bool include_private_key = false)
+        static std::string export_to_json(const Wallet &wallet, bool include_sensitive = false, const std::string &sensitive_type = "mnemonic")
         {
             std::stringstream ss;
             ss << "{\n";
@@ -347,10 +350,16 @@ namespace midnight::wallet
             ss << "    \"source\": \"" << wallet.source << "\",\n";
             ss << "    \"coin_type\": " << wallet.coin_type << ",\n";
 
-            if (include_private_key)
+            if (include_sensitive)
             {
-                ss << "    \"private_key\": \"" << wallet.private_key << "\",\n";
-                ss << "    \"seed\": \"" << wallet.seed << "\",\n";
+                if (sensitive_type == "mnemonic" || sensitive_type == "both")
+                {
+                    ss << "    \"mnemonic\": \"" << wallet.seed << "\",\n";
+                }
+                if (sensitive_type == "private_key" || sensitive_type == "both")
+                {
+                    ss << "    \"private_key\": \"" << wallet.private_key << "\",\n";
+                }
             }
 
             ss << "    \"public_key\": \"" << wallet.public_key << "\",\n";
@@ -804,11 +813,15 @@ int main(int argc, char *argv[])
             wallet.source = "native-hd-wallet";
             wallet.network = "midnight-" + official_network;
             wallet.public_key = night_key.address;
-            wallet.private_key = "";
-            wallet.seed = "";
+            wallet.private_key = night_key.address;  // For display only, NOT real private key
+            wallet.seed = mnemonic;  // ✅ ALWAYS SAVE mnemonic - user MUST backup this!
             wallet.unshield_address = night_key.address;
             wallet.shielded_address = zswap_key.address;
             wallet.dust_address = dust_key.address;
+            
+            // Auto-enable private key display for mnemonic generation
+            // User must see and backup their mnemonic!
+            show_private_key = true;
         }
 
         auto now = std::time(nullptr);
@@ -864,32 +877,42 @@ int main(int argc, char *argv[])
     if (show_private_key)
     {
         std::cout << "╠════════════════════════════════════════════════════════════╣\n";
-        std::cout << "║ ⚠️  PRIVATE KEY (DO NOT SHARE!):                            ║\n";
-        if (wallet.private_key.empty())
-        {
-            std::cout << "║ " << std::setw(62) << std::left << "N/A (managed by official SDK)" << "║\n";
-        }
-        else
-        {
-            std::cout << "║ " << std::setw(62) << wallet.private_key.substr(0, 60) << "║\n";
-            if (wallet.private_key.length() > 60)
-            {
-                std::cout << "║ " << std::setw(62) << wallet.private_key.substr(60) << "║\n";
-            }
-        }
-        std::cout << "║                                                            ║\n";
-        std::cout << "║ RECOVERY SEED (BACKUP THIS NOW!):                         ║\n";
+        std::cout << "║ ⚠️  RECOVERY SEED (BACKUP THIS NOW!):                    ║\n";
         if (wallet.seed.empty())
         {
             std::cout << "║ " << std::setw(62) << std::left << "N/A" << "║\n";
         }
         else
         {
-            std::cout << "║ " << std::setw(62) << wallet.seed.substr(0, 60) << "║\n";
-            if (wallet.seed.length() > 60)
-            {
-                std::cout << "║ " << std::setw(62) << wallet.seed.substr(60) << "║\n";
+            // Split mnemonic into 4 groups of 6 words for readability
+            std::istringstream iss(wallet.seed);
+            std::vector<std::string> words;
+            std::string word;
+            while (iss >> word) {
+                words.push_back(word);
             }
+            
+            std::cout << "║                                                            ║\n";
+            std::cout << "║   WRITE DOWN THESE 24 WORDS IN ORDER:                   ║\n";
+            std::cout << "║                                                            ║\n";
+            
+            // Display words in 4 rows of 6
+            for (size_t row = 0; row < 4; row++) {
+                std::stringstream line;
+                line << "║   ";
+                for (size_t col = 0; col < 6; col++) {
+                    size_t idx = row * 6 + col;
+                    if (idx < words.size()) {
+                        line << (idx + 1) << "." << words[idx];
+                        if (col < 5) line << "  ";
+                    }
+                }
+                line << " ║";
+                std::cout << line.str() << "\n";
+            }
+            std::cout << "║                                                            ║\n";
+            std::cout << "║ ⚠️  NEVER share these words! Keep them SAFE!           ║\n";
+            std::cout << "║                                                            ║\n";
         }
     }
 
@@ -941,12 +964,18 @@ int main(int argc, char *argv[])
     // Save files if requested
     if (!output_file.empty())
     {
+        // Always save mnemonic when using official SDK
+        bool include_mnemonic = use_official_sdk && !wallet.seed.empty();
+        
         std::ofstream file(output_file);
-        file << WalletManager::export_to_json(wallet, show_private_key);
+        file << WalletManager::export_to_json(wallet, include_mnemonic, "mnemonic");
         file.close();
 
         std::cout << "║ ✓ Wallet exported to: " << std::setw(42) << std::left
                   << output_file << "║\n";
+        if (include_mnemonic) {
+            std::cout << "║ ✓ WARNING: Mnemonic SAVED in JSON! Backup & delete!       ║\n";
+        }
     }
 
     if (save_private_key)

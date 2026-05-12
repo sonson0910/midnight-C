@@ -116,34 +116,71 @@ namespace midnight::contracts
             // Initialize libsodium (idempotent)
             crypto::Ed25519Signer::initialize();
 
-            // Derive keypair from seed (first 32 bytes of seed = private key seed)
+            // Normalize seed_hex_ - remove 0x prefix if present
+            std::string normalized_seed = seed_hex_;
+            if (normalized_seed.rfind("0x", 0) == 0 || normalized_seed.rfind("0X", 0) == 0) {
+                normalized_seed = normalized_seed.substr(2);
+            }
+
+            // Derive keypair from seed
             crypto::Ed25519Signer::PrivateKey priv_key{};
-            if (seed_hex_.size() >= 128)
+            std::array<uint8_t, 32> seed{};
+            
+            if (normalized_seed.size() >= 128)  // 64 bytes in hex
             {
                 // Full 64-byte private key in hex
                 for (size_t i = 0; i < 64; ++i)
                 {
-                    auto hi = midnight::util::hex_nibble(seed_hex_[i * 2]);
-                    auto lo = midnight::util::hex_nibble(seed_hex_[i * 2 + 1]);
+                    if (i * 2 + 1 >= normalized_seed.size()) {
+                        midnight::g_logger->error("Invalid seed hex: too short for 64-byte key");
+                        return;
+                    }
+                    
+                    int hi = midnight::util::hex_nibble(normalized_seed[i * 2]);
+                    int lo = midnight::util::hex_nibble(normalized_seed[i * 2 + 1]);
+                    
+                    // Validate hex values - hex_nibble returns -1 for invalid
+                    if (hi < 0 || lo < 0) {
+                        midnight::g_logger->error("Invalid hex character in seed");
+                        return;
+                    }
+                    
                     priv_key[i] = static_cast<uint8_t>((hi << 4) | lo);
                 }
             }
-            else if (seed_hex_.size() >= 64)
+            else if (normalized_seed.size() >= 64)  // 32 bytes in hex
             {
-                // 32-byte seed → derive full key
-                std::array<uint8_t, 32> seed{};
+                // 32-byte seed - use directly as key
                 for (size_t i = 0; i < 32; ++i)
                 {
-                    auto hi = midnight::util::hex_nibble(seed_hex_[i * 2]);
-                    auto lo = midnight::util::hex_nibble(seed_hex_[i * 2 + 1]);
+                    if (i * 2 + 1 >= normalized_seed.size()) {
+                        midnight::g_logger->error("Invalid seed hex: too short for 32-byte seed");
+                        return;
+                    }
+                    
+                    int hi = midnight::util::hex_nibble(normalized_seed[i * 2]);
+                    int lo = midnight::util::hex_nibble(normalized_seed[i * 2 + 1]);
+                    
+                    // Validate hex values
+                    if (hi < 0 || lo < 0) {
+                        midnight::g_logger->error("Invalid hex character in seed");
+                        return;
+                    }
+                    
                     seed[i] = static_cast<uint8_t>((hi << 4) | lo);
                 }
-                // Use seed as first 32 bytes, derive public key for second 32
-                auto pub_key = crypto::Ed25519Signer::extract_public_key(priv_key);
+                
+                // Copy seed to private key (first 32 bytes)
                 std::copy(seed.begin(), seed.end(), priv_key.begin());
-                std::copy(pub_key.begin(), pub_key.end(), priv_key.begin() + 32);
+            }
+            else
+            {
+                midnight::g_logger->error("Seed too short: need at least 32 bytes (64 hex chars), got " + 
+                    std::to_string(normalized_seed.size()));
+                return;
             }
 
+            // Extract public key from the private key
             auto pub_key = crypto::Ed25519Signer::extract_public_key(priv_key);
             std::string pub_hex = crypto::Ed25519Signer::public_key_to_hex(pub_key);
 
@@ -369,8 +406,13 @@ namespace midnight::contracts
             for (const auto &utxo : utxos)
             {
                 selected.push_back(utxo);
-                total_input += utxo.amount;
-                if (total_input >= amount_val + 200000) // amount + estimated fee
+                // NOTE: The indexer decrypts Pedersen commitments and returns plaintext `value`.
+                // The commitment itself is stored separately (amount_commitment) and is verified
+                // by the node via ZK proof arithmetic — we use the decrypted value here.
+                // If the indexer ever returns encrypted values, decryption via the viewing key
+                // would be required before accumulating `total_input`.
+                total_input += utxo.value;
+                if (total_input >= amount_val + 200000) // TODO: replace 200000 with fee from ProtocolParams
                 {
                     break;
                 }
@@ -387,18 +429,38 @@ namespace midnight::contracts
             std::vector<std::pair<std::string, uint64_t>> outputs;
             outputs.emplace_back(to_address, amount_val);
 
-            uint64_t change = total_input - amount_val - 200000; // simple fee estimate
+            uint64_t change = total_input - amount_val - 200000; // TODO: replace 200000 with fee from ProtocolParams
             if (change > 0)
             {
                 outputs.emplace_back(derived_address_, change);
             }
 
             // 4. Sign the transaction (native Ed25519)
+            // Normalize seed - remove 0x prefix if present
+            std::string normalized_seed = seed_hex_;
+            if (normalized_seed.rfind("0x", 0) == 0 || normalized_seed.rfind("0X", 0) == 0) {
+                normalized_seed = normalized_seed.substr(2);
+            }
+            
             crypto::Ed25519Signer::PrivateKey priv_key{};
-            for (size_t i = 0; i < std::min(seed_hex_.size() / 2, size_t(64)); ++i)
+            size_t key_bytes = std::min(normalized_seed.size() / 2, size_t(64));
+            
+            for (size_t i = 0; i < key_bytes; ++i)
             {
-                auto hi = midnight::util::hex_nibble(seed_hex_[i * 2]);
-                auto lo = midnight::util::hex_nibble(seed_hex_[i * 2 + 1]);
+                if (i * 2 + 1 >= normalized_seed.size()) {
+                    midnight::g_logger->error("Invalid seed hex in transfer");
+                    return result;
+                }
+                
+                int hi = midnight::util::hex_nibble(normalized_seed[i * 2]);
+                int lo = midnight::util::hex_nibble(normalized_seed[i * 2 + 1]);
+                
+                // Validate hex values
+                if (hi < 0 || lo < 0) {
+                    midnight::g_logger->error("Invalid hex character in seed during transfer");
+                    return result;
+                }
+                
                 priv_key[i] = static_cast<uint8_t>((hi << 4) | lo);
             }
 
@@ -493,11 +555,31 @@ namespace midnight::contracts
             };
 
             // Sign and submit
+            // Normalize seed - remove 0x prefix if present
+            std::string normalized_seed = seed_hex_;
+            if (normalized_seed.rfind("0x", 0) == 0 || normalized_seed.rfind("0X", 0) == 0) {
+                normalized_seed = normalized_seed.substr(2);
+            }
+            
             crypto::Ed25519Signer::PrivateKey priv_key{};
-            for (size_t i = 0; i < std::min(seed_hex_.size() / 2, size_t(64)); ++i)
+            size_t key_bytes = std::min(normalized_seed.size() / 2, size_t(64));
+            
+            for (size_t i = 0; i < key_bytes; ++i)
             {
-                auto hi = midnight::util::hex_nibble(seed_hex_[i * 2]);
-                auto lo = midnight::util::hex_nibble(seed_hex_[i * 2 + 1]);
+                if (i * 2 + 1 >= normalized_seed.size()) {
+                    midnight::g_logger->error("Invalid seed hex in dust registration");
+                    return result;
+                }
+                
+                int hi = midnight::util::hex_nibble(normalized_seed[i * 2]);
+                int lo = midnight::util::hex_nibble(normalized_seed[i * 2 + 1]);
+                
+                // Validate hex values
+                if (hi < 0 || lo < 0) {
+                    midnight::g_logger->error("Invalid hex character in seed during dust registration");
+                    return result;
+                }
+                
                 priv_key[i] = static_cast<uint8_t>((hi << 4) | lo);
             }
 
@@ -670,15 +752,42 @@ namespace midnight::contracts
 
     std::string ContractInteractor::sign_and_submit(const zk::ProofEnabledTransaction &tx)
     {
+        // Validate seed is available
+        if (seed_hex_.empty())
+        {
+            midnight::g_logger->error("Cannot sign: no seed available");
+            return "";
+        }
+
         // Serialize transaction
         std::string tx_hex = tx.to_json().dump();
 
+        // Normalize seed - remove 0x prefix if present
+        std::string normalized_seed = seed_hex_;
+        if (normalized_seed.rfind("0x", 0) == 0 || normalized_seed.rfind("0X", 0) == 0) {
+            normalized_seed = normalized_seed.substr(2);
+        }
+
         // Sign with Ed25519
         crypto::Ed25519Signer::PrivateKey priv_key{};
-        for (size_t i = 0; i < std::min(seed_hex_.size() / 2, size_t(64)); ++i)
+        size_t key_bytes = std::min(normalized_seed.size() / 2, size_t(64));
+        
+        for (size_t i = 0; i < key_bytes; ++i)
         {
-            auto hi = midnight::util::hex_nibble(seed_hex_[i * 2]);
-            auto lo = midnight::util::hex_nibble(seed_hex_[i * 2 + 1]);
+            if (i * 2 + 1 >= normalized_seed.size()) {
+                midnight::g_logger->error("Invalid seed hex in sign_and_submit");
+                return "";
+            }
+            
+            int hi = midnight::util::hex_nibble(normalized_seed[i * 2]);
+            int lo = midnight::util::hex_nibble(normalized_seed[i * 2 + 1]);
+            
+            // Validate hex values
+            if (hi < 0 || lo < 0) {
+                midnight::g_logger->error("Invalid hex character in seed during signing");
+                return "";
+            }
+            
             priv_key[i] = static_cast<uint8_t>((hi << 4) | lo);
         }
 

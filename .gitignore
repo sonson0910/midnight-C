@@ -6,6 +6,7 @@ build_*/
 build_verify/
 build_check/
 cmake_build/
+cmake-build/
 out/
 Testing/
 
@@ -40,6 +41,11 @@ CMakeFiles/
 Makefile
 cmake_install.cmake
 compile_commands.json
+CTestTestfile.cmake
+*.ninja
+.ninja_deps
+.ninja_log
+rules.ninja
 
 # OSX
 .DS_Store

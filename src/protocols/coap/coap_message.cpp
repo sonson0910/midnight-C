@@ -64,25 +64,27 @@ namespace midnight::protocols::coap
 
         size_t pos = 1;
 
-        // Extended delta
+        // Extended delta (RFC 7252 §3.1):
+        //   delta 13 -> delta = 13 + next byte
+        //   delta 14 -> delta = 269 + (next_byte << 8) + next_next_byte  <-- addition, not OR
         uint16_t delta = delta_nibble;
         if (delta_nibble == 13) {
             if (pos >= len) return "";
             delta = 13 + data[pos++];
         } else if (delta_nibble == 14) {
             if (pos + 1 >= len) return "";
-            delta = 269 + ((static_cast<uint16_t>(data[pos]) << 8) | data[pos + 1]);
+            delta = 269 + (static_cast<uint16_t>(data[pos]) << 8) + data[pos + 1];
             pos += 2;
         }
 
-        // Extended length
+        // Extended length (same formula as delta)
         size_t opt_len = length_nibble;
         if (length_nibble == 13) {
             if (pos >= len) return "";
             opt_len = 13 + data[pos++];
         } else if (length_nibble == 14) {
             if (pos + 1 >= len) return "";
-            opt_len = 269 + ((static_cast<uint16_t>(data[pos]) << 8) | data[pos + 1]);
+            opt_len = 269 + (static_cast<uint16_t>(data[pos]) << 8) + data[pos + 1];
             pos += 2;
         }
 
@@ -114,14 +116,17 @@ namespace midnight::protocols::coap
             std::string value = decode_option_value(&data[pos], len - pos, consumed);
             if (consumed == 0) break;
 
-            uint8_t first_byte = data[pos];
-            uint8_t delta_nibble = (first_byte >> 4) & 0x0F;
-
-            uint16_t delta = delta_nibble;
-            if (delta_nibble == 13) {
+            // Decode delta from the header byte using the RFC 7252 delta encoding.
+            // NOTE: We re-read the first byte here (at offset pos within the buffer)
+            // because decode_option_value has already advanced its internal pointer.
+            // The extended delta bytes immediately follow the header byte at pos+1, pos+2.
+            uint8_t hdr_delta_nibble = (data[pos] >> 4) & 0x0F;
+            uint16_t delta = hdr_delta_nibble;
+            if (hdr_delta_nibble == 13) {
                 if (pos + 1 < len) delta = 13 + data[pos + 1];
-            } else if (delta_nibble == 14) {
-                delta = 269 + ((static_cast<uint16_t>(data[pos + 1]) << 8) | data[pos + 2]);
+            } else if (hdr_delta_nibble == 14) {
+                if (pos + 2 < len)
+                    delta = 269 + (static_cast<uint16_t>(data[pos + 1]) << 8) + data[pos + 2];
             }
 
             uint16_t option_number = prev_option + delta;

@@ -35,7 +35,11 @@ namespace midnight::wallet
      */
     struct KeyPair
     {
-        std::vector<uint8_t> secret_key; ///< 64-byte Ed25519 expanded secret key
+        /// 64-byte Ed25519 expanded secret key (seed || SHA512(seed)[32:]).
+        /// Use this directly with crypto_sign_detached for signing.
+        /// The corresponding public key must be derived via crypto_sign_seed_keypair
+        /// to ensure sign/verify roundtrip compatibility.
+        std::vector<uint8_t> secret_key;
         std::vector<uint8_t> public_key; ///< 32-byte Ed25519 public key
         std::string address;             ///< Bech32m-encoded Midnight address
 
@@ -141,10 +145,6 @@ namespace midnight::wallet
 
         /// Derive full path: m/44'/2400'/account'/role/index
         ChainNode derive_path(uint32_t account, Role role, uint32_t index) const;
-
-        /// Derive public key from a private key using libsodium Ed25519
-        static std::array<uint8_t, 32> derive_public_key_from_private(
-            const std::array<uint8_t, 32> &private_key);
     };
 
 } // namespace midnight::wallet

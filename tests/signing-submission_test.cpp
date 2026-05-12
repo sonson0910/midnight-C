@@ -136,13 +136,24 @@ TEST_F(SigningSubmissionTest, DeriveAddress_ED25519Key_ReturnsAddress)
     EXPECT_EQ(address[0], 'e'); // ED25519 address starts with e
 }
 
+TEST_F(SigningSubmissionTest, GenerateBIP340_NoArgs_ReturnsKeypair)
+{
+    auto keypair = KeyManager::generate_bip340_key();
+
+    ASSERT_TRUE(keypair.has_value()) << "generate_bip340_key() returned nullopt";
+    EXPECT_EQ(keypair->type, KeyType::BIP340);
+    EXPECT_FALSE(keypair->public_key.empty());
+    EXPECT_FALSE(keypair->private_key.empty());
+    std::cout << "Generated BIP340 keypair with public key: " << keypair->public_key.substr(0, 20) << "..." << std::endl;
+}
+
 // ============================================================================
-// Test 7: Sign Transaction with sr25519
+// Test 7: Sign Transaction with BIP-340
 // ============================================================================
 
 TEST_F(SigningSubmissionTest, SignTransaction_ValidTx_ReturnsSignature)
 {
-    auto keypair = KeyManager::generate_sr25519_key();
+    auto keypair = KeyManager::generate_bip340_key();
     ASSERT_TRUE(keypair.has_value());
 
     TransactionSigner signer(*keypair);
@@ -151,7 +162,7 @@ TEST_F(SigningSubmissionTest, SignTransaction_ValidTx_ReturnsSignature)
     auto signature = signer.sign_transaction(tx_data);
 
     EXPECT_FALSE(signature.empty());
-    EXPECT_EQ(signature.size(), 130); // "0x" + 128 hex chars
+    EXPECT_EQ(signature.size(), 128); // 64 bytes = 128 hex chars
 }
 
 // ============================================================================
@@ -160,7 +171,7 @@ TEST_F(SigningSubmissionTest, SignTransaction_ValidTx_ReturnsSignature)
 
 TEST_F(SigningSubmissionTest, VerifySignature_CorrectSignature_ReturnsTrue)
 {
-    auto keypair = KeyManager::generate_sr25519_key();
+    auto keypair = KeyManager::generate_bip340_key();
     ASSERT_TRUE(keypair.has_value());
 
     TransactionSigner signer(*keypair);
@@ -321,7 +332,7 @@ TEST_F(SigningSubmissionTest, MonitorMempool_ValidMonitoring_MonitorsMempool)
 
 TEST_F(SigningSubmissionTest, BatchSign_MultipleTransactions_SignsAll)
 {
-    auto keypair = KeyManager::generate_sr25519_key();
+    auto keypair = KeyManager::generate_bip340_key();
     ASSERT_TRUE(keypair.has_value());
 
     BatchSigner batch_signer;
@@ -434,7 +445,7 @@ TEST_F(SigningSubmissionTest, SubmitBatch_MultipleTransactions_SubmitsAll)
 TEST_F(SigningSubmissionTest, Integration_FullSigningWorkflow_Success)
 {
     // 1. Generate keypair
-    auto keypair = KeyManager::generate_sr25519_key();
+    auto keypair = KeyManager::generate_bip340_key();
     ASSERT_TRUE(keypair.has_value());
 
     // 2. Derive address
@@ -475,6 +486,57 @@ TEST_F(SigningSubmissionTest, Integration_FullSigningWorkflow_Success)
 // ============================================================================
 // Edge Cases
 // ============================================================================
+
+TEST_F(SigningSubmissionTest, SignTransaction_WithCustomContext_UsesCorrectPayload)
+{
+    auto keypair = KeyManager::generate_bip340_key();
+    ASSERT_TRUE(keypair.has_value());
+
+    TransactionSigner signer(*keypair);
+
+    // Set custom signing context
+    signer.set_network_id(1);  // Mainnet
+    signer.set_era(0x82);     // Mortal era
+    signer.set_nonce(42);
+    signer.set_tip(1000);
+
+    // Verify getters
+    EXPECT_EQ(signer.get_network_id(), 1);
+    EXPECT_EQ(signer.get_era(), 0x82);
+    EXPECT_EQ(signer.get_nonce(), 42);
+    EXPECT_EQ(signer.get_tip(), 1000);
+
+    auto tx_data = create_mock_transaction();
+    auto signature = signer.sign_transaction(tx_data);
+
+    // Should sign successfully with the custom payload
+    EXPECT_FALSE(signature.empty());
+    EXPECT_EQ(signature.size(), 128);
+
+    // Verification should work with same context
+    bool verified = signer.verify_signature(tx_data, signature);
+    EXPECT_TRUE(verified);
+}
+
+TEST_F(SigningSubmissionTest, SignTransaction_DifferentNonce_ProducesDifferentSignature)
+{
+    auto keypair = KeyManager::generate_bip340_key();
+    ASSERT_TRUE(keypair.has_value());
+
+    TransactionSigner signer1(*keypair);
+    signer1.set_nonce(0);
+
+    TransactionSigner signer2(*keypair);
+    signer2.set_nonce(1);
+
+    auto tx_data = create_mock_transaction();
+
+    auto sig1 = signer1.sign_transaction(tx_data);
+    auto sig2 = signer2.sign_transaction(tx_data);
+
+    // Different nonces should produce different signatures
+    EXPECT_NE(sig1, sig2);
+}
 
 TEST_F(SigningSubmissionTest, VerifySignature_EmptySignature_ReturnsFalse)
 {

@@ -1,4 +1,5 @@
 #include "midnight/network/graphql_subscription.hpp"
+#include "midnight/network/indexer_client.hpp"
 #include "midnight/core/logger.hpp"
 #include <chrono>
 #include <sstream>
@@ -26,7 +27,9 @@ struct GraphQLSubscriptionClient::WsImpl {
     WsImpl(const std::string& wss_url)
         : url(wss_url)
     {
-        // Midnight Indexer requires graphql-transport-ws subprotocol
+        // Midnight Indexer uses graphql-transport-ws subprotocol
+        // This is the modern GraphQL over WebSocket protocol (not graphql-ws)
+        // graphql-transport-ws is used by Apollo, urql, and most modern implementations
         httplib::Headers headers = {
             {"Sec-WebSocket-Protocol", "graphql-transport-ws"}
         };
@@ -148,7 +151,7 @@ GraphQLSubscriptionClient& GraphQLSubscriptionClient::operator=(GraphQLSubscript
 
 // ─── Connection ───────────────────────────────────────────────────
 
-bool GraphQLSubscriptionClient::connect(int /*timeout_ms*/) {
+bool GraphQLSubscriptionClient::connect(int timeout_ms, const std::string& auth_token) {
     if (connected_.load())
         return true;
 
@@ -168,8 +171,8 @@ bool GraphQLSubscriptionClient::connect(int /*timeout_ms*/) {
 
         midnight::g_logger->info("WebSocket connected, sending connection_init");
 
-        // Send graphql-ws connection_init
-        send_connection_init();
+        // Send graphql-transport-ws connection_init
+        send_connection_init(auth_token);
 
         connected_ = true;
         midnight::g_logger->info("GraphQLSubscriptionClient connected to WebSocket");
@@ -183,6 +186,10 @@ bool GraphQLSubscriptionClient::connect(int /*timeout_ms*/) {
     }
 
     return true;
+}
+
+bool GraphQLSubscriptionClient::connect(const std::string& auth_token, int timeout_ms) {
+    return connect(timeout_ms, auth_token);
 }
 
 void GraphQLSubscriptionClient::disconnect() {
@@ -462,10 +469,18 @@ std::string GraphQLSubscriptionClient::next_subscription_id() {
     return "sub_" + std::to_string(++subscription_counter_);
 }
 
-void GraphQLSubscriptionClient::send_connection_init() {
+void GraphQLSubscriptionClient::send_connection_init(const std::string& auth_token) {
+    json payload = json::object();
+    if (!auth_token.empty()) {
+        // Send auth token in connection_init payload
+        // graphql-transport-ws supports Bearer token format
+        payload = json::object({
+            {"Authorization", "Bearer " + auth_token}
+        });
+    }
     json msg = {
         {"type", "connection_init"},
-        {"payload", json::object()}
+        {"payload", payload}
     };
     send_ws_message(msg.dump());
 }

@@ -557,7 +557,7 @@ namespace midnight::blockchain
             uint64_t total = 0;
             for (const auto &utxo : utxos)
             {
-                total += utxo.amount;
+                total += utxo.value;
             }
             return total;
         }

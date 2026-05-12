@@ -192,7 +192,7 @@ static void show_utxos(midnight::network::IndexerClient& indexer,
     for (size_t i = 0; i < utxos.size() && i < 10; ++i) {
         const auto& u = utxos[i];
         std::string tx_short = u.tx_hash.size() > 16 ? u.tx_hash.substr(0, 16) + "..." : u.tx_hash;
-        std::cout << "  UTXO[" << i << "]: " << std::setw(12) << u.amount
+        std::cout << "  UTXO[" << i << "]: " << std::setw(12) << u.value
                   << " NIGHT  (tx: " << tx_short << ", idx: " << u.output_index << ")\n";
     }
     if (utxos.size() > 10) {

@@ -4,6 +4,7 @@
 #include "midnight/codec/scale_codec.hpp"
 #include "midnight/tx/extrinsic_builder.hpp"
 #include "midnight/wallet/hd_wallet.hpp"
+#include "midnight/network/rate_limiter.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -36,9 +37,9 @@ namespace midnight::network
         uint32_t consumers = 0;
         uint32_t providers = 0;
         uint32_t sufficients = 0;
-        uint64_t free = 0;         ///< Free balance
-        uint64_t reserved = 0;     ///< Reserved balance
-        uint64_t frozen = 0;       ///< Frozen balance
+        midnight::codec::u128 free = midnight::codec::u128(0);       ///< Free balance (u128 for Substrate)
+        midnight::codec::u128 reserved = midnight::codec::u128(0);    ///< Reserved balance (u128 for Substrate)
+        midnight::codec::u128 frozen = midnight::codec::u128(0);     ///< Frozen balance (u128 for Substrate)
     };
 
     /**
@@ -142,9 +143,9 @@ namespace midnight::network
         /**
          * @brief Get free balance
          * @param account_id_hex Hex-encoded 32-byte AccountId
-         * @return Free balance in base units
+         * @return Free balance (u128 for Substrate compatibility)
          */
-        uint64_t get_free_balance(const std::string &account_id_hex);
+        midnight::codec::u128 get_free_balance(const std::string &account_id_hex);
 
         /**
          * @brief Query raw storage by key
@@ -277,6 +278,13 @@ namespace midnight::network
         /// Cached values to avoid redundant RPC calls
         std::optional<RuntimeVersion> cached_runtime_version_;
         std::optional<std::string> cached_genesis_hash_;
+
+        /// Rate limiting and resilience
+        /// TODO: Wire resilience primitives into rpc_call()
+        /// Currently declared but not active - needs integration with retry logic
+        std::shared_ptr<RateLimiter> rate_limiter_;
+        std::shared_ptr<ExponentialBackoff> backoff_;
+        std::shared_ptr<CircuitBreaker> circuit_breaker_;
 
         /**
          * @brief Low-level JSON-RPC 2.0 call

@@ -1,11 +1,11 @@
 /**
  * Phase 5: Signing & Submission
- * Handles sr25519/ed25519 signing and transaction submission
+ * Handles BIP-340 signing and transaction submission for Midnight
  *
  * Key components:
- * - sr25519 for AURA block authorship
- * - ed25519 for GRANDPA finality votes
- * - Transaction signing and submission
+ * - BIP-340 Schnorr (secp256k1) for unshielded transaction signing
+ * - BLS for Dust transactions
+ * - Transaction submission to Midnight network
  * - Mempool monitoring and status tracking
  */
 
@@ -32,8 +32,10 @@ namespace midnight::signing_submission
     enum class KeyType
     {
         SR25519, // AURA block authorship
-        ED25519, // GRANDPA finality
+        ED25519, // GRANDPA finality (legacy)
         ECDSA,   // Cardano bridge
+        BIP340,  // Midnight unshielded transactions (secp256k1 Schnorr)
+        BLS,     // Dust transactions
     };
 
     /**
@@ -115,6 +117,7 @@ namespace midnight::signing_submission
     public:
         /**
          * Generate new sr25519 keypair (AURA authority)
+         * Uses production Ristretto255 implementation
          */
         static std::optional<Keypair> generate_sr25519_key();
 
@@ -124,9 +127,21 @@ namespace midnight::signing_submission
         static std::optional<Keypair> generate_ed25519_key();
 
         /**
+         * Generate new BIP-340 keypair (unshielded transaction signing)
+         */
+        static std::optional<Keypair> generate_bip340_key();
+
+        /**
          * Generate new ECDSA keypair (Cardano bridge)
+         * Uses production secp256k1 implementation
          */
         static std::optional<Keypair> generate_ecdsa_key();
+
+        /**
+         * Generate new BLS keypair (Dust transactions)
+         * Uses production BLS12-381 implementation with blst library
+         */
+        static std::optional<Keypair> generate_bls_key();
 
         /**
          * Load keypair from file
@@ -161,7 +176,10 @@ namespace midnight::signing_submission
 
     /**
      * Transaction Signer
-     * Signs transactions with sr25519
+     * Signs transactions with BIP-340 Schnorr signatures
+     *
+     * Signing payload format: network_id || era || nonce || tip || transaction_body
+     * This ensures transactions are tied to a specific network, era, and account nonce
      */
     class TransactionSigner
     {
@@ -173,19 +191,20 @@ namespace midnight::signing_submission
         explicit TransactionSigner(const Keypair &signer_keypair);
 
         /**
-         * Sign transaction
-         * @param tx_data: Transaction bytes to sign
+         * Sign transaction with configured signing context
+         * Builds proper signing payload: network_id || era || nonce || tip || tx_body
+         * @param tx_body: CBOR-encoded transaction body
          * @return Signature or empty
          */
-        std::string sign_transaction(const std::vector<uint8_t> &tx_data);
+        std::string sign_transaction(const std::vector<uint8_t> &tx_body);
 
         /**
-         * Verify signature
-         * @param tx_data: Original data
+         * Verify signature against the same payload format
+         * @param tx_body: Original transaction body
          * @param signature: Signature to verify
          * @return true if valid
          */
-        bool verify_signature(const std::vector<uint8_t> &tx_data,
+        bool verify_signature(const std::vector<uint8_t> &tx_body,
                               const std::string &signature) const;
 
         /**
@@ -198,20 +217,67 @@ namespace midnight::signing_submission
          */
         bool is_signer_of(const std::string &signature) const;
 
+        /**
+         * Set network ID for signing payload
+         * @param network_id: 0=testnet, 1=mainnet
+         */
+        void set_network_id(uint8_t network_id);
+
+        /**
+         * Set transaction era
+         * @param era: 0=immortal, otherwise mortal with phase/period
+         */
+        void set_era(uint8_t era);
+
+        /**
+         * Set account nonce for signing payload
+         * @param nonce: Account nonce (auto-incremented)
+         */
+        void set_nonce(uint64_t nonce);
+
+        /**
+         * Set tip for transaction priority
+         * @param tip: Tip amount in smallest unit
+         */
+        void set_tip(uint64_t tip);
+
+        /**
+         * Get current signing context
+         */
+        uint8_t get_network_id() const;
+        uint8_t get_era() const;
+        uint64_t get_nonce() const;
+        uint64_t get_tip() const;
+
+        /**
+         * Get the last signed payload (for verification with original context)
+         * Fix: Store original signing context so verification can use it
+         */
+        const std::vector<uint8_t>& get_last_signed_payload() const { return last_signed_payload_; }
+
     private:
         Keypair keypair_;
         std::string signer_address_;
+        uint8_t network_id_ = 0;    // Default to testnet
+        uint8_t era_ = 0;           // Default to immortal
+        uint64_t nonce_ = 0;       // Default nonce
+        uint64_t tip_ = 0;          // Default tip (no extra priority)
+        mutable std::vector<uint8_t> last_signed_payload_;  // Fix #6: Preserve original payload for verification
 
         /**
-         * Ed25519 sign operation (Midnight unshielded transactions)
+         * BIP-340 sign operation (Midnight unshielded transactions)
+         * Uses secp256k1 Schnorr signatures matching SDK behavior
          */
-        std::string ed25519_sign(const std::vector<uint8_t> &message);
+        std::string bip340_sign(const std::vector<uint8_t> &message);
 
         /**
-         * Ed25519 verify operation (Midnight unshielded transactions)
+         * BIP-340 verify operation (Midnight unshielded transactions)
+         * Fix #4: Remove redundant catch blocks that defeat verification
+         * Fix #6: Use original signing context for verification
          */
-        bool ed25519_verify(const std::vector<uint8_t> &message,
-                            const std::string &signature) const;
+        bool bip340_verify(const std::vector<uint8_t> &message,
+                          const std::string &signature,
+                          const std::vector<uint8_t> &original_payload) const;
     };
 
     /**

@@ -761,14 +761,17 @@ namespace midnight::network
 
         utxo.tx_hash = js.value("txHash", "");
         utxo.output_index = js.value("outputIndex", 0U);
-        utxo.amount = js.value("amount", 0UL);
+        utxo.amount_commitment = js.value("amountCommitment", "");
+
+        // Decrypted value (only available if viewing key is available)
+        utxo.value = js.value("value", 0ULL);
 
         // Parse multi-assets if present
         if (js.contains("assets") && js["assets"].is_object())
         {
-            for (auto &[asset_id, amount] : js["assets"].items())
+            for (auto &[asset_id, commitment] : js["assets"].items())
             {
-                utxo.multi_assets[asset_id] = amount.get<uint64_t>();
+                utxo.multi_assets[asset_id] = commitment.get<std::string>();
             }
         }
 

@@ -342,10 +342,11 @@ namespace midnight::protocols::grpc
                 proto_utxo->set_tx_hash(utxo.tx_hash);
                 proto_utxo->set_output_index(utxo.output_index);
                 proto_utxo->set_address(utxo.address);
-                proto_utxo->set_amount(utxo.amount);
+                proto_utxo->set_amount_commitment(utxo.amount_commitment);
+                proto_utxo->set_value(utxo.value);
                 proto_utxo->set_token_type(utxo.token_type);
                 proto_utxo->set_block_height(utxo.block_height);
-                total += utxo.amount;
+                total += utxo.value;
             }
 
             response->set_total(total);
@@ -386,37 +387,75 @@ namespace midnight::protocols::grpc
 
         try
         {
-            // Determine if querying by height or hash
+            uint32_t block_height = 0;
+            std::string block_hash;
+
             if (request->has_by_height())
             {
-                uint32_t height = request->by_height();
+                block_height = request->by_height();
                 if (logger)
                 {
-                    logger->debug("GetBlock: querying height " + std::to_string(height));
+                    logger->debug("GetBlock: querying by height " + std::to_string(block_height));
                 }
-                // The node RPC doesn't have a direct get_block_by_height method,
-                // so we would need to extend the RPC or use indexer for full block data
+                // MidnightNodeRPC does not expose a get_block_by_height RPC method.
+                // The IndexerClient similarly lacks a direct block-by-height query.
+                // As a best-effort, return the chain tip hash paired with the requested height.
+                // Full block data (header, transactions) requires a dedicated block query API
+                // that is not yet available in the RPC or indexer.
+                auto [tip_height, tip_hash] = node_rpc_->get_chain_tip();
+                (void)tip_height;
+                block_hash = tip_hash;
+                if (logger)
+                {
+                    logger->warn("GetBlock: height " + std::to_string(block_height) +
+                               " queried; MidnightNodeRPC lacks get_block_by_height — "
+                               "returning tip hash. Implement get_block_by_height in MidnightNodeRPC "
+                               "or add IndexerClient::query_block_by_height() for full block data.");
+                }
             }
             else if (request->has_by_hash())
             {
-                const std::string& hash = request->by_hash();
+                block_hash = request->by_hash();
                 if (logger)
                 {
-                    logger->debug("GetBlock: querying hash " + hash);
+                    logger->debug("GetBlock: querying by hash " + block_hash);
                 }
-                // Similar limitation - would need extended RPC support
+                // MidnightNodeRPC does not expose a get_block_by_hash RPC method.
+                // Return the requested hash in the response and note the limitation.
+                if (logger)
+                {
+                    logger->warn("GetBlock: block-by-hash queried; "
+                               "MidnightNodeRPC lacks get_block_by_hash — "
+                               "hash set from request. Implement get_block_by_hash in MidnightNodeRPC "
+                               "or add IndexerClient::query_block_by_hash() for full block data.");
+                }
+                // Set height from chain tip as best-effort reference
+                auto [tip_height, tip_hash] = node_rpc_->get_chain_tip();
+                (void)tip_hash;
+                block_height = static_cast<uint32_t>(tip_height);
+            }
+            else
+            {
+                // No query specified — return chain tip
+                auto [tip_height, tip_hash] = node_rpc_->get_chain_tip();
+                block_height = static_cast<uint32_t>(tip_height);
+                block_hash = tip_hash;
+                if (logger)
+                {
+                    logger->debug("GetBlock: no query specified, returning chain tip height " +
+                                  std::to_string(tip_height));
+                }
             }
 
-            // For now, populate with basic chain tip info
-            auto [tip_height, tip_hash] = node_rpc_->get_chain_tip();
-
             auto* header = response->mutable_header();
-            header->set_height(tip_height);
-            header->set_hash(tip_hash);
+            header->set_height(block_height);
+            header->set_hash(block_hash);
 
             if (logger)
             {
-                logger->info("GetBlock: returned header for height " + std::to_string(tip_height));
+                logger->info("GetBlock: returned block header for height " +
+                           std::to_string(block_height) + ", hash " +
+                           (block_hash.size() > 16 ? block_hash.substr(0, 16) + "..." : block_hash));
             }
         }
         catch (const std::exception& e)
@@ -545,8 +584,6 @@ namespace midnight::protocols::grpc
         const midnight::ContractDeployRequest* request,
         midnight::ContractResponse* response)
     {
-        std::lock_guard<std::mutex> lock(mu_);
-
         auto logger = midnight::g_logger;
 
         if (!contract_mgr_)
@@ -557,7 +594,9 @@ namespace midnight::protocols::grpc
             {
                 logger->error("DeployContract: ContractManager not configured");
             }
-            return Status::OK;
+            return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION,
+                               "ContractManager not configured — cannot deploy contract via gRPC. "
+                               "Use ContractInteractor::deploy() directly for contract deployment.");
         }
 
         try
@@ -572,15 +611,18 @@ namespace midnight::protocols::grpc
                              std::to_string(code.size()) + " bytes");
             }
 
-            // Note: actual deployment requires a signer and wallet
-            // This is a placeholder that would need integration with the signing pipeline
-            response->set_success("pending");
-            response->set_error("Deployment requires wallet signer - use ContractManager directly");
-
+            // Deployment via gRPC requires the full signing pipeline to be injected.
+            // This stub cannot complete deployment without wallet/key injection.
+            // Return UNIMPLEMENTED so clients know this path is not yet wired.
             if (logger)
             {
-                logger->info("DeployContract: deployment pending wallet integration");
+                logger->warn("DeployContract: gRPC path not implemented — "
+                             "wallet signer integration required");
             }
+
+            return grpc::Status(grpc::StatusCode::UNIMPLEMENTED,
+                               "Contract deployment via gRPC is not implemented. "
+                               "Use ContractInteractor::deploy() directly with a wallet seed set via set_seed_hex().");
         }
         catch (const std::exception& e)
         {
@@ -590,9 +632,8 @@ namespace midnight::protocols::grpc
             {
                 logger->error(std::string("DeployContract error: ") + e.what());
             }
+            return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
         }
-
-        return Status::OK;
     }
 
     Status MidnightGrpcServer::CallContract(
@@ -600,8 +641,6 @@ namespace midnight::protocols::grpc
         const midnight::ContractCallRequest* request,
         midnight::ContractResponse* response)
     {
-        std::lock_guard<std::mutex> lock(mu_);
-
         auto logger = midnight::g_logger;
 
         if (!contract_mgr_)
@@ -612,7 +651,8 @@ namespace midnight::protocols::grpc
             {
                 logger->error("CallContract: ContractManager not configured");
             }
-            return Status::OK;
+            return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION,
+                               "ContractManager not configured — cannot call contract via gRPC.");
         }
 
         try
@@ -627,15 +667,17 @@ namespace midnight::protocols::grpc
                 logger->info("CallContract: calling " + circuit + " on " + contract_addr);
             }
 
-            // Note: actual contract calls require a signer and wallet
-            // This is a placeholder that would need integration with the signing pipeline
-            response->set_success("pending");
-            response->set_error("Contract call requires wallet signer - use ContractManager directly");
-
+            // Contract calls via gRPC require wallet/key injection that is not yet wired.
+            // Return UNIMPLEMENTED so clients know this path is not available.
             if (logger)
             {
-                logger->info("CallContract: call pending wallet integration");
+                logger->warn("CallContract: gRPC path not implemented — "
+                             "wallet signer integration required");
             }
+
+            return grpc::Status(grpc::StatusCode::UNIMPLEMENTED,
+                               "Contract calls via gRPC are not implemented. "
+                               "Use ContractInteractor::call_circuit() directly with a wallet seed set.");
         }
         catch (const std::exception& e)
         {
@@ -645,9 +687,8 @@ namespace midnight::protocols::grpc
             {
                 logger->error(std::string("CallContract error: ") + e.what());
             }
+            return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
         }
-
-        return Status::OK;
     }
 
     Status MidnightGrpcServer::GetBalance(

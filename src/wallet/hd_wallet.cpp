@@ -12,7 +12,7 @@
 #include <iomanip>
 #include <cstring>
 
-// BIP39 English wordlist
+// BIP39 wordlist must be included before midnight::wallet namespace
 #include "midnight/wallet/bip39_wordlist.hpp"
 
 namespace midnight::wallet
@@ -99,32 +99,20 @@ namespace midnight::wallet
             throw std::runtime_error("libsodium init failed");
         }
 
-        std::vector<uint8_t> expanded_sk;
-        if (secret_key.size() == 32) {
-            // ─────────────────────────────────────────────────────────────────────────
-            // SLIP-10 derives a 32-byte Ed25519 scalar.  libsodium's crypto_sign_detached
-            // needs the full 64-byte "expanded" form: scalar || SHA512(scalar)[32:].
-            // This matches Midnight's internal key expansion.
-            // ─────────────────────────────────────────────────────────────────────────
-            uint8_t hash[64];
-            crypto_hash_sha512(hash, secret_key.data(), 32);
-
-            expanded_sk.reserve(64);
-            expanded_sk.insert(expanded_sk.end(), secret_key.begin(), secret_key.end());
-            expanded_sk.insert(expanded_sk.end(), hash + 32, hash + 64);
-        } else if (secret_key.size() == 64) {
-            expanded_sk = secret_key;
-        } else {
-            throw std::runtime_error("Ed25519 secret key must be 32 or 64 bytes, got " +
-                                    std::to_string(secret_key.size()));
+        if (secret_key.size() != 64) {
+            throw std::runtime_error("Ed25519 secret key must be 64 bytes (expanded_sk)");
         }
 
+        // secret_key is the 64-byte Ed25519 expanded secret key:
+        // expanded_sk = seed || SHA512(seed)[32:]
+        // crypto_sign_seed_keypair produces exactly this format.
+        // crypto_sign_detached expects this format directly — no further expansion needed.
         std::array<uint8_t, 64> sig{};
         unsigned long long sig_len = 0;
 
         if (crypto_sign_detached(sig.data(), &sig_len,
                                  message.data(), message.size(),
-                                 expanded_sk.data()) != 0) {
+                                 secret_key.data()) != 0) {
             throw std::runtime_error("Ed25519 signing failed");
         }
         return std::vector<uint8_t>(sig.begin(), sig.begin() + sig_len);
@@ -172,7 +160,7 @@ namespace midnight::wallet
             for (auto b : ent)
                 for (int i = 7; i >= 0; --i) bits.push_back((b >> i) & 1);
             for (int i = 0; i < ebytes / 4; ++i)
-                bits.push_back((h[i / 8] >> (7 - (i % 8))) & 1);
+                bits.push_back(((h[i / 8] >> (7 - (i % 8))) & 1));
 
             std::string r;
             for (int i = 0; i < wc; ++i) {
@@ -187,12 +175,71 @@ namespace midnight::wallet
         bool validate_mnemonic(const std::string& m) {
             std::istringstream iss(m);
             std::string w;
+            std::vector<int> indices;
             int cnt = 0;
+            
             while (iss >> w) {
-                if (word_index(w) < 0) return false;
+                int idx = word_index(w);
+                if (idx < 0) return false;
+                indices.push_back(idx);
                 ++cnt;
             }
-            return cnt == 12 || cnt == 15 || cnt == 18 || cnt == 21 || cnt == 24;
+            
+            // Check valid word counts
+            if (cnt != 12 && cnt != 15 && cnt != 18 && cnt != 21 && cnt != 24) {
+                return false;
+            }
+            
+            // BIP39 checksum validation
+            // 1. Convert word indices to entropy bits (11 bits per word)
+            // 2. Split into entropy + checksum bits
+            // 3. Verify checksum
+            
+            // Calculate total bits and checksum bits
+            int total_bits = cnt * 11;
+            int checksum_bits = total_bits / 33;  // 4 bits for 12 words, 6 for 24, etc.
+            int entropy_bits = total_bits - checksum_bits;
+            int entropy_bytes = entropy_bits / 8;
+            
+            // Build entropy bytes from indices
+            std::vector<uint8_t> entropy(entropy_bytes, 0);
+            int bit_pos = 0;
+            
+            for (int idx : indices) {
+                for (int b = 10; b >= 0; --b) {
+                    if (bit_pos < entropy_bits) {
+                        int byte_idx = bit_pos / 8;
+                        int bit_idx = 7 - (bit_pos % 8);
+                        entropy[byte_idx] |= ((idx >> b) & 1) << bit_idx;
+                    }
+                    ++bit_pos;
+                }
+            }
+            
+            // Calculate expected checksum (first checksum_bits of SHA256 of entropy)
+            uint8_t hash[SHA256_DIGEST_LENGTH];
+            SHA256(entropy.data(), static_cast<int>(entropy.size()), hash);
+            
+            // Compare checksum bits
+            bit_pos = 0;
+            for (int idx : indices) {
+                if (bit_pos >= entropy_bits) {
+                    // We're in checksum bits
+                    int checksum_bit_pos = bit_pos - entropy_bits;
+                    int byte_idx = checksum_bit_pos / 8;
+                    int bit_idx = 7 - (checksum_bit_pos % 8);
+                    
+                    int expected_bit = (hash[byte_idx] >> bit_idx) & 1;
+                    int actual_bit = (idx >> (10 - (checksum_bit_pos % 11))) & 1;
+                    
+                    if (expected_bit != actual_bit) {
+                        return false;
+                    }
+                }
+                ++bit_pos;
+            }
+            
+            return true;
         }
 
         std::vector<uint8_t> mnemonic_to_seed(const std::string& m,
@@ -222,6 +269,31 @@ namespace midnight::wallet
         } else {
             BN_bn2bin(bn, out);
         }
+    }
+
+    // BLS scalar field modulus (256-bit, little-endian for BN_mod)
+    // 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001
+    static const uint8_t BLS_FIELD[] = {
+        0x01, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFE,
+        0xB4, 0xDA, 0x02, 0x53, 0x5B, 0xA0, 0x8D, 0x9E,
+        0x80, 0x9D, 0xD8, 0x33, 0x7D, 0x48, 0x97, 0x29,
+        0x53, 0xE7, 0xDE, 0x73, 0x00, 0x00, 0x00, 0x00
+    };
+
+    // Reduce a 32-byte scalar modulo the BLS field
+    // Matches SDK: DustSecretKey.fromSeed(seed) computes seed % BLS_FIELD
+    static std::array<uint8_t, 32> bls_reduce(const std::array<uint8_t, 32>& scalar) {
+        BnCtx ctx;
+        BnNum n(BN_bin2bn(BLS_FIELD, 32, nullptr));
+        BnNum bn_s(BN_bin2bn(scalar.data(), 32, nullptr));
+        BnNum r(BN_new());
+        if (!n.get() || !bn_s.get() || !r.get())
+            throw std::runtime_error("BIGNUM allocation failed in bls_reduce");
+        if (BN_mod(r.get(), bn_s.get(), n.get(), ctx.get()) != 1)
+            throw std::runtime_error("BN_mod failed in bls_reduce");
+        std::array<uint8_t, 32> out{};
+        bn_to_bytes32(r.get(), out.data());
+        return out;
     }
 
     // (a + b) mod secp256k1_n using RAII BN_CTX and RAII BIGNUMs
@@ -325,22 +397,6 @@ namespace midnight::wallet
         return xonly;
     }
 
-    // Derive public key from private key using libsodium Ed25519
-    std::array<uint8_t, 32> HDWallet::derive_public_key_from_private(
-        const std::array<uint8_t, 32>& private_key)
-    {
-        if (sodium_init() < 0) {
-            throw std::runtime_error("libsodium init failed");
-        }
-
-        std::array<uint8_t, 32> public_key{};
-        // crypto_scalarmult_base derives the Ed25519 public key from a 32-byte scalar
-        if (crypto_scalarmult_base(public_key.data(), private_key.data()) != 0) {
-            throw std::runtime_error("Failed to derive Ed25519 public key");
-        }
-        return public_key;
-    }
-
     // ─── HDWallet ─────────────────────────────────────────
 
     HDWallet HDWallet::from_mnemonic(const std::string& m, const std::string& p) {
@@ -398,41 +454,42 @@ namespace midnight::wallet
     KeyPair HDWallet::derive(uint32_t acc, Role role, uint32_t idx) const {
         auto node = derive_path(acc, role, idx);
 
-        // Derive the Ed25519 public key from the 32-byte scalar
-        auto pub32 = derive_public_key_from_private(node.key);
+        unsigned char pk[32];
+        unsigned char sk[64];
+        crypto_sign_seed_keypair(pk, sk, node.key.data());
 
         KeyPair kp;
-        // secret_key = 32-byte scalar (SLIP-10 key) — compatible with Midnight SDK
-        kp.secret_key.assign(node.key.begin(), node.key.end());
-        kp.public_key.assign(pub32.begin(), pub32.end());
+        kp.secret_key.assign(sk, sk + 64);
+        kp.public_key.assign(pk, pk + 32);
         return kp;
     }
 
     KeyPair HDWallet::derive_night(uint32_t acc, uint32_t idx) const {
         auto node = derive_path(acc, Role::NightExternal, idx);
 
-        // Derive Ed25519 public key from the 32-byte scalar
-        auto pub32 = derive_public_key_from_private(node.key);
-        std::vector<uint8_t> pub_vec(pub32.begin(), pub32.end());
+        unsigned char pk[32];
+        unsigned char sk[64];
+        crypto_sign_seed_keypair(pk, sk, node.key.data());
+        std::vector<uint8_t> pub_vec(pk, pk + 32);
 
         KeyPair kp;
-        kp.secret_key.assign(node.key.begin(), node.key.end());
+        kp.secret_key.assign(sk, sk + 64);
         kp.public_key = pub_vec;
 
-        // Encode as Midnight unshielded Bech32m address
         kp.address = address::encode_unshielded(pub_vec, address::Network::Preview);
         return kp;
     }
 
     KeyPair HDWallet::derive_night_internal(uint32_t acc, uint32_t idx) const {
-        // NightInternal uses Role::NightInternal (value 1), NOT NightExternal
         auto node = derive_path(acc, Role::NightInternal, idx);
 
-        auto pub32 = derive_public_key_from_private(node.key);
-        std::vector<uint8_t> pub_vec(pub32.begin(), pub32.end());
+        unsigned char pk[32];
+        unsigned char sk[64];
+        crypto_sign_seed_keypair(pk, sk, node.key.data());
+        std::vector<uint8_t> pub_vec(pk, pk + 32);
 
         KeyPair kp;
-        kp.secret_key.assign(node.key.begin(), node.key.end());
+        kp.secret_key.assign(sk, sk + 64);
         kp.public_key = pub_vec;
         kp.address = address::encode_unshielded(pub_vec, address::Network::Preview);
         return kp;
@@ -441,22 +498,39 @@ namespace midnight::wallet
     KeyPair HDWallet::derive_dust(uint32_t acc, uint32_t idx) const {
         auto node = derive_path(acc, Role::Dust, idx);
 
-        // The dust key is the 32-byte SLIP-10 scalar (same as the private scalar)
-        // The public key is derived via Ed25519 scalarmult_base
-        auto pub32 = derive_public_key_from_private(node.key);
-        std::vector<uint8_t> pub_vec(pub32.begin(), pub32.end());
+        // For Dust keys, Midnight SDK computes: DustSecretKey = raw_scalar % BLS_FIELD
+        // The DustPublicKey is NOT an Ed25519 or secp256k1 public key - it IS the scalar.
+        // We store the raw 32-byte scalar, then reduce it to get the DustPublicKey (also 32 bytes).
+        // This matches: ledger.DustSecretKey.fromSeed(seed) where DustPublicKey = seed % BLS_FIELD
+        auto dust_scalar = bls_reduce(node.key);
 
         KeyPair kp;
+        // secret_key = the SLIP-10 scalar (for signing with DustSecretKey)
         kp.secret_key.assign(node.key.begin(), node.key.end());
-        kp.public_key = pub_vec;
+        // public_key = the BLS-reduced scalar (this IS the DustPublicKey)
+        kp.public_key.assign(dust_scalar.begin(), dust_scalar.end());
 
         // Encode as Midnight dust Bech32m address
-        kp.address = address::encode_dust(pub_vec, address::Network::Preview);
+        // The SDK does: DustAddress.encodePublicKey(network, DustPublicKey)
+        // which stores the scalar as SCALE BigInt and encodes with Bech32m prefix "mn_dust_preview1"
+        std::vector<uint8_t> dust_scalar_vec(dust_scalar.begin(), dust_scalar.end());
+        kp.address = address::encode_dust(dust_scalar_vec, address::Network::Preview);
         return kp;
     }
 
     KeyPair HDWallet::derive_zswap(uint32_t acc, uint32_t idx) const {
-        return derive(acc, Role::Zswap, idx);
+        auto node = derive_path(acc, Role::Zswap, idx);
+
+        unsigned char pk[32];
+        unsigned char sk[64];
+        crypto_sign_seed_keypair(pk, sk, node.key.data());
+        std::vector<uint8_t> pub_vec(pk, pk + 32);
+
+        KeyPair kp;
+        kp.secret_key.assign(sk, sk + 64);
+        kp.public_key.assign(pk, pk + 32);
+        kp.address = address::encode_unshielded(pub_vec, address::Network::Preview);
+        return kp;
     }
 
     KeyPair HDWallet::derive_metadata(uint32_t acc, uint32_t idx) const {

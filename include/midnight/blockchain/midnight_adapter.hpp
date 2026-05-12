@@ -44,16 +44,26 @@ namespace midnight::blockchain
 
     /**
      * @brief UTXO (Unspent Transaction Output) for Midnight
+     *
+     * Midnight uses Pedersen commitments to hide actual amounts.
+     * The amount_commitment field contains the encrypted Pedersen commitment,
+     * which allows verification that the sum of inputs equals the sum of outputs
+     * without revealing the actual amounts.
+     *
+     * For UTXOs owned by the wallet, the 'value' field contains the decrypted
+     * amount for balance calculations. For UTXOs from other sources, value may
+     * be 0 if the amount is not known (e.g., viewing key not available).
      */
     struct UTXO
     {
-        std::string tx_hash;                          // Transaction hash in hex (32 bytes)
-        uint32_t output_index;                        // Output index in transaction
-        std::string address;                          // Recipient address
-        uint64_t amount;                              // Amount in basic units
-        std::string token_type = "NIGHT";            // Token type: "NIGHT", "DUST", etc.
-        std::map<std::string, uint64_t> multi_assets; // Multi-assets: {asset_id -> amount}
-        uint32_t block_height = 0;                    // Block height (optional)
+        std::string tx_hash;                              // Transaction hash in hex (32 bytes)
+        uint32_t output_index;                            // Output index in transaction
+        std::string address;                              // Recipient address
+        std::string amount_commitment;                   // Pedersen commitment (encrypted amount, hex)
+        uint64_t value = 0;                             // Decrypted amount (only if known to wallet)
+        std::string token_type = "NIGHT";              // Token type: "NIGHT", "DUST", etc.
+        std::map<std::string, std::string> multi_assets; // Multi-assets: {asset_id -> commitment}
+        uint32_t block_height = 0;                       // Block height (optional)
     };
 
     /**

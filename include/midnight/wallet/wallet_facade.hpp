@@ -15,6 +15,7 @@
 #include <map>
 #include <chrono>
 #include <memory>
+#include <mutex>
 
 namespace midnight::wallet {
 
@@ -45,6 +46,7 @@ struct UtxoWithMeta {
     uint64_t amount = 0;
     std::string token_type = "NIGHT";
     std::string tx_hash;
+    std::string receiver_address;  // Address that can spend this UTXO
     std::chrono::system_clock::time_point ctime;
     bool registered_for_dust = false;
 };
@@ -159,6 +161,7 @@ struct SwapOutputs {
 struct TransferResult {
     bool success = false;
     std::string tx_hash;
+    std::string tx_signature;  // BIP-340/Ed25519 signature (stored separately, not in tx_hash)
     std::vector<UtxoWithMeta> inputs_used;
     std::vector<UtxoWithMeta> change_outputs;
     uint64_t fee_estimate = 0;
@@ -265,12 +268,74 @@ struct WalletFacadeConfig {
 
 class WalletFacade {
 public:
-    // Allow test fixtures to inject state for testing
+    // Move constructor and assignment (required because of mutex members)
+    WalletFacade(WalletFacade&& other) noexcept
+        : hd_wallet_(std::move(other.hd_wallet_))
+        , night_key_(std::move(other.night_key_))
+        , night_internal_key_(std::move(other.night_internal_key_))
+        , dust_key_(std::move(other.dust_key_))
+        , zswap_key_(std::move(other.zswap_key_))
+        , metadata_key_(std::move(other.metadata_key_))
+        , night_addr_(std::move(other.night_addr_))
+        , dust_addr_(std::move(other.dust_addr_))
+        , shielded_addr_(std::move(other.shielded_addr_))
+        , indexer_url_(std::move(other.indexer_url_))
+        , network_(other.network_)
+        , state_(std::move(other.state_))
+        , cleared_(other.cleared_)
+        , running_(other.running_)
+        , coin_strategy_(other.coin_strategy_)
+        , submission_service_(std::move(other.submission_service_))
+        , proving_service_(std::move(other.proving_service_))
+        , pending_tx_service_(std::move(other.pending_tx_service_))
+        , state_mutex_()
+        , pending_mutex_()
+    {}
+
+    WalletFacade& operator=(WalletFacade&& other) noexcept {
+        if (this != &other) {
+            hd_wallet_ = std::move(other.hd_wallet_);
+            night_key_ = std::move(other.night_key_);
+            night_internal_key_ = std::move(other.night_internal_key_);
+            dust_key_ = std::move(other.dust_key_);
+            zswap_key_ = std::move(other.zswap_key_);
+            metadata_key_ = std::move(other.metadata_key_);
+            night_addr_ = std::move(other.night_addr_);
+            dust_addr_ = std::move(other.dust_addr_);
+            shielded_addr_ = std::move(other.shielded_addr_);
+            indexer_url_ = std::move(other.indexer_url_);
+            network_ = other.network_;
+            state_ = std::move(other.state_);
+            cleared_ = other.cleared_;
+            running_ = other.running_;
+            coin_strategy_ = other.coin_strategy_;
+            submission_service_ = std::move(other.submission_service_);
+            proving_service_ = std::move(other.proving_service_);
+            pending_tx_service_ = std::move(other.pending_tx_service_);
+            // Mutexes are default-constructed (not copied/moved)
+        }
+        return *this;
+    }
+
+    // Allow test fixtures to inject state for testing (thread-safe)
     void set_available_coins(const std::vector<UtxoWithMeta>& coins) {
+        std::lock_guard<std::mutex> lock(state_mutex_);
         state_.unshielded.available_coins = coins;
     }
     void set_balance(const std::string& token, uint64_t amount) {
+        std::lock_guard<std::mutex> lock(state_mutex_);
         state_.unshielded.balances[token] = amount;
+    }
+
+    // Thread-safe state accessors
+    FacadeState get_state() const {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        return state_;
+    }
+
+    void update_state(const FacadeState& new_state) {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        state_ = new_state;
     }
 
     // ─── Factory Methods ─────────────────────────────────────
@@ -510,6 +575,9 @@ private:
     std::unique_ptr<SubmissionService> submission_service_;
     std::unique_ptr<ProvingService> proving_service_;
     std::unique_ptr<PendingTransactionsService> pending_tx_service_;
+
+    mutable std::mutex state_mutex_;  // Protects state_ for thread-safe access
+    mutable std::mutex pending_mutex_;  // Protects pending operations
 
     WalletFacade() = default;
     void ensure_not_cleared() const;

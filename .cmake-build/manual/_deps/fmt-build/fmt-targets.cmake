@@ -51,7 +51,7 @@ add_library(fmt::fmt STATIC IMPORTED)
 
 set_target_properties(fmt::fmt PROPERTIES
   INTERFACE_COMPILE_FEATURES "cxx_std_11"
-  INTERFACE_INCLUDE_DIRECTORIES "D:/venera/midnight/night_fund/.cmake-build/manual/_deps/fmt-src/include"
+  INTERFACE_INCLUDE_DIRECTORIES "D:/venera/midnight/night_fund/build/_deps/fmt-src/include"
 )
 
 # Create imported target fmt::fmt-header-only
@@ -60,7 +60,7 @@ add_library(fmt::fmt-header-only INTERFACE IMPORTED)
 set_target_properties(fmt::fmt-header-only PROPERTIES
   INTERFACE_COMPILE_DEFINITIONS "FMT_HEADER_ONLY=1"
   INTERFACE_COMPILE_FEATURES "cxx_std_11"
-  INTERFACE_INCLUDE_DIRECTORIES "D:/venera/midnight/night_fund/.cmake-build/manual/_deps/fmt-src/include"
+  INTERFACE_INCLUDE_DIRECTORIES "D:/venera/midnight/night_fund/build/_deps/fmt-src/include"
 )
 
 # Import target "fmt::fmt" for configuration "Debug"

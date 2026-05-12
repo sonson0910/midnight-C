@@ -21,10 +21,11 @@ message Utxo {
     string tx_hash = 1;
     uint32 output_index = 2;
     string address = 3;
-    uint64 amount = 4;
-    string token_type = 5;
-    map<string, uint64> multi_assets = 6;
-    uint32 block_height = 7;
+    string amount_commitment = 4;      // Pedersen commitment (hex)
+    uint64 value = 5;                 // Decrypted amount (if known to wallet)
+    string token_type = 6;
+    map<string, string> multi_assets = 7; // {asset_id -> commitment}
+    uint32 block_height = 8;
 }
 
 message UtxoQuery {

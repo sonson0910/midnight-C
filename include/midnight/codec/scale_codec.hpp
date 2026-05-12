@@ -3,10 +3,32 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include <stdexcept>
 
 namespace midnight::codec
 {
+
+    // u128 type for balance storage (little-endian)
+    struct u128 {
+        uint64_t lo = 0;  // lower 64 bits
+        uint64_t hi = 0;  // upper 64 bits
+
+        u128() = default;
+        u128(uint64_t low) : lo(low), hi(0) {}
+        u128(uint64_t low, uint64_t high) : lo(low), hi(high) {}
+        u128& operator=(uint64_t val) { lo = val; hi = 0; return *this; }
+
+        bool operator==(const u128& other) const { return lo == other.lo && hi == other.hi; }
+        bool operator!=(const u128& other) const { return !(*this == other); }
+        bool operator<(const u128& other) const {
+            if (hi != other.hi) return hi < other.hi;
+            return lo < other.lo;
+        }
+        bool operator>(const u128& other) const { return other < *this; }
+        bool operator<=(const u128& other) const { return !(other < *this); }
+        bool operator>=(const u128& other) const { return !(*this < other); }
+
+        std::string to_decimal() const;
+    };
 
     /**
      * @brief SCALE (Simple Concatenated Aggregate Little-Endian) encoder
@@ -80,6 +102,7 @@ namespace midnight::codec
         uint16_t decode_u16_le();
         uint32_t decode_u32_le();
         uint64_t decode_u64_le();
+        u128 decode_u128_le();
         bool decode_bool();
         std::vector<uint8_t> decode_bytes();
         std::vector<uint8_t> decode_raw(size_t len);

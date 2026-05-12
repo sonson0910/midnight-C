@@ -39,33 +39,63 @@ namespace
         {
             Json::Value result;
 
-            if (query.find("utxoSet(") != std::string::npos)
+            // Midnight SDK uses unspentUtxos subscription with createdUtxos/spentUtxos
+            // Field names: owner, tokenType, value, outputIndex, intentHash, ctime, registeredForDustGeneration
+            if (query.find("unspentUtxos") != std::string::npos)
             {
                 Json::Value entry;
-                entry["txHash"] = "0x" + std::string(64, 'b');
+                entry["owner"] = "mn_addr_preprod1u9vv9jcrkl5v75z";
+                entry["tokenType"] = "0x00";
+                entry["value"] = "1000000";
                 entry["outputIndex"] = 2;
-                entry["recipient"] = "0xaddress123";
-                entry["amountCommitment"] = "0x" + std::string(64, 'c');
-                entry["confirmedHeight"] = 7777;
-                entry["finalityDepth"] = 42;
+                entry["intentHash"] = "0x" + std::string(64, 'b');
+                entry["ctime"] = 1234567890;
+                entry["registeredForDustGeneration"] = false;
 
-                result["data"]["utxoSet"].append(entry);
+                result["data"]["unspentUtxos"].append(entry);
                 return result;
             }
 
-            if (query.find("utxo(") != std::string::npos)
+            // Midnight SDK uses transactions with unshieldedCreatedOutputs/unshieldedSpentOutputs
+            if (query.find("transactions") != std::string::npos)
             {
-                result["data"]["utxo"]["txHash"] = "0x" + std::string(64, 'b');
-                result["data"]["utxo"]["outputIndex"] = 2;
-                result["data"]["utxo"]["recipient"] = "0xaddress123";
-                result["data"]["utxo"]["amountCommitment"] = "0x" + std::string(64, 'c');
-                result["data"]["utxo"]["confirmedHeight"] = 7777;
-                result["data"]["utxo"]["finalityDepth"] = 42;
-                result["data"]["utxo"]["isSpent"] = false;
+                Json::Value created;
+                created["owner"] = "mn_addr_preprod1u9vv9jcrkl5v75z";
+                created["tokenType"] = "0x00";
+                created["value"] = "1000000";
+                created["outputIndex"] = 2;
+                created["intentHash"] = "0x" + std::string(64, 'b');
+                created["ctime"] = 1234567890;
+
+                result["data"]["transactions"]["unshieldedCreatedOutputs"].append(created);
                 return result;
             }
 
             return result;
+        }
+
+        Json::Value execute_query_with_vars(const std::string &query,
+                                           const std::map<std::string, Json::Value> &variables) override
+        {
+            // For unspentUtxos queries, return the same data as execute_query
+            if (query.find("unspentUtxos") != std::string::npos)
+            {
+                Json::Value result;
+                Json::Value entry;
+                entry["owner"] = "mn_addr_preprod1u9vv9jcrkl5v75z";
+                entry["tokenType"] = "0x00";
+                entry["value"] = "1000000";
+                entry["outputIndex"] = 2;
+                entry["intentHash"] = "0x" + std::string(64, 'b');
+                entry["ctime"] = 1234567890;
+                entry["registeredForDustGeneration"] = false;
+
+                result["data"]["unspentUtxos"].append(entry);
+                return result;
+            }
+
+            // For transaction queries, delegate to execute_query
+            return execute_query(query);
         }
     };
 
@@ -187,7 +217,9 @@ TEST_F(UtxoTransactionsTest, IsSpent_UnspentUtxo_ReturnsFalse)
     ASSERT_FALSE(utxos->empty());
 
     const auto &candidate = utxos->front();
-    bool spent = manager.is_spent(candidate.tx_hash, candidate.output_index);
+    auto spent_result = manager.is_spent(candidate.tx_hash, candidate.output_index);
+    ASSERT_TRUE(spent_result.has_value());  // UTXO should exist
+    bool spent = spent_result.value();
 
     EXPECT_FALSE(spent);
 }
@@ -237,8 +269,9 @@ TEST_F(UtxoTransactionsTest, QueryUnspentUtxos_WithInjectedIndexerProvider_Retur
     ASSERT_TRUE(utxos.has_value());
     ASSERT_EQ(utxos->size(), 1U);
     EXPECT_EQ((*utxos)[0].tx_hash, "0x" + std::string(64, 'b'));
-    EXPECT_EQ((*utxos)[0].confirmed_height, 7777U);
-    EXPECT_EQ((*utxos)[0].finality_depth, 42U);
+    EXPECT_EQ((*utxos)[0].output_index, 2U);
+    EXPECT_EQ((*utxos)[0].token_type, "0x00");
+    EXPECT_EQ((*utxos)[0].value, "1000000");
 }
 
 TEST_F(UtxoTransactionsTest, CreateBuilderContext_WithInjectedNodeProvider_ReturnsTypedContext)
@@ -497,7 +530,7 @@ TEST_F(UtxoTransactionsTest, ValidateInputs_ValidInputs_ReturnsTrue)
     input.address = "0x" + std::string(40, 'a');
     tx.inputs.push_back(input);
 
-    bool valid = TransactionValidator::validate_inputs(tx);
+    bool valid = TransactionValidator().validate_inputs(tx);
 
     EXPECT_TRUE(valid);
 }
@@ -507,7 +540,7 @@ TEST_F(UtxoTransactionsTest, ValidateInputs_EmptyInputs_ReturnsFalse)
     Transaction tx;
     // No inputs
 
-    bool valid = TransactionValidator::validate_inputs(tx);
+    bool valid = TransactionValidator().validate_inputs(tx);
 
     EXPECT_FALSE(valid);
 }
@@ -525,7 +558,7 @@ TEST_F(UtxoTransactionsTest, ValidateOutputs_ValidOutputs_ReturnsTrue)
     output.amount_commitment = "0x" + std::string(64, 'c');
     tx.outputs.push_back(output);
 
-    bool valid = TransactionValidator::validate_outputs(tx);
+    bool valid = TransactionValidator().validate_outputs(tx);
 
     EXPECT_TRUE(valid);
 }
@@ -539,7 +572,7 @@ TEST_F(UtxoTransactionsTest, ValidateOutputs_InvalidCommitmentLength_ReturnsFals
     output.amount_commitment = "0x" + std::string(32, 'c'); // Too short
     tx.outputs.push_back(output);
 
-    bool valid = TransactionValidator::validate_outputs(tx);
+    bool valid = TransactionValidator().validate_outputs(tx);
 
     EXPECT_FALSE(valid);
 }
@@ -556,7 +589,7 @@ TEST_F(UtxoTransactionsTest, ValidateDustAccounting_BalancedTransaction_ReturnsT
     tx.fees = 5000;
     tx.outputs.resize(2);
 
-    bool valid = TransactionValidator::validate_dust_accounting(tx);
+    bool valid = TransactionValidator().validate_dust_accounting(tx);
 
     EXPECT_TRUE(valid);
 }
@@ -570,7 +603,7 @@ TEST_F(UtxoTransactionsTest, ValidateProofs_ValidProofs_ReturnsTrue)
     Transaction tx;
     tx.proofs.push_back("0x" + std::string(256, 'p')); // 128 bytes
 
-    bool valid = TransactionValidator::validate_proofs(tx);
+    bool valid = TransactionValidator().validate_proofs(tx);
 
     EXPECT_TRUE(valid);
 }
@@ -580,7 +613,7 @@ TEST_F(UtxoTransactionsTest, ValidateProofs_NoProofs_ReturnsFalse)
     Transaction tx;
     // No proofs
 
-    bool valid = TransactionValidator::validate_proofs(tx);
+    bool valid = TransactionValidator().validate_proofs(tx);
 
     EXPECT_FALSE(valid);
 }
@@ -590,7 +623,7 @@ TEST_F(UtxoTransactionsTest, ValidateProofs_WitnessReferencesOnly_ReturnsTrue)
     Transaction tx;
     tx.witness_bundle.proof_references.push_back("proof-ref-only");
 
-    bool valid = TransactionValidator::validate_proofs(tx);
+    bool valid = TransactionValidator().validate_proofs(tx);
 
     EXPECT_TRUE(valid);
 }
@@ -600,7 +633,7 @@ TEST_F(UtxoTransactionsTest, ValidateSignature_WitnessSignatureOnly_ReturnsTrue)
     Transaction tx;
     tx.witness_bundle.signatures.push_back("0x" + std::string(128, 'f'));
 
-    bool valid = TransactionValidator::validate_signature(tx);
+    bool valid = TransactionValidator().validate_signature(tx);
 
     EXPECT_TRUE(valid);
 }
@@ -610,7 +643,7 @@ TEST_F(UtxoTransactionsTest, ValidateSignature_InvalidWitnessSignature_ReturnsFa
     Transaction tx;
     tx.witness_bundle.signatures.push_back("0x" + std::string(64, 'f'));
 
-    bool valid = TransactionValidator::validate_signature(tx);
+    bool valid = TransactionValidator().validate_signature(tx);
 
     EXPECT_FALSE(valid);
 }
@@ -807,9 +840,10 @@ TEST_F(UtxoTransactionsTest, Integration_FullTransactionWorkflow_Success)
     tx->output_dust = 2000;
 
     // 4. Validate transaction
-    bool valid = TransactionValidator::validate_inputs(*tx) &&
-                 TransactionValidator::validate_outputs(*tx) &&
-                 TransactionValidator::validate_dust_accounting(*tx);
+    TransactionValidator validator;
+    bool valid = validator.validate_inputs(*tx) &&
+                 validator.validate_outputs(*tx) &&
+                 validator.validate_dust_accounting(*tx);
 
     // In real scenario: would also validate proofs and signature
     EXPECT_TRUE(valid);
@@ -839,7 +873,7 @@ TEST_F(UtxoTransactionsTest, ValidateOutputs_EmptyOutputs_ReturnsFalse)
     Transaction tx;
     // No outputs
 
-    bool valid = TransactionValidator::validate_outputs(tx);
+    bool valid = TransactionValidator().validate_outputs(tx);
 
     EXPECT_FALSE(valid);
 }

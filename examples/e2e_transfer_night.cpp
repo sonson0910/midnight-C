@@ -277,7 +277,7 @@ static int cmd_balance(const std::string &mnemonic,
         // System.Account (nonce only on Midnight — balance is always 0)
         auto info = rpc.get_account_info(hex_addr);
         box_row("System Nonce:", std::to_string(info.nonce));
-        box_row("System Balance:", std::to_string(info.free) + " (always 0 — NIGHT is UTXO)");
+        box_row("System Balance:", std::to_string(info.free.lo) + " (always 0 — NIGHT is UTXO)");
     }
     catch (const std::exception &e)
     {
@@ -394,8 +394,8 @@ static int cmd_utxos(const std::string &mnemonic,
                 std::cout << "  UTXO #" << i << ":\n";
                 std::cout << "    TX Hash: " << utxo.tx_hash.substr(0, 48) << "...\n";
                 std::cout << "    Index:   " << utxo.output_index << "\n";
-                std::cout << "    Value:   " << utxo.amount << " units\n";
-                total += utxo.amount;
+                std::cout << "    Value:   " << utxo.value << " units\n";
+                total += utxo.value;
             }
             box_sep();
             box_row("Total UTXOs:", std::to_string(utxos.size()));
@@ -473,7 +473,7 @@ static int cmd_faucet(const std::string &mnemonic,
         auto utxos = indexer.query_utxos(night_addr);
         uint64_t total = 0;
         for (const auto &utxo : utxos)
-            total += utxo.amount;
+            total += utxo.value;
 
         box_row("  UTXOs after faucet:", std::to_string(utxos.size()));
         box_row("  Total NIGHT:", std::to_string(total));

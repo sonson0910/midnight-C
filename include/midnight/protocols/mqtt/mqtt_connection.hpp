@@ -120,12 +120,8 @@ private:
     bool connected_ = false;
 
 #ifdef _WIN32
-    static std::atomic<bool> winsock_initialized_;
+    inline static std::atomic<bool> winsock_initialized_{false};
 #endif
 };
-
-#ifdef _WIN32
-std::atomic<bool> MqttConnection::winsock_initialized_{false};
-#endif
 
 } // namespace midnight::protocols::mqtt
