@@ -1,0 +1,24 @@
+{
+  "config": {
+    "indexerHttpUrl": "https://indexer.preprod.midnight.network/api/v4/graphql",
+    "indexerWsUrl": "wss://indexer.preprod.midnight.network/api/v4/graphql",
+    "nodeHttpUrl": "https://node.preprod.midnight.network",
+    "proofServerUrl": "http://127.0.0.1:6300"
+  },
+  "derivation_paths": {
+    "night": "m/44'/2400'/0'/0/0",
+    "dust": "m/44'/2400'/0'/2/0",
+    "shielded": "m/44'/2400'/0'/3/0"
+  },
+  "network": "preprod",
+  "mnemonic": "basic fan uncover try settle replace taxi denial shuffle sibling snow toddler consider miracle walnut give tower enact current sausage oval repeat joy glue",
+  "night_address": "mn_addr_preprod1vm7tp364dgq8u9shfms29wll0w4qs4c37aqhtwd8pjqq78zuekvs5vf04q",
+  "night_sk": "6142ad2753e122c54b568df13ff1f08219084e2a62d4596a0d8a83236addb3dc66fcb0c7556a007e16174ee0a2bbff7baa085711f74175b9a70c800f1c5ccd99",
+  "night_pk": "66fcb0c7556a007e16174ee0a2bbff7baa085711f74175b9a70c800f1c5ccd99",
+  "dust_address": "mn_dust_preprod1wvqxerdugw4sdynx945nhwu3uatg8lkd8cgpkxfxezgpzz03lpfhu6kkrrm",
+  "dust_sk": "2c6c8de843ab06597ba5cf8f7b2a3e949f1ff61798951441346a4ccdf1f8537e",
+  "dust_pk": "006c8dbc43ab0692662d693bbb91e75683fecd3e101b1926c8901109f1f8537e",
+  "shielded_address": "mn_shield-addr_preprod174y7jkm7987k75jv0zhwhv0vt5dpdpep8d03ulnadawj2tz4u7e5g8tnrwralr9wtedqfhpnlv9d95ttkh4jcwkw7kv0zl8a63aqwvq49flv9",
+  "shielded_coin_public_key": "f549e95b7e29fd6f524c78aeebb1ec5d1a1687213b5f1e7e7d6f5d252c55e7b3",
+  "shielded_encryption_public_key": "441d731b87df8cae5e5a04dc33fb0ad2d16bb5eb2c3acef598f17cfdd47a0730"
+}

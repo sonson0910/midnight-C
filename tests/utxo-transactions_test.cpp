@@ -35,39 +35,42 @@ namespace
     class StubIndexerProvider : public IIndexerProvider
     {
     public:
+        static Json::Value make_created_output()
+        {
+            Json::Value created;
+            created["owner"] = "0xaddress123";
+            created["tokenType"] = "0x00";
+            created["value"] = "1000000";
+            created["outputIndex"] = 2;
+            created["intentHash"] = "0x" + std::string(64, 'b');
+            created["ctime"] = 1234567890;
+            created["registeredForDustGeneration"] = false;
+            created["spentAtTransaction"] = Json::nullValue;
+            return created;
+        }
+
+        static Json::Value make_transaction()
+        {
+            Json::Value tx;
+            tx["hash"] = "0x" + std::string(64, 'b');
+            tx["unshieldedCreatedOutputs"].append(make_created_output());
+            return tx;
+        }
+
         Json::Value execute_query(const std::string &query) override
         {
             Json::Value result;
 
-            // Midnight SDK uses unspentUtxos subscription with createdUtxos/spentUtxos
-            // Field names: owner, tokenType, value, outputIndex, intentHash, ctime, registeredForDustGeneration
-            if (query.find("unspentUtxos") != std::string::npos)
+            if (query.find("block") != std::string::npos)
             {
-                Json::Value entry;
-                entry["owner"] = "mn_addr_preprod1u9vv9jcrkl5v75z";
-                entry["tokenType"] = "0x00";
-                entry["value"] = "1000000";
-                entry["outputIndex"] = 2;
-                entry["intentHash"] = "0x" + std::string(64, 'b');
-                entry["ctime"] = 1234567890;
-                entry["registeredForDustGeneration"] = false;
-
-                result["data"]["unspentUtxos"].append(entry);
+                result["data"]["block"]["height"] = 609178;
+                result["data"]["block"]["transactions"].append(make_transaction());
                 return result;
             }
 
-            // Midnight SDK uses transactions with unshieldedCreatedOutputs/unshieldedSpentOutputs
             if (query.find("transactions") != std::string::npos)
             {
-                Json::Value created;
-                created["owner"] = "mn_addr_preprod1u9vv9jcrkl5v75z";
-                created["tokenType"] = "0x00";
-                created["value"] = "1000000";
-                created["outputIndex"] = 2;
-                created["intentHash"] = "0x" + std::string(64, 'b');
-                created["ctime"] = 1234567890;
-
-                result["data"]["transactions"]["unshieldedCreatedOutputs"].append(created);
+                result["data"]["transactions"] = make_transaction();
                 return result;
             }
 
@@ -77,24 +80,15 @@ namespace
         Json::Value execute_query_with_vars(const std::string &query,
                                            const std::map<std::string, Json::Value> &variables) override
         {
-            // For unspentUtxos queries, return the same data as execute_query
-            if (query.find("unspentUtxos") != std::string::npos)
+            (void)variables;
+            if (query.find("block") != std::string::npos)
             {
                 Json::Value result;
-                Json::Value entry;
-                entry["owner"] = "mn_addr_preprod1u9vv9jcrkl5v75z";
-                entry["tokenType"] = "0x00";
-                entry["value"] = "1000000";
-                entry["outputIndex"] = 2;
-                entry["intentHash"] = "0x" + std::string(64, 'b');
-                entry["ctime"] = 1234567890;
-                entry["registeredForDustGeneration"] = false;
-
-                result["data"]["unspentUtxos"].append(entry);
+                result["data"]["block"]["height"] = 609178;
+                result["data"]["block"]["transactions"].append(make_transaction());
                 return result;
             }
 
-            // For transaction queries, delegate to execute_query
             return execute_query(query);
         }
     };
@@ -601,7 +595,7 @@ TEST_F(UtxoTransactionsTest, ValidateDustAccounting_BalancedTransaction_ReturnsT
 TEST_F(UtxoTransactionsTest, ValidateProofs_ValidProofs_ReturnsTrue)
 {
     Transaction tx;
-    tx.proofs.push_back("0x" + std::string(256, 'p')); // 128 bytes
+    tx.proofs.push_back("0x" + std::string(256, 'b')); // 128-byte hex fixture
 
     bool valid = TransactionValidator().validate_proofs(tx);
 

@@ -20,8 +20,8 @@ namespace midnight::network
         enum class Network
         {
             DEVNET,   // Local development
-            PREVIEW,  // Preview testnet (recommended for dev)
-            TESTNET,  // Preprod testnet
+            PREVIEW,  // Preview testnet
+            PREPROD, // Preprod testnet (recommended for dev)
             STAGENET, // Staging network (future)
             MAINNET   // Production mainnet
         };
@@ -39,7 +39,7 @@ namespace midnight::network
             case Network::PREVIEW:
                 return "https://rpc.preview.midnight.network";
 
-            case Network::TESTNET:
+            case Network::PREPROD:
                 return "https://rpc.preprod.midnight.network";
 
             case Network::STAGENET:
@@ -66,7 +66,7 @@ namespace midnight::network
             case Network::PREVIEW:
                 return "https://indexer.preview.midnight.network/api/v4/graphql";
 
-            case Network::TESTNET:
+            case Network::PREPROD:
                 return "https://indexer.preprod.midnight.network/api/v4/graphql";
 
             case Network::STAGENET:
@@ -93,7 +93,7 @@ namespace midnight::network
             case Network::PREVIEW:
                 return "https://faucet.preview.midnight.network/";
 
-            case Network::TESTNET:
+            case Network::PREPROD:
                 return "https://faucet.preprod.midnight.network/";
 
             case Network::STAGENET:
@@ -118,8 +118,8 @@ namespace midnight::network
                 return "devnet";
             case Network::PREVIEW:
                 return "preview";
-            case Network::TESTNET:
-                return "testnet";
+            case Network::PREPROD:
+                return "preprod";
             case Network::STAGENET:
                 return "stagenet";
             case Network::MAINNET:
@@ -144,9 +144,9 @@ namespace midnight::network
                 return Network::DEVNET;
             if (normalized == "preview" || normalized == "midnight-preview")
                 return Network::PREVIEW;
-            if (normalized == "testnet" || normalized == "preprod" ||
-                normalized == "midnight-testnet" || normalized == "midnight-preprod")
-                return Network::TESTNET;
+            if (normalized == "preprod" || normalized == "midnight-preprod" ||
+                normalized == "midnight-testnet")
+                return Network::PREPROD;
             if (normalized == "stagenet" || normalized == "midnight-stagenet")
                 return Network::STAGENET;
             if (normalized == "mainnet" || normalized == "midnight-mainnet")

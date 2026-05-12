@@ -2042,6 +2042,15 @@ build tests/CMakeFiles/midnight-tests.dir/hd_wallet_test.cpp.obj: CXX_COMPILER__
   OBJECT_FILE_DIR = tests\CMakeFiles\midnight-tests.dir
   TARGET_SUPPORT_DIR = tests\CMakeFiles\midnight-tests.dir
 
+build tests/CMakeFiles/midnight-tests.dir/indexer_client_live_test.cpp.obj: CXX_COMPILER__midnight-tests_unscanned_Debug D$:/venera/midnight/night_fund/tests/indexer_client_live_test.cpp || cmake_object_order_depends_target_midnight-tests
+  CONFIG = Debug
+  DEP_FILE = tests\CMakeFiles\midnight-tests.dir\indexer_client_live_test.cpp.obj.d
+  FLAGS = -g -std=gnu++20
+  INCLUDES = -ID:/venera/midnight/night_fund/include -ID:/venera/midnight/night_fund/.cmake-build/manual/_deps/jsoncpp-src/include -ID:/venera/midnight/night_fund/build/_deps/fmt-src/include -ID:/venera/midnight/night_fund/.cmake-build/manual/_deps/jsoncpp-src/src/lib_json/../../include -isystem D:/venera/midnight/night_fund/.cmake-build/manual/_deps/googletest-src/googletest/include -isystem C:/Users/Admin/anaconda3/Library/include -isystem D:/venera/midnight/night_fund/.cmake-build/manual/_deps/googletest-src/googletest
+  OBJECT_DIR = tests\CMakeFiles\midnight-tests.dir
+  OBJECT_FILE_DIR = tests\CMakeFiles\midnight-tests.dir
+  TARGET_SUPPORT_DIR = tests\CMakeFiles\midnight-tests.dir
+
 build tests/CMakeFiles/midnight-tests.dir/monitoring-finality_test.cpp.obj: CXX_COMPILER__midnight-tests_unscanned_Debug D$:/venera/midnight/night_fund/tests/monitoring-finality_test.cpp || cmake_object_order_depends_target_midnight-tests
   CONFIG = Debug
   DEP_FILE = tests\CMakeFiles\midnight-tests.dir\monitoring-finality_test.cpp.obj.d
@@ -2158,7 +2167,7 @@ build tests/CMakeFiles/midnight-tests.dir/zk-proofs_test.cpp.obj: CXX_COMPILER__
 #############################################
 # Link the executable bin\midnight-tests.exe
 
-build bin/midnight-tests.exe: CXX_EXECUTABLE_LINKER__midnight-tests_Debug tests/CMakeFiles/midnight-tests.dir/compact-contracts_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/contract_manager_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/extrinsic_builder_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/hd_wallet_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/monitoring-finality_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/network_config_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/official_wallet_generator_integration_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/scale_codec_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/signing-submission_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/substrate_rpc_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/transaction_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/utxo-transactions_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/wallet_facade_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/wallet_manager_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/wallet_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/zk-proofs_test.cpp.obj | lib/libmidnight-core.a lib/libgtest.a lib/libgtest_main.a lib/libfmtd.a lib/libjsoncpp.a C$:/Users/Admin/anaconda3/Library/lib/libssl.lib C$:/Users/Admin/anaconda3/Library/lib/libcrypto.lib C$:/Users/Admin/anaconda3/Library/lib/libsodium.lib lib/libgtest.a || lib/libfmtd.a lib/libgtest.a lib/libgtest_main.a lib/libjsoncpp.a lib/libmidnight-core.a
+build bin/midnight-tests.exe: CXX_EXECUTABLE_LINKER__midnight-tests_Debug tests/CMakeFiles/midnight-tests.dir/compact-contracts_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/contract_manager_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/extrinsic_builder_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/hd_wallet_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/indexer_client_live_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/monitoring-finality_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/network_config_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/official_wallet_generator_integration_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/scale_codec_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/signing-submission_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/substrate_rpc_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/transaction_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/utxo-transactions_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/wallet_facade_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/wallet_manager_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/wallet_test.cpp.obj tests/CMakeFiles/midnight-tests.dir/zk-proofs_test.cpp.obj | lib/libmidnight-core.a lib/libgtest.a lib/libgtest_main.a lib/libfmtd.a lib/libjsoncpp.a C$:/Users/Admin/anaconda3/Library/lib/libssl.lib C$:/Users/Admin/anaconda3/Library/lib/libcrypto.lib C$:/Users/Admin/anaconda3/Library/lib/libsodium.lib lib/libgtest.a || lib/libfmtd.a lib/libgtest.a lib/libgtest_main.a lib/libjsoncpp.a lib/libmidnight-core.a
   CONFIG = Debug
   FLAGS = -g
   LINK_LIBRARIES = lib/libmidnight-core.a  lib/libgtest.a  lib/libgtest_main.a  lib/libfmtd.a  lib/libjsoncpp.a  C:/Users/Admin/anaconda3/Library/lib/libssl.lib  C:/Users/Admin/anaconda3/Library/lib/libcrypto.lib  C:/Users/Admin/anaconda3/Library/lib/libsodium.lib  -lws2_32  -lcrypt32  -lsecur32  -lbcrypt  -liphlpapi  lib/libgtest.a  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
@@ -3065,6 +3074,158 @@ build bin/midnight-wallet-tool.exe: CXX_EXECUTABLE_LINKER__midnight-wallet-tool_
   TARGET_SUPPORT_DIR = examples\CMakeFiles\midnight-wallet-tool.dir
 
 # =============================================================================
+# Object build statements for EXECUTABLE target wallet-generator-new
+
+
+#############################################
+# Order-only phony target for wallet-generator-new
+
+build cmake_object_order_depends_target_wallet-generator-new: phony || cmake_object_order_depends_target_fmt cmake_object_order_depends_target_jsoncpp_static cmake_object_order_depends_target_midnight-core
+
+build examples/CMakeFiles/wallet-generator-new.dir/wallet_generator_new.cpp.obj: CXX_COMPILER__wallet-generator-new_unscanned_Debug D$:/venera/midnight/night_fund/examples/wallet_generator_new.cpp || cmake_object_order_depends_target_wallet-generator-new
+  CONFIG = Debug
+  DEP_FILE = examples\CMakeFiles\wallet-generator-new.dir\wallet_generator_new.cpp.obj.d
+  FLAGS = -g -std=gnu++20
+  INCLUDES = -ID:/venera/midnight/night_fund/include -ID:/venera/midnight/night_fund/build/_deps/fmt-src/include -ID:/venera/midnight/night_fund/.cmake-build/manual/_deps/jsoncpp-src/src/lib_json/../../include -isystem C:/Users/Admin/anaconda3/Library/include
+  OBJECT_DIR = examples\CMakeFiles\wallet-generator-new.dir
+  OBJECT_FILE_DIR = examples\CMakeFiles\wallet-generator-new.dir
+  TARGET_SUPPORT_DIR = examples\CMakeFiles\wallet-generator-new.dir
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target wallet-generator-new
+
+
+#############################################
+# Link the executable bin\wallet-generator-new.exe
+
+build bin/wallet-generator-new.exe: CXX_EXECUTABLE_LINKER__wallet-generator-new_Debug examples/CMakeFiles/wallet-generator-new.dir/wallet_generator_new.cpp.obj | lib/libmidnight-core.a lib/libfmtd.a lib/libjsoncpp.a C$:/Users/Admin/anaconda3/Library/lib/libssl.lib C$:/Users/Admin/anaconda3/Library/lib/libcrypto.lib C$:/Users/Admin/anaconda3/Library/lib/libsodium.lib || lib/libfmtd.a lib/libjsoncpp.a lib/libmidnight-core.a
+  CONFIG = Debug
+  FLAGS = -g
+  LINK_LIBRARIES = lib/libmidnight-core.a  lib/libfmtd.a  lib/libjsoncpp.a  C:/Users/Admin/anaconda3/Library/lib/libssl.lib  C:/Users/Admin/anaconda3/Library/lib/libcrypto.lib  C:/Users/Admin/anaconda3/Library/lib/libsodium.lib  -lws2_32  -lcrypt32  -lsecur32  -lbcrypt  -liphlpapi  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
+  OBJECT_DIR = examples\CMakeFiles\wallet-generator-new.dir
+  POST_BUILD = cd .
+  PRE_LINK = cd .
+  TARGET_FILE = bin\wallet-generator-new.exe
+  TARGET_IMPLIB = lib\libwallet-generator-new.dll.a
+  TARGET_PDB = wallet-generator-new.exe.dbg
+  TARGET_SUPPORT_DIR = examples\CMakeFiles\wallet-generator-new.dir
+
+# =============================================================================
+# Object build statements for EXECUTABLE target fast_balance_checker
+
+
+#############################################
+# Order-only phony target for fast_balance_checker
+
+build cmake_object_order_depends_target_fast_balance_checker: phony || cmake_object_order_depends_target_fmt cmake_object_order_depends_target_jsoncpp_static cmake_object_order_depends_target_midnight-core
+
+build examples/CMakeFiles/fast_balance_checker.dir/fast_balance_checker.cpp.obj: CXX_COMPILER__fast_balance_checker_unscanned_Debug D$:/venera/midnight/night_fund/examples/fast_balance_checker.cpp || cmake_object_order_depends_target_fast_balance_checker
+  CONFIG = Debug
+  DEP_FILE = examples\CMakeFiles\fast_balance_checker.dir\fast_balance_checker.cpp.obj.d
+  FLAGS = -g -std=gnu++20
+  INCLUDES = -ID:/venera/midnight/night_fund/include -ID:/venera/midnight/night_fund/build/_deps/fmt-src/include -ID:/venera/midnight/night_fund/.cmake-build/manual/_deps/jsoncpp-src/src/lib_json/../../include -isystem C:/Users/Admin/anaconda3/Library/include
+  OBJECT_DIR = examples\CMakeFiles\fast_balance_checker.dir
+  OBJECT_FILE_DIR = examples\CMakeFiles\fast_balance_checker.dir
+  TARGET_SUPPORT_DIR = examples\CMakeFiles\fast_balance_checker.dir
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target fast_balance_checker
+
+
+#############################################
+# Link the executable bin\fast_balance_checker.exe
+
+build bin/fast_balance_checker.exe: CXX_EXECUTABLE_LINKER__fast_balance_checker_Debug examples/CMakeFiles/fast_balance_checker.dir/fast_balance_checker.cpp.obj | lib/libmidnight-core.a lib/libfmtd.a lib/libjsoncpp.a C$:/Users/Admin/anaconda3/Library/lib/libssl.lib C$:/Users/Admin/anaconda3/Library/lib/libcrypto.lib C$:/Users/Admin/anaconda3/Library/lib/libsodium.lib || lib/libfmtd.a lib/libjsoncpp.a lib/libmidnight-core.a
+  CONFIG = Debug
+  FLAGS = -g
+  LINK_LIBRARIES = lib/libmidnight-core.a  lib/libfmtd.a  lib/libjsoncpp.a  C:/Users/Admin/anaconda3/Library/lib/libssl.lib  C:/Users/Admin/anaconda3/Library/lib/libcrypto.lib  C:/Users/Admin/anaconda3/Library/lib/libsodium.lib  -lws2_32  -lcrypt32  -lsecur32  -lbcrypt  -liphlpapi  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
+  OBJECT_DIR = examples\CMakeFiles\fast_balance_checker.dir
+  POST_BUILD = cd .
+  PRE_LINK = cd .
+  TARGET_FILE = bin\fast_balance_checker.exe
+  TARGET_IMPLIB = lib\libfast_balance_checker.dll.a
+  TARGET_PDB = fast_balance_checker.exe.dbg
+  TARGET_SUPPORT_DIR = examples\CMakeFiles\fast_balance_checker.dir
+
+# =============================================================================
+# Object build statements for EXECUTABLE target balance_checker
+
+
+#############################################
+# Order-only phony target for balance_checker
+
+build cmake_object_order_depends_target_balance_checker: phony || cmake_object_order_depends_target_fmt cmake_object_order_depends_target_jsoncpp_static cmake_object_order_depends_target_midnight-core
+
+build examples/CMakeFiles/balance_checker.dir/balance_checker.cpp.obj: CXX_COMPILER__balance_checker_unscanned_Debug D$:/venera/midnight/night_fund/examples/balance_checker.cpp || cmake_object_order_depends_target_balance_checker
+  CONFIG = Debug
+  DEP_FILE = examples\CMakeFiles\balance_checker.dir\balance_checker.cpp.obj.d
+  FLAGS = -g -std=gnu++20
+  INCLUDES = -ID:/venera/midnight/night_fund/include -ID:/venera/midnight/night_fund/build/_deps/fmt-src/include -ID:/venera/midnight/night_fund/.cmake-build/manual/_deps/jsoncpp-src/src/lib_json/../../include -isystem C:/Users/Admin/anaconda3/Library/include
+  OBJECT_DIR = examples\CMakeFiles\balance_checker.dir
+  OBJECT_FILE_DIR = examples\CMakeFiles\balance_checker.dir
+  TARGET_SUPPORT_DIR = examples\CMakeFiles\balance_checker.dir
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target balance_checker
+
+
+#############################################
+# Link the executable bin\balance_checker.exe
+
+build bin/balance_checker.exe: CXX_EXECUTABLE_LINKER__balance_checker_Debug examples/CMakeFiles/balance_checker.dir/balance_checker.cpp.obj | lib/libmidnight-core.a lib/libfmtd.a lib/libjsoncpp.a C$:/Users/Admin/anaconda3/Library/lib/libssl.lib C$:/Users/Admin/anaconda3/Library/lib/libcrypto.lib C$:/Users/Admin/anaconda3/Library/lib/libsodium.lib || lib/libfmtd.a lib/libjsoncpp.a lib/libmidnight-core.a
+  CONFIG = Debug
+  FLAGS = -g
+  LINK_LIBRARIES = lib/libmidnight-core.a  lib/libfmtd.a  lib/libjsoncpp.a  C:/Users/Admin/anaconda3/Library/lib/libssl.lib  C:/Users/Admin/anaconda3/Library/lib/libcrypto.lib  C:/Users/Admin/anaconda3/Library/lib/libsodium.lib  -lws2_32  -lcrypt32  -lsecur32  -lbcrypt  -liphlpapi  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
+  OBJECT_DIR = examples\CMakeFiles\balance_checker.dir
+  POST_BUILD = cd .
+  PRE_LINK = cd .
+  TARGET_FILE = bin\balance_checker.exe
+  TARGET_IMPLIB = lib\libbalance_checker.dll.a
+  TARGET_PDB = balance_checker.exe.dbg
+  TARGET_SUPPORT_DIR = examples\CMakeFiles\balance_checker.dir
+
+# =============================================================================
+# Object build statements for EXECUTABLE target decode_address
+
+
+#############################################
+# Order-only phony target for decode_address
+
+build cmake_object_order_depends_target_decode_address: phony || cmake_object_order_depends_target_fmt cmake_object_order_depends_target_jsoncpp_static cmake_object_order_depends_target_midnight-core
+
+build examples/CMakeFiles/decode_address.dir/decode_address.cpp.obj: CXX_COMPILER__decode_address_unscanned_Debug D$:/venera/midnight/night_fund/examples/decode_address.cpp || cmake_object_order_depends_target_decode_address
+  CONFIG = Debug
+  DEP_FILE = examples\CMakeFiles\decode_address.dir\decode_address.cpp.obj.d
+  FLAGS = -g -std=gnu++20
+  INCLUDES = -ID:/venera/midnight/night_fund/include -ID:/venera/midnight/night_fund/build/_deps/fmt-src/include -ID:/venera/midnight/night_fund/.cmake-build/manual/_deps/jsoncpp-src/src/lib_json/../../include -isystem C:/Users/Admin/anaconda3/Library/include
+  OBJECT_DIR = examples\CMakeFiles\decode_address.dir
+  OBJECT_FILE_DIR = examples\CMakeFiles\decode_address.dir
+  TARGET_SUPPORT_DIR = examples\CMakeFiles\decode_address.dir
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target decode_address
+
+
+#############################################
+# Link the executable bin\decode_address.exe
+
+build bin/decode_address.exe: CXX_EXECUTABLE_LINKER__decode_address_Debug examples/CMakeFiles/decode_address.dir/decode_address.cpp.obj | lib/libmidnight-core.a lib/libfmtd.a lib/libjsoncpp.a C$:/Users/Admin/anaconda3/Library/lib/libssl.lib C$:/Users/Admin/anaconda3/Library/lib/libcrypto.lib C$:/Users/Admin/anaconda3/Library/lib/libsodium.lib || lib/libfmtd.a lib/libjsoncpp.a lib/libmidnight-core.a
+  CONFIG = Debug
+  FLAGS = -g
+  LINK_LIBRARIES = lib/libmidnight-core.a  lib/libfmtd.a  lib/libjsoncpp.a  C:/Users/Admin/anaconda3/Library/lib/libssl.lib  C:/Users/Admin/anaconda3/Library/lib/libcrypto.lib  C:/Users/Admin/anaconda3/Library/lib/libsodium.lib  -lws2_32  -lcrypt32  -lsecur32  -lbcrypt  -liphlpapi  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
+  OBJECT_DIR = examples\CMakeFiles\decode_address.dir
+  POST_BUILD = cd .
+  PRE_LINK = cd .
+  TARGET_FILE = bin\decode_address.exe
+  TARGET_IMPLIB = lib\libdecode_address.dll.a
+  TARGET_PDB = decode_address.exe.dbg
+  TARGET_SUPPORT_DIR = examples\CMakeFiles\decode_address.dir
+
+# =============================================================================
 # Object build statements for EXECUTABLE target indexer-probe
 
 
@@ -3279,9 +3440,21 @@ build NightlyTest: phony _deps/jsoncpp-build/NightlyTest
 
 build NightlyUpdate: phony _deps/jsoncpp-build/NightlyUpdate
 
+build balance_checker: phony bin/balance_checker.exe
+
+build balance_checker.exe: phony bin/balance_checker.exe
+
+build decode_address: phony bin/decode_address.exe
+
+build decode_address.exe: phony bin/decode_address.exe
+
 build e2e_transfer_night: phony bin/e2e_transfer_night.exe
 
 build e2e_transfer_night.exe: phony bin/e2e_transfer_night.exe
+
+build fast_balance_checker: phony bin/fast_balance_checker.exe
+
+build fast_balance_checker.exe: phony bin/fast_balance_checker.exe
 
 build fmt: phony lib/libfmtd.a
 
@@ -3370,6 +3543,10 @@ build phase4d_ledger_state_sync_example: phony bin/phase4d_ledger_state_sync_exa
 build phase4d_ledger_state_sync_example.exe: phony bin/phase4d_ledger_state_sync_example.exe
 
 build wallet-generator: phony bin/wallet-generator.exe
+
+build wallet-generator-new: phony bin/wallet-generator-new.exe
+
+build wallet-generator-new.exe: phony bin/wallet-generator-new.exe
 
 build wallet-generator.exe: phony bin/wallet-generator.exe
 
@@ -3462,7 +3639,7 @@ build _deps/jsoncpp-build/src/test_lib_json/all: phony bin/jsoncpp_test.exe
 #############################################
 # Folder: D:/venera/midnight/night_fund/.cmake-build/manual/examples
 
-build examples/all: phony bin/mqtt_example.exe bin/http_example.exe bin/http_connectivity_test.exe bin/phase4a_zk_types_example.exe bin/phase4b_private_state_example.exe bin/phase4c_proof_server_resilience_example.exe bin/phase4d_ledger_state_sync_example.exe bin/wallet-generator.exe bin/native_contract_interactor_example.exe bin/e2e_transfer_night.exe bin/midnight-wallet-tool.exe bin/indexer-probe.exe bin/ws-probe.exe
+build examples/all: phony bin/mqtt_example.exe bin/http_example.exe bin/http_connectivity_test.exe bin/phase4a_zk_types_example.exe bin/phase4b_private_state_example.exe bin/phase4c_proof_server_resilience_example.exe bin/phase4d_ledger_state_sync_example.exe bin/wallet-generator.exe bin/native_contract_interactor_example.exe bin/e2e_transfer_night.exe bin/midnight-wallet-tool.exe bin/wallet-generator-new.exe bin/fast_balance_checker.exe bin/balance_checker.exe bin/decode_address.exe bin/indexer-probe.exe bin/ws-probe.exe
 
 # =============================================================================
 

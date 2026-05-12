@@ -94,7 +94,7 @@ namespace
         }
         if (indexer_url.find("preview") != std::string::npos)
         {
-            return "https://rpc.preview.midnight.network";
+            return "https://rpc.preprod.midnight.network";
         }
         if (indexer_url.find("127.0.0.1") != std::string::npos || indexer_url.find("localhost") != std::string::npos)
         {
@@ -481,6 +481,10 @@ namespace midnight::monitoring_finality
                     continue;
                 }
 
+                if (!monitoring_.load()) {
+                    break;
+                }
+
                 StateChangeEvent event;
                 event.contract_address = "chain";
                 event.state_key = "best_block_hash";
@@ -533,6 +537,10 @@ namespace midnight::monitoring_finality
                 // Retry next interval.
             }
 
+            if (!monitoring_.load()) {
+                break;
+            }
+
             if (current_balance != last_balance) {
                 try {
                     callback(current_balance);
@@ -576,11 +584,19 @@ namespace midnight::monitoring_finality
                 // Retry next interval.
             }
 
+            if (!monitoring_.load()) {
+                break;
+            }
+
             if (!contract_address.empty()) {
                 current_state += "|contract=" + contract_address;
             }
             if (!state_key.empty()) {
                 current_state += "|key=" + state_key;
+            }
+
+            if (!monitoring_.load()) {
+                break;
             }
 
             if (!current_state.empty() && current_state != last_state) {

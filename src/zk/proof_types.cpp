@@ -7,6 +7,61 @@
 
 namespace midnight::zk
 {
+    namespace
+    {
+        std::string strip_hex_prefix(const std::string &value)
+        {
+            if (value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0)
+            {
+                return value.substr(2);
+            }
+            return value;
+        }
+
+        int hex_nibble(char c)
+        {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+            if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+            return -1;
+        }
+
+        std::vector<uint8_t> parse_hex_bytes(const std::string &hex, const char *kind)
+        {
+            const std::string normalized = strip_hex_prefix(hex);
+            if (normalized.size() % 2 != 0)
+            {
+                throw std::invalid_argument(fmt::format("Odd-length {} hex", kind));
+            }
+
+            std::vector<uint8_t> bytes;
+            bytes.reserve(normalized.length() / 2);
+            for (size_t i = 0; i < normalized.length(); i += 2)
+            {
+                const int hi = hex_nibble(normalized[i]);
+                const int lo = hex_nibble(normalized[i + 1]);
+                if (hi < 0 || lo < 0)
+                {
+                    throw std::invalid_argument(fmt::format("Non-hex character in {} hex", kind));
+                }
+                bytes.push_back(static_cast<uint8_t>((hi << 4) | lo));
+            }
+
+            return bytes;
+        }
+
+        bool is_even_hex(const std::string &value)
+        {
+            const std::string normalized = strip_hex_prefix(value);
+            if (normalized.empty() || normalized.size() % 2 != 0)
+            {
+                return false;
+            }
+            return std::all_of(normalized.begin(), normalized.end(), [](unsigned char c) {
+                return std::isxdigit(c) != 0;
+            });
+        }
+    }
 
     // ============================================================================
     // ProofData Implementation
@@ -25,24 +80,7 @@ namespace midnight::zk
     ProofData ProofData::from_hex(const std::string &hex)
     {
         ProofData proof;
-        proof.proof_bytes.reserve(hex.length() / 2);
-
-        for (size_t i = 0; i < hex.length(); i += 2)
-        {
-            auto nibble = [](char c) -> int {
-                if (c >= '0' && c <= '9') return c - '0';
-                if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
-                if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
-                return -1;
-            };
-            int hi = nibble(hex[i]);
-            int lo = nibble(hex[i + 1]);
-            if (hi < 0 || lo < 0) {
-                throw std::invalid_argument("Non-hex character in proof hex");
-            }
-            proof.proof_bytes.push_back(static_cast<uint8_t>((hi << 4) | lo));
-        }
-
+        proof.proof_bytes = parse_hex_bytes(hex, "proof");
         return proof;
     }
 
@@ -125,24 +163,7 @@ namespace midnight::zk
     WitnessOutput WitnessOutput::from_hex(const std::string &hex)
     {
         WitnessOutput wo;
-        wo.output_bytes.reserve(hex.length() / 2);
-
-        for (size_t i = 0; i < hex.length(); i += 2)
-        {
-            auto nibble = [](char c) -> int {
-                if (c >= '0' && c <= '9') return c - '0';
-                if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
-                if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
-                return -1;
-            };
-            int hi = nibble(hex[i]);
-            int lo = nibble(hex[i + 1]);
-            if (hi < 0 || lo < 0) {
-                throw std::invalid_argument("Non-hex character in witness hex");
-            }
-            wo.output_bytes.push_back(static_cast<uint8_t>((hi << 4) | lo));
-        }
-
+        wo.output_bytes = parse_hex_bytes(hex, "witness");
         return wo;
     }
 
@@ -459,17 +480,7 @@ namespace midnight::zk
 
         std::vector<uint8_t> hex_to_commitment(const std::string &hex)
         {
-            std::vector<uint8_t> commitment;
-            commitment.reserve(hex.length() / 2);
-
-            for (size_t i = 0; i < hex.length(); i += 2)
-            {
-                std::string byte_str = hex.substr(i, 2);
-                uint8_t byte = static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16));
-                commitment.push_back(byte);
-            }
-
-            return commitment;
+            return parse_hex_bytes(hex, "commitment");
         }
 
         bool is_valid_proof_size(size_t size)
@@ -493,13 +504,9 @@ namespace midnight::zk
                 {
                     return false;
                 }
-                // Verify it's valid hex
-                for (char c : hex_value)
+                if (!is_even_hex(hex_value))
                 {
-                    if (!std::isxdigit(c))
-                    {
-                        return false;
-                    }
+                    return false;
                 }
             }
 

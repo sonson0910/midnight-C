@@ -55,12 +55,23 @@ namespace midnight::utxo_transactions
         // Note: midnight::util::is_hex_string requires even length;
         // is_signature_hex already checks exact length so this is compatible.
         using midnight::util::is_hex_string;
+        using midnight::util::strip_hex_prefix;
 
         bool is_signature_hex(const std::string &signature)
         {
             return signature.size() == 130 &&
                    signature.rfind("0x", 0) == 0 &&
                    is_hex_string(signature.substr(2));
+        }
+
+        bool is_proof_hex(const std::string &proof)
+        {
+            const std::string payload = strip_hex_prefix(proof);
+            const size_t proof_bytes = payload.size() / 2;
+            return !payload.empty() &&
+                   is_hex_string(payload) &&
+                   proof_bytes >= 64 &&
+                   proof_bytes <= (10 * 1024 * 1024);
         }
 
         uint64_t derive_estimated_dust_per_utxo(const TransactionBuilderContext &context)
@@ -208,50 +219,138 @@ namespace midnight::utxo_transactions
             {
                 throw std::runtime_error("Indexer provider is not configured");
             }
+            constexpr uint32_t kFirstIndexedBlock = 609178u;
+            uint32_t tip_height = kFirstIndexedBlock;
 
-            // Midnight SDK GraphQL query matching the indexer's unspentUtxos field
-            std::string query = R"QUERY(
-            query UnspentUtxos($address: UnshieldedAddress!) {
-                unspentUtxos(address: $address) {
-                    owner
-                    tokenType
-                    value
-                    outputIndex
-                    intentHash
-                    ctime
-                    registeredForDustGeneration
+            const std::string tip_query = R"QUERY(
+            query TipHeight {
+                block { height }
+            }
+            )QUERY";
+
+            auto tip_result = indexer_provider_->execute_query(tip_query);
+            if (tip_result.isMember("data") && tip_result["data"].isMember("block") &&
+                !tip_result["data"]["block"].isNull())
+            {
+                const auto &block = tip_result["data"]["block"];
+                if (block.isMember("height"))
+                {
+                    try
+                    {
+                        if (block["height"].isUInt())
+                        {
+                            tip_height = block["height"].asUInt();
+                        }
+                        else if (block["height"].isString())
+                        {
+                            tip_height = static_cast<uint32_t>(
+                                std::stoul(block["height"].asString()));
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+            }
+
+            if (tip_height == 0)
+            {
+                return std::vector<Utxo>{};
+            }
+
+            const uint32_t from_block = tip_height < kFirstIndexedBlock ? 1u : kFirstIndexedBlock;
+
+            const std::string block_query = R"QUERY(
+            query BlockByHeight($height: Int!) {
+                block(offset: { height: $height }) {
+                    height
+                    transactions {
+                        hash
+                        unshieldedCreatedOutputs {
+                            owner
+                            tokenType
+                            value
+                            outputIndex
+                            intentHash
+                            ctime
+                            registeredForDustGeneration
+                            spentAtTransaction {
+                                hash
+                            }
+                        }
+                    }
                 }
             }
             )QUERY";
 
-            auto result = indexer_provider_->execute_query_with_vars(
-                query, {{"address", Json::Value(address)}});
-
             std::vector<Utxo> utxos;
-            if (result.isMember("data") && result["data"].isMember("unspentUtxos"))
+            const std::string normalized_address = midnight::util::to_lower_copy(address);
+
+            for (uint32_t h = from_block; h <= tip_height; ++h)
             {
-                auto utxo_array = result["data"]["unspentUtxos"];
-                for (const auto &u : utxo_array)
+                auto result = indexer_provider_->execute_query_with_vars(
+                    block_query, {{"height", static_cast<int>(h)}});
+
+                if (!result.isMember("data") || !result["data"].isMember("block") ||
+                    result["data"]["block"].isNull())
                 {
-                    Utxo utxo;
-                    utxo.address = u.get("owner", "").asString();
-                    utxo.token_type = u.get("tokenType", "").asString();
-                    utxo.value = u.get("value", "0").asString();
-                    utxo.output_index = u.get("outputIndex", 0).asUInt();
-                    utxo.intent_hash = u.get("intentHash", "").asString();
-                    utxo.ctime = u.get("ctime", 0).asUInt64();
-                    utxo.registered_for_dust = u.get("registeredForDustGeneration", false).asBool();
+                    continue;
+                }
 
-                    // Extract tx_hash from intentHash (last 32 bytes = 64 hex chars)
-                    std::string ih = midnight::util::strip_hex_prefix(utxo.intent_hash);
-                    if (ih.size() >= 64) {
-                        utxo.tx_hash = "0x" + ih.substr(ih.size() - 64);
-                    } else {
-                        utxo.tx_hash = utxo.intent_hash;
+                const auto &block = result["data"]["block"];
+                if (!block.isMember("transactions"))
+                {
+                    continue;
+                }
+
+                const auto &txs = block["transactions"];
+                auto handle_tx = [&](const Json::Value &tx) {
+                    const std::string tx_hash = tx.get("hash", "").asString();
+                    if (!tx.isMember("unshieldedCreatedOutputs"))
+                    {
+                        return;
                     }
+                    for (const auto &out : tx["unshieldedCreatedOutputs"])
+                    {
+                        const std::string owner = out.get("owner", "").asString();
+                        if (midnight::util::to_lower_copy(owner) != normalized_address)
+                        {
+                            continue;
+                        }
 
-                    utxo.is_spent = false;
-                    utxos.push_back(utxo);
+                        if (out.isMember("spentAtTransaction") &&
+                            !out["spentAtTransaction"].isNull())
+                        {
+                            continue;
+                        }
+
+                        Utxo utxo;
+                        utxo.tx_hash = tx_hash;
+                        utxo.address = owner;
+                        utxo.token_type = out.get("tokenType", "").asString();
+                        utxo.value = out.get("value", "0").asString();
+                        utxo.output_index = out.get("outputIndex", 0).asUInt();
+                        utxo.intent_hash = out.get("intentHash", "").asString();
+                        utxo.amount_commitment = utxo.intent_hash;
+                        utxo.ctime = out.get("ctime", 0).asUInt64();
+                        utxo.registered_for_dust =
+                            out.get("registeredForDustGeneration", false).asBool();
+                        utxo.confirmed_height = block.get("height", h).asUInt();
+                        utxo.is_spent = false;
+                        utxos.push_back(utxo);
+                    }
+                };
+
+                if (txs.isArray())
+                {
+                    for (const auto &tx : txs)
+                    {
+                        handle_tx(tx);
+                    }
+                }
+                else if (txs.isObject())
+                {
+                    handle_tx(txs);
                 }
             }
 
@@ -281,8 +380,9 @@ namespace midnight::utxo_transactions
             // Midnight SDK uses transactions with unshieldedCreatedOutputs/unshieldedSpentOutputs
             // Each output has: owner, tokenType, value, outputIndex, intentHash, ctime
             std::string query = R"QUERY(
-            query UtxoDetails($txHash: HexEncoded!, $outputIndex: Int!) {
+            query UtxoDetails($txHash: HexEncoded!) {
                 transactions(offset: {hash: $txHash}) {
+                    hash
                     unshieldedCreatedOutputs {
                         owner
                         tokenType
@@ -290,14 +390,8 @@ namespace midnight::utxo_transactions
                         outputIndex
                         intentHash
                         ctime
-                    }
-                    unshieldedSpentOutputs {
-                        owner
-                        tokenType
-                        value
-                        outputIndex
-                        intentHash
-                        ctime
+                        registeredForDustGeneration
+                        spentAtTransaction { hash }
                     }
                 }
             }
@@ -308,54 +402,78 @@ namespace midnight::utxo_transactions
                 throw std::runtime_error("Indexer provider is not configured");
             }
 
+            std::string clean_hash = midnight::util::strip_hex_prefix(tx_hash);
+            auto colon_pos = clean_hash.find(':');
+            if (colon_pos != std::string::npos)
+            {
+                clean_hash = clean_hash.substr(0, colon_pos);
+            }
+
             auto result = indexer_provider_->execute_query_with_vars(
                 query,
-                {{"txHash", tx_hash}, {"outputIndex", static_cast<int>(output_index)}});
+                {{"txHash", midnight::util::ensure_hex_prefix(clean_hash)}});
 
             if (result.isMember("data") && result["data"].isMember("transactions"))
             {
-                auto tx = result["data"]["transactions"];
-                
-                // Check created outputs
-                if (tx.isMember("unshieldedCreatedOutputs"))
-                {
+                const auto &txs = result["data"]["transactions"];
+
+                auto handle_tx = [&](const Json::Value &tx) -> std::optional<Utxo> {
+                    if (!tx.isMember("unshieldedCreatedOutputs"))
+                    {
+                        return {};
+                    }
+
                     for (const auto &u : tx["unshieldedCreatedOutputs"])
                     {
                         if (u.get("outputIndex", 0).asUInt() == output_index)
                         {
                             Utxo utxo;
-                            utxo.tx_hash = tx_hash;
+                            utxo.tx_hash = tx.get("hash", "").asString();
                             utxo.address = u.get("owner", "").asString();
                             utxo.token_type = u.get("tokenType", "").asString();
                             utxo.value = u.get("value", "0").asString();
                             utxo.output_index = u.get("outputIndex", 0).asUInt();
                             utxo.intent_hash = u.get("intentHash", "").asString();
+                            utxo.amount_commitment = utxo.intent_hash;
                             utxo.ctime = u.get("ctime", 0).asUInt64();
-                            utxo.is_spent = false;
+                            utxo.registered_for_dust =
+                                u.get("registeredForDustGeneration", false).asBool();
+
+                            if (u.isMember("spentAtTransaction") &&
+                                !u["spentAtTransaction"].isNull())
+                            {
+                                utxo.is_spent = true;
+                                utxo.spending_tx_hash =
+                                    u["spentAtTransaction"].get("hash", "").asString();
+                            }
+                            else
+                            {
+                                utxo.is_spent = false;
+                            }
+                            if (utxo.tx_hash.empty())
+                            {
+                                utxo.tx_hash = midnight::util::ensure_hex_prefix(clean_hash);
+                            }
                             return utxo;
+                        }
+                    }
+                    return {};
+                };
+
+                if (txs.isArray())
+                {
+                    for (const auto &tx : txs)
+                    {
+                        auto found = handle_tx(tx);
+                        if (found)
+                        {
+                            return found;
                         }
                     }
                 }
-                
-                // Check spent outputs
-                if (tx.isMember("unshieldedSpentOutputs"))
+                else if (txs.isObject())
                 {
-                    for (const auto &u : tx["unshieldedSpentOutputs"])
-                    {
-                        if (u.get("outputIndex", 0).asUInt() == output_index)
-                        {
-                            Utxo utxo;
-                            utxo.tx_hash = tx_hash;
-                            utxo.address = u.get("owner", "").asString();
-                            utxo.token_type = u.get("tokenType", "").asString();
-                            utxo.value = u.get("value", "0").asString();
-                            utxo.output_index = u.get("outputIndex", 0).asUInt();
-                            utxo.intent_hash = u.get("intentHash", "").asString();
-                            utxo.ctime = u.get("ctime", 0).asUInt64();
-                            utxo.is_spent = true;
-                            return utxo;
-                        }
-                    }
+                    return handle_tx(txs);
                 }
             }
 
@@ -400,7 +518,7 @@ namespace midnight::utxo_transactions
             }
 
             // Query the UTXO to verify it exists and get its status
-            auto utxo_opt = query_utxo(input.outpoint, input.output_index);
+            auto utxo_opt = query_utxo(tx_hash, input.output_index);
 
             if (!utxo_opt)
             {
@@ -1283,11 +1401,9 @@ namespace midnight::utxo_transactions
 
         for (const auto &proof : tx.proofs)
         {
-            // Each proof should be 128 bytes = 256 hex chars
-            if (proof.size() != 258)
-            { // "0x" + 256 chars
-                last_error_ = "Proof not well-formed: size " + std::to_string(proof.size()) +
-                            " (expected 258)";
+            if (!is_proof_hex(proof))
+            {
+                last_error_ = "Proof not well-formed: expected even-length hex payload of at least 64 bytes";
                 return false;
             }
         }

@@ -256,17 +256,25 @@ namespace midnight::protocols::grpc
                 auto tx_json = indexer_->query_transaction(tx_hash);
                 if (!tx_json.empty())
                 {
-                    if (tx_json.contains("blockHeight"))
+                    if (tx_json.contains("block") && tx_json["block"].is_object())
                     {
-                        response->set_block_height(tx_json["blockHeight"].get<uint32_t>());
-                    }
-                    if (tx_json.contains("blockHash"))
-                    {
-                        response->set_block_hash(tx_json["blockHash"].get<std::string>());
+                        const auto& block = tx_json["block"];
+                        if (block.contains("height") && !block["height"].is_null())
+                        {
+                            response->set_block_height(block["height"].get<uint32_t>());
+                        }
+                        if (block.contains("hash") && !block["hash"].is_null())
+                        {
+                            response->set_block_hash(block["hash"].get<std::string>());
+                        }
                     }
                     if (tx_json.contains("finalized"))
                     {
                         response->set_finalized(tx_json["finalized"].get<bool>());
+                    }
+                    else if (tx_json.contains("block") && !tx_json["block"].is_null())
+                    {
+                        response->set_finalized(true);
                     }
                 }
             }
@@ -376,11 +384,11 @@ namespace midnight::protocols::grpc
 
         auto logger = midnight::g_logger;
 
-        if (!node_rpc_)
+        if (!node_rpc_ && !indexer_)
         {
             if (logger)
             {
-                logger->error("GetBlock: MidnightNodeRPC not configured");
+                logger->error("GetBlock: neither MidnightNodeRPC nor IndexerClient configured");
             }
             return Status::OK;
         }
@@ -397,20 +405,24 @@ namespace midnight::protocols::grpc
                 {
                     logger->debug("GetBlock: querying by height " + std::to_string(block_height));
                 }
-                // MidnightNodeRPC does not expose a get_block_by_height RPC method.
-                // The IndexerClient similarly lacks a direct block-by-height query.
-                // As a best-effort, return the chain tip hash paired with the requested height.
-                // Full block data (header, transactions) requires a dedicated block query API
-                // that is not yet available in the RPC or indexer.
-                auto [tip_height, tip_hash] = node_rpc_->get_chain_tip();
-                (void)tip_height;
-                block_hash = tip_hash;
+                // Historical block lookup is provided by the Indexer. Node RPC is used
+                // only as a raw fallback when no indexer has been injected.
+                if (indexer_)
+                {
+                    auto block = indexer_->query_block(block_height);
+                    if (!block.hash.empty())
+                    {
+                        block_hash = block.hash;
+                        block_height = static_cast<uint32_t>(block.height);
+                    }
+                }
+                else
+                {
+                    block_hash = node_rpc_->get_block_hash(block_height);
+                }
                 if (logger)
                 {
-                    logger->warn("GetBlock: height " + std::to_string(block_height) +
-                               " queried; MidnightNodeRPC lacks get_block_by_height — "
-                               "returning tip hash. Implement get_block_by_height in MidnightNodeRPC "
-                               "or add IndexerClient::query_block_by_height() for full block data.");
+                    logger->debug("GetBlock: resolved height " + std::to_string(block_height));
                 }
             }
             else if (request->has_by_hash())
@@ -420,30 +432,35 @@ namespace midnight::protocols::grpc
                 {
                     logger->debug("GetBlock: querying by hash " + block_hash);
                 }
-                // MidnightNodeRPC does not expose a get_block_by_hash RPC method.
-                // Return the requested hash in the response and note the limitation.
-                if (logger)
+                if (indexer_)
                 {
-                    logger->warn("GetBlock: block-by-hash queried; "
-                               "MidnightNodeRPC lacks get_block_by_hash — "
-                               "hash set from request. Implement get_block_by_hash in MidnightNodeRPC "
-                               "or add IndexerClient::query_block_by_hash() for full block data.");
+                    auto block = indexer_->query_block(0, block_hash);
+                    if (!block.hash.empty())
+                    {
+                        block_hash = block.hash;
+                        block_height = static_cast<uint32_t>(block.height);
+                    }
                 }
-                // Set height from chain tip as best-effort reference
-                auto [tip_height, tip_hash] = node_rpc_->get_chain_tip();
-                (void)tip_hash;
-                block_height = static_cast<uint32_t>(tip_height);
             }
             else
             {
                 // No query specified — return chain tip
-                auto [tip_height, tip_hash] = node_rpc_->get_chain_tip();
-                block_height = static_cast<uint32_t>(tip_height);
-                block_hash = tip_hash;
+                if (indexer_)
+                {
+                    auto block = indexer_->query_block();
+                    block_height = static_cast<uint32_t>(block.height);
+                    block_hash = block.hash;
+                }
+                else
+                {
+                    auto [tip_height, tip_hash] = node_rpc_->get_chain_tip();
+                    block_height = static_cast<uint32_t>(tip_height);
+                    block_hash = tip_hash;
+                }
                 if (logger)
                 {
                     logger->debug("GetBlock: no query specified, returning chain tip height " +
-                                  std::to_string(tip_height));
+                                  std::to_string(block_height));
                 }
             }
 
@@ -706,21 +723,32 @@ namespace midnight::protocols::grpc
             logger->debug("GetBalance: querying balance for " + address);
         }
 
-        if (!node_rpc_)
+        if (!indexer_ && !node_rpc_)
         {
             if (logger)
             {
-                logger->error("GetBalance: MidnightNodeRPC not configured");
+                logger->error("GetBalance: neither IndexerClient nor MidnightNodeRPC configured");
             }
             return Status::OK;
         }
 
         try
         {
-            uint64_t balance = node_rpc_->get_balance(address);
+            uint64_t balance = 0;
+            uint64_t dust = 0;
+            if (indexer_)
+            {
+                auto state = indexer_->query_wallet_state(address);
+                balance = state.unshielded_balance.empty() ? 0 : std::stoull(state.unshielded_balance);
+                dust = state.dust_balance.empty() ? 0 : std::stoull(state.dust_balance);
+            }
+            else
+            {
+                balance = node_rpc_->get_balance(address);
+            }
             response->set_unshielded(balance);
-            response->set_dust(0);
-            response->set_total(balance);
+            response->set_dust(dust);
+            response->set_total(balance + dust);
 
             if (logger)
             {

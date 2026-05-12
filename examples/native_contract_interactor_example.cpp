@@ -1,10 +1,10 @@
 /**
  * @file native_contract_interactor_example.cpp
- * @brief REAL transfer on Midnight Preview network — NO MOCKS
+ * @brief REAL transfer on Midnight Preprod network — NO MOCKS
  *
  * Performs REAL network calls to:
- *   1. Midnight Node (rpc.preview.midnight.network) — JSON-RPC
- *   2. Indexer (indexer.preview.midnight.network/api/v4/graphql) — GraphQL
+ *   1. Midnight Node (rpc.preprod.midnight.network) — JSON-RPC
+ *   2. Indexer (indexer.preprod.midnight.network/api/v4/graphql) — GraphQL
  *   3. Proof Server (localhost:6300) — HTTP (optional)
  *
  * Usage:
@@ -89,12 +89,12 @@ int main(int argc, char *argv[])
     print_banner("Midnight C++ SDK — Preview Network (v4 API, Zero Node.js)");
 
     // ──────────────────────────────────────
-    // Step 1: Configuration — REAL preview endpoints
+    // Step 1: Configuration — REAL preprod endpoints
     // ──────────────────────────────────────
-    print_step(1, "Configuring native clients (Preview network, v4 API)...");
+    print_step(1, "Configuring native clients (Preprod network, v4 API)...");
 
-    const std::string node_url = "https://rpc.preview.midnight.network";
-    const std::string indexer_url = "https://indexer.preview.midnight.network/api/v4/graphql";
+    const std::string node_url = "https://rpc.preprod.midnight.network";
+    const std::string indexer_url = "https://indexer.preprod.midnight.network/api/v4/graphql";
     const std::string proof_server_url = "http://localhost:6300";
 
     print_info("Node RPC", node_url);
@@ -438,11 +438,11 @@ int main(int argc, char *argv[])
               << "    2. REAL connection to Preview Indexer (v4 API)      [OK]\n"
               << "    3. Native wallet derivation (Ed25519/libsodium)     [OK]\n"
               << "    4. Midnight-specific RPC (zswap, ledger, api)       [OK]\n"
-              << "    5. Real extrinsic submission to preview network     [OK]\n"
+              << "    5. Real extrinsic submission to preprod network     [OK]\n"
               << "\n"
               << "  Endpoints:\n"
-              << "    Node:    https://rpc.preview.midnight.network\n"
-              << "    Indexer: https://indexer.preview.midnight.network/api/v4/graphql\n"
+              << "    Node:    https://rpc.preprod.midnight.network\n"
+              << "    Indexer: https://indexer.preprod.midnight.network/api/v4/graphql\n"
               << "\n"
               << "  ALL communication is pure C++ (cpp-httplib + libsodium)\n"
               << "  ZERO Node.js processes were spawned.\n\n";

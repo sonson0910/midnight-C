@@ -17,8 +17,8 @@ using json = nlohmann::json;
 int main() {
     std::cout << "=== WebSocket Test to Midnight Indexer ===\n\n";
     
-    // Test endpoint: wss://indexer.preview.midnight.network/api/v4/graphql/ws
-    std::string ws_url = "wss://indexer.preview.midnight.network/api/v4/graphql/ws";
+    // Test endpoint: wss://indexer.preprod.midnight.network/api/v4/graphql/ws
+    std::string ws_url = "wss://indexer.preprod.midnight.network/api/v4/graphql/ws";
     std::cout << "Connecting to: " << ws_url << "\n\n";
     
     // Create subscription client

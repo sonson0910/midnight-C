@@ -1027,24 +1027,33 @@ BalancingRecipe WalletFacade::balance_unbound_transaction(
 
     uint64_t shortfall = input_total > output_total ? input_total - output_total : 0;
 
-    // Step 2: Create TransactionBalancer with available UTXOs
-    TransactionBalancer balancer(state_.unshielded.available_coins, shortfall, "NIGHT");
-
     // For unbound TXs, unshielded balancing happens IN-PLACE (modifies the base TX)
     json base_tx = unbound_tx;
     uint64_t total_fee = 0;
 
     if (token_kinds.should_balance_unshielded && shortfall > 0) {
-        // Select UTXOs to cover shortfall
         uint64_t fee_estimate = TransactionBalancer::calculate_fee(1, 1, false);
-        auto selection = balancer.select_utxos(shortfall + fee_estimate);
+        const uint64_t target = shortfall + fee_estimate;
 
-        if (selection.selected.empty()) {
+        std::vector<UtxoWithMeta> selected;
+        uint64_t selected_total = 0;
+        for (const auto& utxo : state_.unshielded.available_coins) {
+            if (utxo.token_type != "NIGHT") {
+                continue;
+            }
+            selected.push_back(utxo);
+            selected_total += utxo.amount;
+            if (selected_total >= target) {
+                break;
+            }
+        }
+
+        if (selected.empty() || selected_total < target) {
             recipe.error = "Insufficient UTXOs for unshielded balancing";
             return recipe;
         }
 
-        uint64_t actual_fee = TransactionBalancer::calculate_fee(selection.selected.size(), 1, false);
+        uint64_t actual_fee = TransactionBalancer::calculate_fee(selected.size(), 1, false);
         total_fee = actual_fee;
 
         // Add inputs to base transaction IN-PLACE
@@ -1054,7 +1063,7 @@ BalancingRecipe WalletFacade::balance_unbound_transaction(
                 inputs_arr.push_back(inp);
             }
         }
-        for (const auto& utxo : selection.selected) {
+        for (const auto& utxo : selected) {
             inputs_arr.push_back({
                 {"utxo_hash", utxo.utxo_hash},
                 {"amount", utxo.amount},
@@ -1103,8 +1112,9 @@ BalancingRecipe WalletFacade::balance_unbound_transaction(
     recipe.success = true;
 
     if (midnight::g_logger) {
+        const std::string tx_hash = unbound_tx.value("tx_hash", std::string("?"));
         midnight::g_logger->info("Balanced unbound TX: " +
-                                  unbound_tx.value("tx_hash", "?").substr(0, 16) +
+                                  tx_hash.substr(0, std::min<size_t>(16, tx_hash.size())) +
                                   ", total_fee=" + std::to_string(total_fee));
     }
 
@@ -1706,6 +1716,7 @@ void WalletFacade::sync() {
                     meta.token_type = utxo.token_type.empty() ? "NIGHT" : utxo.token_type;
                     meta.tx_hash = utxo.tx_hash;
                     meta.ctime = std::chrono::system_clock::now();
+                    meta.registered_for_dust = utxo.registered_for_dust_generation;
                     state_.unshielded.available_coins.push_back(meta);
                 }
                 for (const network::UtxoEvent& utxo : evt.spent) {
@@ -1831,6 +1842,7 @@ void WalletFacade::sync() {
                 meta.token_type = utxo.token_type.empty() ? "NIGHT" : utxo.token_type;
                 meta.tx_hash = utxo.tx_hash;
                 meta.ctime = std::chrono::system_clock::now();
+                meta.registered_for_dust = utxo.registered_for_dust_generation;
                 state_.unshielded.available_coins.push_back(meta);
                 if (meta.token_type == "NIGHT") total_night += meta.amount;
                 (void)blk;  // silence unused warning
@@ -1850,9 +1862,14 @@ void WalletFacade::sync() {
         }
 
         // ── DUST status (HTTP one-shot) ─────────────────────────────────────────
-        network::IndexerClient indexer(http_url);
-        auto dust_status = indexer.query_dust_status(night_addr_);
-        state_.dust.registered = (dust_status == network::DustRegistrationStatus::REGISTERED);
+        state_.dust.registered = false;
+        state_.dust.registered_night_amount = 0;
+        for (const auto& coin : state_.unshielded.available_coins) {
+            if (coin.registered_for_dust) {
+                state_.dust.registered = true;
+                state_.dust.registered_night_amount += coin.amount;
+            }
+        }
 
         state_.unshielded.synced = sync_ok;
         state_.unshielded.progress.is_connected = sync_ok;

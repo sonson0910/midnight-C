@@ -91,9 +91,9 @@ static int cmd_generate()
     // Generate Bech32m unshielded address (mn_addr_preview1...)
     // This matches the official @midnight-ntwrk/wallet-sdk-address-format
     std::string night_addr = address::encode_unshielded(
-        night_key.public_key, address::Network::Preview);
+        night_key.public_key, address::Network::PreProd);
     std::string dust_addr = address::encode_dust(
-        dust_key.public_key, address::Network::Preview);
+        dust_key.public_key, address::Network::PreProd);
 
     box_row("Network:", "Midnight Preview");
     box_row("Source:", "Native BIP39/SLIP-10 HD Wallet");
@@ -256,7 +256,7 @@ static int cmd_balance(const std::string &mnemonic,
 
     // IMPORTANT: Indexer uses Bech32m format, NOT hex!
     std::string hex_addr = night_key.address; // 0xf525...
-    std::string bech32m_addr = address::encode_unshielded(night_key.public_key, address::Network::Preview);
+    std::string bech32m_addr = address::encode_unshielded(night_key.public_key, address::Network::PreProd);
 
     box_top("NIGHT Balance — Midnight Preview");
     box_row("Bech32m Address:", bech32m_addr);
@@ -369,7 +369,7 @@ static int cmd_utxos(const std::string &mnemonic,
     auto night_key = hd.derive_night(0, 0);
 
     box_top("Unshielded NIGHT UTXOs — Preview Network");
-    std::string bech32m_addr = address::encode_unshielded(night_key.public_key, address::Network::Preview);
+    std::string bech32m_addr = address::encode_unshielded(night_key.public_key, address::Network::PreProd);
     box_row("Bech32m Address:", bech32m_addr);
     box_row("Indexer:", indexer_url);
     box_sep();
@@ -383,7 +383,7 @@ static int cmd_utxos(const std::string &mnemonic,
         if (utxos.empty())
         {
             std::cout << "  No unshielded UTXOs found.\n";
-            std::cout << "  Fund this address via: https://faucet.preview.midnight.network/\n";
+            std::cout << "  Fund this address via: https://faucet.preprod.midnight.network/\n";
         }
         else
         {
@@ -427,7 +427,7 @@ static int cmd_faucet(const std::string &mnemonic,
 
     // Generate unshielded address
     std::string night_addr = address::encode_unshielded(
-        night_key.public_key, address::Network::Preview);
+        night_key.public_key, address::Network::PreProd);
 
     box_top("NIGHT Faucet — Midnight Preview");
     box_row("Address:", night_addr);
@@ -469,7 +469,7 @@ static int cmd_faucet(const std::string &mnemonic,
         std::this_thread::sleep_for(std::chrono::seconds(15));
 
         // Check balance after faucet
-        IndexerClient indexer("https://indexer.preview.midnight.network/api/v4/graphql");
+        IndexerClient indexer("https://indexer.preprod.midnight.network/api/v4/graphql");
         auto utxos = indexer.query_utxos(night_addr);
         uint64_t total = 0;
         for (const auto &utxo : utxos)
@@ -485,7 +485,7 @@ static int cmd_faucet(const std::string &mnemonic,
 
     box_sep();
     std::cout << "  NOTE: If faucet requires Discord/Twitter auth,\n";
-    std::cout << "  use the web interface: https://faucet.preview.midnight.network\n";
+    std::cout << "  use the web interface: https://faucet.preprod.midnight.network\n";
     box_end();
 
     return 0;
@@ -556,7 +556,7 @@ static int cmd_register_dust(const std::string &mnemonic,
 
     std::cout << "  Dust registration complete!\n";
     std::cout << "  TX Hash: " << result.tx_hash << "\n";
-    std::cout << "  Monitor at: https://preview.midnight.network/tx/" << result.tx_hash << "\n";
+    std::cout << "  Monitor at: https://preprod.midnight.network/tx/" << result.tx_hash << "\n";
 
     box_end();
     return 0;
@@ -576,11 +576,11 @@ static int cmd_realtime(const std::string &mnemonic,
     auto night_key = hd.derive_night(0, 0);
 
     // IMPORTANT: Indexer uses Bech32m format!
-    std::string bech32m_addr = address::encode_unshielded(night_key.public_key, address::Network::Preview);
+    std::string bech32m_addr = address::encode_unshielded(night_key.public_key, address::Network::PreProd);
 
     box_top("Real-time Balance Tracker — Midnight Preview");
     box_row("Address:", bech32m_addr);
-    box_row("WS Indexer:", "wss://indexer.preview.midnight.network/api/v4/graphql");
+    box_row("WS Indexer:", "wss://indexer.preprod.midnight.network/api/v4/graphql");
     box_row("HTTP Indexer:", indexer_url);
     box_sep();
 
@@ -590,7 +590,7 @@ static int cmd_realtime(const std::string &mnemonic,
     box_sep();
 
     // Create realtime client
-    std::string ws_url = "wss://indexer.preview.midnight.network/api/v4/graphql";
+    std::string ws_url = "wss://indexer.preprod.midnight.network/api/v4/graphql";
     RealtimeIndexerClient client(ws_url, indexer_url);
 
     // Set up callbacks
@@ -729,7 +729,7 @@ static int cmd_transfer(const std::string &mnemonic,
 
     std::cout << "  Transfer submitted!\n";
     std::cout << "  TX Hash: " << submission.tx_hash << "\n";
-    std::cout << "  Monitor at: https://preview.midnight.network/tx/" << submission.tx_hash << "\n";
+    std::cout << "  Monitor at: https://preprod.midnight.network/tx/" << submission.tx_hash << "\n";
 
     box_end();
     return 0;
@@ -752,9 +752,9 @@ int main(int argc, char *argv[])
     bool do_realtime = false;
     uint64_t transfer_amount = 0;
     uint64_t dust_amount = 0;
-    std::string rpc_url = "https://rpc.preview.midnight.network";
-    std::string indexer_url = "https://indexer.preview.midnight.network/api/v4/graphql";
-    std::string faucet_url = "https://faucet.preview.midnight.network";
+    std::string rpc_url = "https://rpc.preprod.midnight.network";
+    std::string indexer_url = "https://indexer.preprod.midnight.network/api/v4/graphql";
+    std::string faucet_url = "https://faucet.preprod.midnight.network";
 
     // Parse arguments
     for (int i = 1; i < argc; ++i)

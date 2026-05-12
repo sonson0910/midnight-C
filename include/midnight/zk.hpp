@@ -90,11 +90,14 @@
  * docker run -p 6300:6300 midnightntwrk/proof-server:8.0.3 midnight-proof-server
  * ```
  *
- * The ProofServerClient communicates via HTTP to:
- * - Generate ZK proofs: POST /generate
- * - Verify proofs: POST /verify
- * - Get circuit metadata: GET /circuits/{name}
- * - Check server status: GET /status
+ * The ProofServerClient communicates via HTTP to the local binary proof API:
+ * - Check serialized payloads: POST /check
+ * - Generate proof bytes: POST /prove
+ * - Prove serialized transactions: POST /prove-tx
+ * - Check server health: GET /health
+ *
+ * The public proof server does not accept ad-hoc JSON /generate requests. Compact
+ * circuits must first be converted into ledger-built binary payloads.
  *
  * @section private_vs_public Private State vs Public Ledger
  *

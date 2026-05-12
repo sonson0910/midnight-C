@@ -69,7 +69,7 @@ namespace midnight::network
      *
      * Example:
      * ```cpp
-     * SubstrateRPC rpc("https://rpc.preview.midnight.network");
+     * SubstrateRPC rpc("https://rpc.preprod.midnight.network");
      * auto version = rpc.get_runtime_version();
      * auto nonce = rpc.get_account_nonce(public_key_hex);
      * auto result = rpc.submit_extrinsic(signed_bytes);

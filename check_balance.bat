@@ -12,7 +12,7 @@ echo Querying balance for: %ADDRESS%
 echo.
 
 REM Query UTXOs owned by this address
-curl -s -X POST "https://indexer.preview.midnight.network/api/v4/graphql" ^
+curl -s -X POST "https://indexer.preprod.midnight.network/api/v4/graphql" ^
   -H "Content-Type: application/json" ^
   -d "{\"query\":\"subscription { unshieldedTransactions(address: \\"%ADDRESS%\\") { ... on UnshieldedTransaction { createdUtxos { value owner } } } }\"]"
 

@@ -1,4 +1,5 @@
 #include "midnight/network/substrate_rpc.hpp"
+#include "midnight/core/common_utils.hpp"
 #include "midnight/core/logger.hpp"
 #include <sodium.h>
 #include <sstream>
@@ -450,7 +451,7 @@ namespace midnight::network
         try
         {
             return rpc_call("midnight_contractState",
-                            json::array({contract_address}));
+                            json::array({midnight::util::strip_hex_prefix(contract_address)}));
         }
         catch (const std::exception &e)
         {

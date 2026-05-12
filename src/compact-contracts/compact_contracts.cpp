@@ -133,7 +133,7 @@ namespace
         }
         if (rpc_url.find("preview") != std::string::npos)
         {
-            return "https://indexer.preview.midnight.network/api/v4/graphql";
+            return "https://indexer.preprod.midnight.network/api/v4/graphql";
         }
         if (rpc_url.find("127.0.0.1") != std::string::npos || rpc_url.find("localhost") != std::string::npos)
         {
@@ -859,8 +859,8 @@ namespace midnight::compact_contracts
             {
                 midnight::g_logger->error(
                     "Deploy bridge script not found: " + bridge_script + ". " +
-                    "The C++ SDK's ContractManager::deploy() provides native deployment via SubstrateRPC. " +
-                    "For TypeScript SDK bridge deployment, install the @midnight-ntwrk/compact npm package and use its CLI.");
+                    "Native C++ deployment requires ledger-built serialized transaction bytes. " +
+                    "For now, use the Midnight Compact/ledger toolchain to build the transaction, then submit it through the SDK raw submit path.");
                 return {};
             }
 

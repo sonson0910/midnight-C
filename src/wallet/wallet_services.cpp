@@ -1,4 +1,5 @@
 #include "midnight/wallet/wallet_services.hpp"
+#include "midnight/core/common_utils.hpp"
 #include "midnight/core/logger.hpp"
 #include "midnight/network/network_client.hpp"
 #include "midnight/network/indexer_client.hpp"
@@ -299,59 +300,14 @@ ProvedTransaction ProvingService::prove(const std::vector<uint8_t>& unproven_tx)
         // Create HTTP client for proof server
         network::NetworkClient proof_client(config_.proving_server_url, config_.timeout_ms);
 
-        // The proof server expects:
-        //   POST /prove-tx
+        // Official proof-server contract:
+        //   POST /prove
         //   Content-Type: application/octet-stream
-        //   Body: serialized UnprovenTransaction bytes
-
-        // For now, we build a JSON-RPC request similar to SDK pattern
-        // The actual proof server API may vary - this is a reasonable implementation
-        json request_body;
-        request_body["jsonrpc"] = "2.0";
-        request_body["id"] = 1;
-        request_body["method"] = "prove_transaction";
-
-        // Encode TX bytes as hex
-        std::ostringstream hex_stream;
-        hex_stream << "0x";
-        for (auto b : unproven_tx) {
-            hex_stream << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(b);
-        }
-        request_body["params"] = json::object({{"transaction", hex_stream.str()}});
-
-        auto response = proof_client.post_json("/", request_body);
-
-        // Check for errors
-        if (response.contains("error")) {
-            result.error = "Proof generation failed";
-            if (response["error"].contains("message")) {
-                result.error = response["error"]["message"].get<std::string>();
-            }
-            result.success = false;
-            return result;
-        }
-
-        // Extract proved transaction data from response
-        if (response.contains("result")) {
-            const auto& res = response["result"];
-            if (res.is_object() && res.contains("provedTransaction")) {
-                std::string proved_hex = res["provedTransaction"].get<std::string>();
-                // Decode hex back to bytes
-                result.data = hex_to_bytes(proved_hex);
-                result.proof_hash = sha256_hex(result.data);
-                result.success = true;
-            } else {
-                // Fallback: use input as data
-                result.data = unproven_tx;
-                result.proof_hash = sha256_hex(result.data);
-                result.success = true;
-            }
-        } else {
-            // Fallback: use input as data
-            result.data = unproven_tx;
-            result.proof_hash = sha256_hex(result.data);
-            result.success = true;
-        }
+        //   Body: ledger createProvingPayload(...) bytes
+        //   Response: serialized proof result bytes
+        result.data = proof_client.post_bytes("/prove", unproven_tx);
+        result.proof_hash = sha256_hex(result.data);
+        result.success = true;
 
         if (midnight::g_logger) {
             midnight::g_logger->info("TX proved: " + result.proof_hash.substr(0, 16) + "...");
@@ -360,11 +316,9 @@ ProvedTransaction ProvingService::prove(const std::vector<uint8_t>& unproven_tx)
     } catch (const std::exception& e) {
         result.error = std::string("Proof server error: ") + e.what();
         result.success = false;
-        result.data = unproven_tx;
-        result.proof_hash = sha256_hex(unproven_tx);
 
         if (midnight::g_logger) {
-            midnight::g_logger->warn("ProvingService: falling back to no-op proof - " + result.error);
+            midnight::g_logger->warn("ProvingService failed: " + result.error);
         }
     }
 
@@ -378,15 +332,38 @@ ProvedTransaction ProvingService::prove_json(const json& tx_json) {
 }
 
 bool ProvingService::is_available() const {
-    // Check if the proof server is reachable
-    // In production: HTTP GET <config_.proving_server_url>/status
-    return !config_.proving_server_url.empty();
+    if (config_.proving_server_url.empty()) {
+        return false;
+    }
+
+    try {
+        network::NetworkClient proof_client(config_.proving_server_url, config_.timeout_ms);
+        auto response = proof_client.get_json("/health");
+        return response.value("status", "") == "ok" || response.contains("version");
+    } catch (...) {
+        return false;
+    }
 }
 
 json ProvingService::get_status() {
     json status;
-    status["available"] = is_available();
     status["url"] = config_.proving_server_url;
+    status["available"] = false;
+
+    if (config_.proving_server_url.empty()) {
+        status["error"] = "No proof server URL configured";
+        return status;
+    }
+
+    try {
+        network::NetworkClient proof_client(config_.proving_server_url, config_.timeout_ms);
+        auto health = proof_client.get_json("/health");
+        status["available"] = health.value("status", "") == "ok" || health.contains("version");
+        status["health"] = health;
+    } catch (const std::exception& e) {
+        status["error"] = e.what();
+    }
+
     return status;
 }
 
@@ -494,7 +471,7 @@ void PendingTransactionsService::poll_once() {
                 }
             )";
 
-            json variables = {{"hash", ptx.tx_hash}};
+            json variables = {{"hash", midnight::util::ensure_hex_prefix(ptx.tx_hash)}};
             auto data = indexer.graphql_query(query, variables);
 
             if (data.contains("transactions") && data["transactions"].is_array() &&

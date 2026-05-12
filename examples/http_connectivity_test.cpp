@@ -47,12 +47,12 @@ int main()
         std::cout << "✗ Error: " << e.what() << std::endl;
     }
 
-    std::cout << "\nTest 2: Midnight Preprod (TESTNET)" << std::endl;
+    std::cout << "\nTest 2: Midnight Preprod (PREPROD)" << std::endl;
     std::cout << "------------------------------------" << std::endl;
     try
     {
         std::string testnet_url = midnight::network::NetworkConfig::get_rpc_endpoint(
-            midnight::network::NetworkConfig::Network::TESTNET);
+            midnight::network::NetworkConfig::Network::PREPROD);
         std::cout << "Endpoint: " << testnet_url << std::endl;
 
         midnight::network::NetworkClient testnet_client(testnet_url, 5000);
@@ -61,7 +61,7 @@ int main()
         if (testnet_client.is_connected())
         {
             preprod_transport_ok = true;
-            std::cout << "✓ Connected to Midnight TESTNET (Preprod)" << std::endl;
+            std::cout << "✓ Connected to Midnight PREPROD" << std::endl;
 
             // Probe the Substrate-compatible RPC methods exposed by Midnight Preprod.
             std::cout << "Attempting JSON-RPC compatibility probe..." << std::endl;

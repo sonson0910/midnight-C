@@ -83,8 +83,8 @@ namespace midnight::utxo_transactions
         uint64_t output_dust = 0; // Total DUST to outputs
         uint64_t fees = 0;        // Fee (input_dust - output_dust - output_amount)
 
-        // Proof of correctness (zk-SNARK)
-        std::vector<std::string> proofs; // 128-byte zk-SNARKs
+        // Proof of correctness (Midnight PLONK proof bytes encoded as hex)
+        std::vector<std::string> proofs;
 
         // Signature
         std::string signature; // sr25519 signature

@@ -181,7 +181,7 @@ TEST(AccountInfoTest, DefaultValues)
 // Integration Tests — connect to live Midnight Preview network
 // ═══════════════════════════════════════════════════════════════
 
-static const char *PREVIEW_RPC = "https://rpc.preview.midnight.network";
+static const char *PREVIEW_RPC = "https://rpc.preprod.midnight.network";
 
 class SubstrateRPCIntegrationTest : public ::testing::Test
 {
@@ -321,7 +321,7 @@ class ExtrinsicSubmissionIntegrationTest : public ::testing::Test
 {
 protected:
     std::unique_ptr<SubstrateRPC> rpc_;
-    std::string rpc_url_ = "https://rpc.preview.midnight.network";
+    std::string rpc_url_ = "https://rpc.preprod.midnight.network";
 
     void SetUp() override
     {

@@ -25,10 +25,10 @@ namespace midnight::contracts
     NetworkConfig NetworkConfig::preview()
     {
         return {
-            .node_url = "https://rpc.preview.midnight.network",
-            .indexer_url = "https://indexer.preview.midnight.network/api/v4/graphql",
+            .node_url = "https://rpc.preprod.midnight.network",
+            .indexer_url = "https://indexer.preprod.midnight.network/api/v4/graphql",
             .proof_server_url = "http://localhost:6300",
-            .network_name = "preview",
+            .network_name = "preprod",
         };
     }
 
@@ -239,7 +239,14 @@ namespace midnight::contracts
         {
             return network::DustRegistrationStatus::UNKNOWN;
         }
-        return indexer_->query_dust_status(derived_address_);
+        auto state = indexer_->query_wallet_state(derived_address_);
+        if (!state.error.empty())
+        {
+            return network::DustRegistrationStatus::UNKNOWN;
+        }
+        return state.dust_registered_utxo_count > 0
+                   ? network::DustRegistrationStatus::REGISTERED
+                   : network::DustRegistrationStatus::NOT_REGISTERED;
     }
 
     // ════════════════════════════════════════════════
@@ -252,57 +259,16 @@ namespace midnight::contracts
         const std::string &zk_config_path)
     {
         DeployResult result;
+        (void)contract_name;
+        (void)constructor_args;
+        (void)zk_config_path;
 
-        if (seed_hex_.empty())
-        {
-            result.error = "No wallet seed. Call set_seed_hex() first.";
-            return result;
-        }
-
-        try
-        {
-            midnight::g_logger->info("Deploying contract: " + contract_name);
-
-            // 1. Load circuit data from ZK config
-            auto circuit_data = load_circuit_data(zk_config_path, "constructor");
-
-            // 2. Build public inputs from constructor args
-            zk::PublicInputs inputs;
-            for (size_t i = 0; i < constructor_args.size(); ++i)
-            {
-                inputs.add_input("arg_" + std::to_string(i),
-                                 constructor_args[i].dump());
-            }
-
-            // 3. Generate ZK proof via Proof Server (native HTTP)
-            std::map<std::string, zk::WitnessOutput> witnesses;
-            auto proof_result = proof_server_->generate_proof(
-                contract_name + "_constructor", circuit_data, inputs, witnesses);
-
-            if (!proof_result.success)
-            {
-                result.error = "Proof generation failed: " + proof_result.error_message;
-                midnight::g_logger->error(result.error);
-                return result;
-            }
-
-            // 4. Build deployment transaction
-            zk::ProofEnabledTransaction deploy_tx;
-            deploy_tx.circuit_proof = proof_result.proof;
-
-            // 5. Sign and submit
-            result.txid = sign_and_submit(deploy_tx);
-            if (!result.txid.empty())
-            {
-                result.success = true;
-                midnight::g_logger->info("Contract deployed: txid=" + result.txid);
-            }
-        }
-        catch (const std::exception &e)
-        {
-            result.error = "Deploy failed: " + std::string(e.what());
-            midnight::g_logger->error(result.error);
-        }
+        result.error =
+            "Native Compact deployment requires ledger-built serialized payloads. "
+            "Build the deploy transaction/proving payload with midnight-ledger, then use "
+            "prove_contract_payload(), prove_transaction_payload(), and "
+            "submit_serialized_transaction().";
+        midnight::g_logger->error(result.error);
 
         return result;
     }
@@ -317,54 +283,15 @@ namespace midnight::contracts
         const json &args)
     {
         CallResult result;
+        (void)contract_address;
+        (void)circuit_name;
+        (void)args;
 
-        if (seed_hex_.empty())
-        {
-            result.error = "No wallet seed. Call set_seed_hex() first.";
-            return result;
-        }
-
-        try
-        {
-            midnight::g_logger->info("Calling circuit: " + circuit_name +
-                                     " on " + contract_address.substr(0, 20) + "...");
-
-            // 1. Read current contract state (native GraphQL)
-            auto current_state = read_state(contract_address);
-
-            // 2. Build public inputs
-            auto inputs = build_public_inputs(circuit_name, args, current_state);
-
-            // 3. Generate ZK proof (native HTTP to Proof Server)
-            auto circuit_data = load_circuit_data("", circuit_name);
-            std::map<std::string, zk::WitnessOutput> witnesses;
-            auto proof_result = proof_server_->generate_proof(
-                circuit_name, circuit_data, inputs, witnesses);
-
-            if (!proof_result.success)
-            {
-                result.error = "Proof generation failed: " + proof_result.error_message;
-                return result;
-            }
-
-            // 4. Build proof-enabled transaction
-            zk::ProofEnabledTransaction tx;
-            tx.circuit_proof = proof_result.proof;
-
-            // 5. Sign and submit (native Ed25519 + JSON-RPC)
-            result.txid = sign_and_submit(tx);
-            result.success = !result.txid.empty();
-
-            if (result.success)
-            {
-                midnight::g_logger->info("Circuit call submitted: " + result.txid);
-            }
-        }
-        catch (const std::exception &e)
-        {
-            result.error = "Circuit call failed: " + std::string(e.what());
-            midnight::g_logger->error(result.error);
-        }
+        result.error =
+            "Native Compact circuit calls require a ledger-built transaction/proving payload. "
+            "Use read_state()/read_fields() for indexer reads, and the raw payload methods "
+            "for /check, /prove, /prove-tx, then submit_serialized_transaction().";
+        midnight::g_logger->error(result.error);
 
         return result;
     }
@@ -378,6 +305,16 @@ namespace midnight::contracts
         const std::string &amount)
     {
         CallResult result;
+        (void)to_address;
+        (void)amount;
+
+        result.error =
+            "Native NIGHT transfer construction is not implemented yet. "
+            "The node only accepts real Midnight transaction bytes, not JSON transfer bodies; "
+            "build the transfer with the ledger/wallet transaction builder and call "
+            "submit_serialized_transaction().";
+        midnight::g_logger->error(result.error);
+        return result;
 
         if (seed_hex_.empty())
         {
@@ -515,9 +452,64 @@ namespace midnight::contracts
     // Native DUST Registration
     // ════════════════════════════════════════════════
 
+    CallResult ContractInteractor::submit_serialized_transaction(
+        const std::vector<uint8_t> &transaction_bytes)
+    {
+        CallResult result;
+
+        if (transaction_bytes.empty())
+        {
+            result.error = "Serialized transaction bytes cannot be empty.";
+            return result;
+        }
+
+        try
+        {
+            const auto tx_hex = midnight::util::ensure_hex_prefix(
+                midnight::util::bytes_to_hex(transaction_bytes));
+            result.txid = rpc_->submit_transaction(tx_hex);
+            result.success = !result.txid.empty();
+            if (!result.success)
+            {
+                result.error = "Node RPC returned an empty transaction hash.";
+            }
+        }
+        catch (const std::exception &e)
+        {
+            result.error = "Serialized transaction submit failed: " + std::string(e.what());
+        }
+
+        return result;
+    }
+
+    std::vector<uint8_t> ContractInteractor::prove_contract_payload(
+        const std::vector<uint8_t> &proving_payload)
+    {
+        return proof_server_->post_proving_payload(proving_payload);
+    }
+
+    std::vector<uint8_t> ContractInteractor::check_contract_payload(
+        const std::vector<uint8_t> &check_payload)
+    {
+        return proof_server_->post_check_payload(check_payload);
+    }
+
+    std::vector<uint8_t> ContractInteractor::prove_transaction_payload(
+        const std::vector<uint8_t> &prove_tx_payload)
+    {
+        return proof_server_->post_prove_tx_payload(prove_tx_payload);
+    }
+
     CallResult ContractInteractor::register_dust()
     {
         CallResult result;
+
+        result.error =
+            "Native DUST registration transaction construction is not implemented yet. "
+            "Build the registration transaction with the ledger/wallet transaction builder "
+            "and call submit_serialized_transaction().";
+        midnight::g_logger->error(result.error);
+        return result;
 
         if (seed_hex_.empty())
         {

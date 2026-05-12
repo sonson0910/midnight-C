@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 # Find correct query for Midnight Indexer
 
-$graphql_url = "https://indexer.preview.midnight.network/api/v4/graphql"
+$graphql_url = "https://indexer.preprod.midnight.network/api/v4/graphql"
 
 Write-Host "=== Finding Correct Indexer Query ===" -ForegroundColor Cyan
 Write-Host ""

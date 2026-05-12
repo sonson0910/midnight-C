@@ -215,6 +215,39 @@ namespace midnight::network
         }
     }
 
+    std::vector<uint8_t> NetworkClient::post_bytes(
+        const std::string &path,
+        const std::vector<uint8_t> &payload,
+        const std::string &content_type)
+    {
+        const std::string body(reinterpret_cast<const char *>(payload.data()), payload.size());
+
+        midnight::g_logger->debug("HTTP POST " + base_url_ + path +
+                                  " (" + std::to_string(body.length()) + " raw bytes)");
+
+        ParsedEndpoint ep = parse_url(base_url_);
+        std::string request_path = ep.path_prefix.empty() ? "/" :
+                                  (ep.path_prefix.back() == '/' ? ep.path_prefix + path :
+                                   ep.path_prefix + path);
+
+        std::string response_body;
+        if (ep.use_tls) {
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+            httplib::SSLClient cli(ep.host, ep.port);
+            cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
+            response_body = do_post(cli, request_path, body, content_type);
+#else
+            throw std::runtime_error("HTTPS not supported - compile with OpenSSL");
+#endif
+        } else {
+            httplib::Client cli(ep.host, ep.port);
+            cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
+            response_body = do_post(cli, request_path, body, content_type);
+        }
+
+        return std::vector<uint8_t>(response_body.begin(), response_body.end());
+    }
+
     json NetworkClient::get_json(const std::string &path)
     {
         midnight::g_logger->debug("HTTP GET " + base_url_ + path);

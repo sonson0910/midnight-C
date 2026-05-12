@@ -270,7 +270,7 @@ public:
 private:
     ShieldedCoinPublicKey coin_key_;
     ShieldedEncryptionPublicKey encrypt_key_;
-    address::Network network_ = address::Network::Preview;
+    address::Network network_ = address::Network::PreProd;
     std::string encoded_;
 };
 

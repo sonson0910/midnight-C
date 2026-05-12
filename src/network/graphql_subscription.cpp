@@ -1,9 +1,12 @@
 #include "midnight/network/graphql_subscription.hpp"
 #include "midnight/network/indexer_client.hpp"
 #include "midnight/core/logger.hpp"
+#include "midnight/core/common_utils.hpp"
 #include <chrono>
 #include <sstream>
 #include <iostream>
+#include <algorithm>
+#include <cctype>
 
 // cpp-httplib WebSocket support
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
@@ -112,6 +115,7 @@ GraphQLSubscriptionClient::GraphQLSubscriptionClient(GraphQLSubscriptionClient&&
     , utxo_cb_(std::move(other.utxo_cb_))
     , balance_cb_(std::move(other.balance_cb_))
     , progress_cb_(std::move(other.progress_cb_))
+    , dust_generation_cb_(std::move(other.dust_generation_cb_))
     , night_balance_(other.night_balance_.load())
     , dust_balance_(other.dust_balance_.load())
     , utxo_count_(other.utxo_count_.load())
@@ -138,6 +142,7 @@ GraphQLSubscriptionClient& GraphQLSubscriptionClient::operator=(GraphQLSubscript
         utxo_cb_ = std::move(other.utxo_cb_);
         balance_cb_ = std::move(other.balance_cb_);
         progress_cb_ = std::move(other.progress_cb_);
+        dust_generation_cb_ = std::move(other.dust_generation_cb_);
         night_balance_ = other.night_balance_.load();
         dust_balance_ = other.dust_balance_.load();
         utxo_count_ = other.utxo_count_.load();
@@ -268,6 +273,10 @@ void GraphQLSubscriptionClient::on_progress_change(ProgressCallback cb) {
     progress_cb_ = std::move(cb);
 }
 
+void GraphQLSubscriptionClient::on_dust_generation(DustGenerationCallback cb) {
+    dust_generation_cb_ = std::move(cb);
+}
+
 // ─── Subscriptions ───────────────────────────────────────────────
 
 std::string GraphQLSubscriptionClient::subscribe_unshielded_transactions(const std::string& address,
@@ -293,8 +302,26 @@ std::string GraphQLSubscriptionClient::subscribe_unshielded_transactions(const s
                 __typename
                 ... on UnshieldedTransaction {
                     transaction { id hash block { height } }
-                    createdUtxos { owner value outputIndex tokenType }
-                    spentUtxos { owner value tokenType outputIndex }
+                    createdUtxos {
+                        owner
+                        value
+                        outputIndex
+                        tokenType
+                        ctime
+                        initialNonce
+                        registeredForDustGeneration
+                        createdAtTransaction { id hash }
+                    }
+                    spentUtxos {
+                        owner
+                        value
+                        tokenType
+                        outputIndex
+                        ctime
+                        initialNonce
+                        registeredForDustGeneration
+                        createdAtTransaction { id hash }
+                    }
                 }
                 ... on UnshieldedTransactionsProgress {
                     highestTransactionId
@@ -313,6 +340,65 @@ std::string GraphQLSubscriptionClient::subscribe_unshielded_transactions(const s
                              address.substr(0, 20) + "..." +
                              (from_transaction_id > 0 ? " (resuming from tx " + std::to_string(from_transaction_id) + ")" : " (full sync)"));
 
+    return id;
+}
+
+std::string GraphQLSubscriptionClient::subscribe_dust_generations(
+    const std::string& dust_address,
+    uint64_t start_index,
+    uint64_t end_index) {
+    std::string id = next_subscription_id();
+
+    std::string query = R"(
+        subscription DustGenerationsSub($dustAddress: DustAddress!, $startIndex: Int!, $endIndex: Int!) {
+            dustGenerations(dustAddress: $dustAddress, startIndex: $startIndex, endIndex: $endIndex) {
+                __typename
+                ... on DustGenerationsItem {
+                    commitmentMtIndex
+                    generationMtIndex
+                    owner
+                    value
+                    initialValue
+                    backingNight
+                    ctime
+                    transactionId
+                    collapsedMerkleTree {
+                        startIndex
+                        endIndex
+                        update
+                        protocolVersion
+                    }
+                }
+                ... on DustGenerationsProgress {
+                    highestIndex
+                    collapsedMerkleTree {
+                        startIndex
+                        endIndex
+                        update
+                        protocolVersion
+                    }
+                }
+                ... on DustGenerationDtimeUpdateItem {
+                    id
+                    raw
+                    maxId
+                    protocolVersion
+                }
+            }
+        }
+    )";
+
+    json variables = {
+        {"dustAddress", dust_address},
+        {"startIndex", static_cast<int>(start_index)},
+        {"endIndex", static_cast<int>(end_index)}
+    };
+    send_subscribe(id, query, variables);
+
+    midnight::g_logger->info("Subscribed to dustGenerations for: " +
+                             dust_address.substr(0, std::min<size_t>(20, dust_address.size())) +
+                             "... [" + std::to_string(start_index) + ", " +
+                             std::to_string(end_index) + "]");
     return id;
 }
 
@@ -444,6 +530,9 @@ void GraphQLSubscriptionClient::handle_subscription_data(const json& payload) {
     if (payload.contains("unshieldedTransactions")) {
         parse_unshielded_transaction_event(payload);
     }
+    if (payload.contains("dustGenerations")) {
+        parse_dust_generations_event(payload);
+    }
 }
 
 void GraphQLSubscriptionClient::handle_subscription_error(const json& payload) {
@@ -521,6 +610,10 @@ void GraphQLSubscriptionClient::parse_unshielded_transaction_event(const json& d
         if (progress_cb_) {
             try { progress_cb_(static_cast<uint64_t>(highest_id)); } catch (...) {}
         }
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            last_state_.synced = true;
+        }
         return;
     }
 
@@ -546,15 +639,11 @@ void GraphQLSubscriptionClient::parse_unshielded_transaction_event(const json& d
         utxo.tx_hash = tx_hash;
         utxo.output_index = static_cast<uint32_t>(out.value("outputIndex", 0));
         utxo.amount = parse_amount(out.value("value", json::object()));
-        utxo.token_type = out.value("tokenType", "NIGHT");
-        if (utxo.token_type.empty())
-            utxo.token_type = "NIGHT";
+        utxo.token_type = normalize_token_type(out.value("tokenType", "NIGHT"));
         utxo.owner = out.value("owner", "");
-        utxo.ctime = static_cast<int64_t>(
-            std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::system_clock::now().time_since_epoch()
-            ).count()
-        );
+        utxo.ctime = static_cast<int64_t>(parse_amount(out.value("ctime", json(0))));
+        utxo.initial_nonce = out.value("initialNonce", "");
+        utxo.registered_for_dust_generation = out.value("registeredForDustGeneration", false);
 
         midnight::g_logger->debug("  +UTXO: " + std::to_string(utxo.amount) +
                                 " " + utxo.token_type);
@@ -578,15 +667,16 @@ void GraphQLSubscriptionClient::parse_unshielded_transaction_event(const json& d
     auto spent_arr = wrapper.value("spentUtxos", json::array());
     for (const auto& out : spent_arr) {
         UtxoEvent utxo;
-        utxo.tx_hash = tx_hash;
+        const auto created_tx = out.value("createdAtTransaction", json::object());
+        utxo.tx_hash = created_tx.value("hash", tx_hash);
         utxo.output_index = static_cast<uint32_t>(out.value("outputIndex", 0));
         utxo.amount = parse_amount(out.value("value", json::object()));
-        utxo.token_type = out.value("tokenType", "NIGHT");
-        if (utxo.token_type.empty())
-            utxo.token_type = "NIGHT";
+        utxo.token_type = normalize_token_type(out.value("tokenType", "NIGHT"));
         utxo.owner = out.value("owner", "");
         utxo.is_spent = true;
-        utxo.ctime = 0;
+        utxo.ctime = static_cast<int64_t>(parse_amount(out.value("ctime", json(0))));
+        utxo.initial_nonce = out.value("initialNonce", "");
+        utxo.registered_for_dust_generation = out.value("registeredForDustGeneration", false);
 
         midnight::g_logger->debug("  -UTXO: " + std::to_string(utxo.amount) +
                                 " " + utxo.token_type);
@@ -599,6 +689,7 @@ void GraphQLSubscriptionClient::parse_unshielded_transaction_event(const json& d
             dust_balance_.store(dust_balance_.load() > utxo.amount
                                 ? dust_balance_.load() - utxo.amount : 0);
         }
+        utxo_count_.store(utxo_count_.load() > 0 ? utxo_count_.load() - 1 : 0);
     }
 
     // Build event and fire callbacks
@@ -613,28 +704,36 @@ void GraphQLSubscriptionClient::parse_unshielded_transaction_event(const json& d
             u.tx_hash = tx_hash;
             u.output_index = static_cast<uint32_t>(out.value("outputIndex", 0));
             u.amount = parse_amount(out.value("value", json::object()));
-            u.token_type = out.value("tokenType", "NIGHT");
-            if (u.token_type.empty()) u.token_type = "NIGHT";
+            u.token_type = normalize_token_type(out.value("tokenType", "NIGHT"));
             u.owner = out.value("owner", "");
-            u.ctime = static_cast<int64_t>(
-                std::chrono::duration_cast<std::chrono::seconds>(
-                    std::chrono::system_clock::now().time_since_epoch()
-                ).count()
-            );
+            u.ctime = static_cast<int64_t>(parse_amount(out.value("ctime", json(0))));
+            u.initial_nonce = out.value("initialNonce", "");
+            u.registered_for_dust_generation = out.value("registeredForDustGeneration", false);
             evt.created.push_back(u);
         }
 
         // Re-populate spent
         for (const auto& out : spent_arr) {
             UtxoEvent u;
-            u.tx_hash = tx_hash;
+            const auto created_tx = out.value("createdAtTransaction", json::object());
+            u.tx_hash = created_tx.value("hash", tx_hash);
             u.output_index = static_cast<uint32_t>(out.value("outputIndex", 0));
             u.amount = parse_amount(out.value("value", json::object()));
-            u.token_type = out.value("tokenType", "NIGHT");
-            if (u.token_type.empty()) u.token_type = "NIGHT";
+            u.token_type = normalize_token_type(out.value("tokenType", "NIGHT"));
             u.owner = out.value("owner", "");
             u.is_spent = true;
+            u.ctime = static_cast<int64_t>(parse_amount(out.value("ctime", json(0))));
+            u.initial_nonce = out.value("initialNonce", "");
+            u.registered_for_dust_generation = out.value("registeredForDustGeneration", false);
             evt.spent.push_back(u);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            last_state_.available_utxo_count = static_cast<uint64_t>(utxo_count_.load());
+            last_state_.unshielded_balance = std::to_string(night_balance_.load());
+            last_state_.dust_balance = std::to_string(dust_balance_.load());
+            last_state_.synced = true;
         }
 
         midnight::g_logger->info("UTXO event: +" + std::to_string(evt.created.size()) +
@@ -645,6 +744,36 @@ void GraphQLSubscriptionClient::parse_unshielded_transaction_event(const json& d
                 midnight::g_logger->error("UTXO callback error: " + std::string(e.what()));
             }
         }
+    }
+}
+
+void GraphQLSubscriptionClient::parse_dust_generations_event(const json& data) {
+    if (!data.contains("dustGenerations") || data["dustGenerations"].is_null())
+        return;
+
+    const auto& wrapper = data["dustGenerations"];
+    DustGenerationEvent evt;
+    evt.event_type = wrapper.value("__typename", "");
+
+    if (evt.event_type == "DustGenerationsItem") {
+        evt.commitment_mt_index = parse_amount(wrapper.value("commitmentMtIndex", json(0)));
+        evt.generation_mt_index = parse_amount(wrapper.value("generationMtIndex", json(0)));
+        evt.owner = wrapper.value("owner", "");
+        evt.value = wrapper.value("value", "0");
+        evt.initial_value = wrapper.value("initialValue", "0");
+        evt.backing_night = wrapper.value("backingNight", "");
+        evt.ctime = parse_amount(wrapper.value("ctime", json(0)));
+        evt.transaction_id = parse_amount(wrapper.value("transactionId", json(0)));
+    } else if (evt.event_type == "DustGenerationsProgress") {
+        evt.highest_index = parse_amount(wrapper.value("highestIndex", json(0)));
+    }
+
+    if (wrapper.contains("collapsedMerkleTree") && !wrapper["collapsedMerkleTree"].is_null()) {
+        evt.collapsed_merkle_tree = wrapper["collapsedMerkleTree"];
+    }
+
+    if (dust_generation_cb_) {
+        try { dust_generation_cb_(evt); } catch (...) {}
     }
 }
 
@@ -661,6 +790,16 @@ uint64_t GraphQLSubscriptionClient::parse_amount(const json& val) {
         return parse_amount(val["value"]);
     }
     return 0;
+}
+
+std::string GraphQLSubscriptionClient::normalize_token_type(const std::string& token_type) const {
+    std::string raw = midnight::util::strip_hex_prefix(token_type);
+    std::transform(raw.begin(), raw.end(), raw.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (raw.empty() || raw == std::string(64, '0')) {
+        return "NIGHT";
+    }
+    return token_type;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -773,6 +912,28 @@ bool RealtimeIndexerClient::subscribe(const std::string& address) {
     return true;
 }
 
+std::string RealtimeIndexerClient::subscribe_dust_generations(
+    const std::string& dust_address,
+    uint64_t start_index,
+    uint64_t end_index) {
+    ws_client_.on_dust_generation([this](const DustGenerationEvent& evt) {
+        if (dust_generation_cb_) {
+            try { dust_generation_cb_(evt); } catch (...) {}
+        }
+    });
+
+    if (!ws_client_.is_connected() && !ws_client_.connect()) {
+        midnight::g_logger->error("Failed to connect to WebSocket for dustGenerations");
+        return "";
+    }
+
+    const auto id = ws_client_.subscribe_dust_generations(dust_address, start_index, end_index);
+    if (!id.empty() && !running_.load()) {
+        ws_client_.start_async();
+    }
+    return id;
+}
+
 void RealtimeIndexerClient::unsubscribe() {
     if (!subscribed_.load())
         return;
@@ -825,6 +986,10 @@ void RealtimeIndexerClient::on_progress(ProgressCallback cb) {
     progress_cb_ = std::move(cb);
 }
 
+void RealtimeIndexerClient::on_dust_generation(DustGenerationCallback cb) {
+    dust_generation_cb_ = std::move(cb);
+}
+
 void RealtimeIndexerClient::on_ws_balance(const std::string& token, uint64_t bal) {
     midnight::g_logger->info("Balance update: " + token + " = " + std::to_string(bal));
 
@@ -849,9 +1014,23 @@ void RealtimeIndexerClient::on_ws_utxo(const UnshieldedTxEvent& evt) {
     // Update UTXO count in state
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
+        uint64_t registered = state_.dust_registered_utxo_count;
+        for (const auto& u : evt.created) {
+            if (u.registered_for_dust_generation) {
+                registered++;
+            }
+        }
+        for (const auto& u : evt.spent) {
+            if (u.registered_for_dust_generation && registered > 0) {
+                registered--;
+            }
+        }
+        state_.address = address_;
         state_.available_utxo_count = static_cast<uint32_t>(
             ws_client_.current_utxo_count()
         );
+        state_.dust_registered_utxo_count = registered;
+        state_.synced = true;
     }
 
     if (utxo_cb_) {

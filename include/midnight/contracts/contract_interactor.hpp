@@ -67,7 +67,12 @@ namespace midnight::contracts
     };
 
     /**
-     * @brief Native contract interaction engine
+     * @brief Contract interaction helper for Indexer, node RPC, and Proof Server
+     *
+     * Production note: read-only contract state queries are native Indexer v4
+     * calls. State-changing Compact deploy/call/transfer flows require serialized
+     * ledger transaction or proof payload bytes produced by the Midnight
+     * ledger/Compact toolchain, then submitted through the raw payload helpers.
      *
      * Replaces the Node.js bridge (`official_sdk_bridge.cpp` → popen("node ..."))
      * with pure C++ calls to the Midnight network:
@@ -112,6 +117,10 @@ namespace midnight::contracts
         /**
          * @brief Deploy a Compact contract
          *
+         * Production note: this high-level method is fail-safe until native ledger
+         * transaction building is implemented. Use submit_serialized_transaction()
+         * with bytes produced by the Midnight ledger/Compact toolchain.
+         *
          * Full native flow:
          *   1. Derive wallet address from seed
          *   2. Load ZK circuit config from zk_config_path
@@ -132,6 +141,10 @@ namespace midnight::contracts
 
         /**
          * @brief Call a circuit on a deployed contract (state-changing)
+         *
+         * Production note: this high-level method is fail-safe until native ledger
+         * transaction building is implemented. Use prove_*_payload() and
+         * submit_serialized_transaction() with ledger-built bytes.
          *
          * Flow:
          *   1. Read current contract state from indexer
@@ -179,6 +192,30 @@ namespace midnight::contracts
         CallResult transfer_night(
             const std::string &to_address,
             const std::string &amount);
+
+        /**
+         * @brief Submit a ledger-serialized transaction to the node.
+         *
+         * The input must be real Midnight transaction bytes produced by the
+         * ledger/wallet builder. This method hex-encodes the bytes and submits
+         * them via the node RPC transaction endpoint.
+         */
+        CallResult submit_serialized_transaction(const std::vector<uint8_t> &transaction_bytes);
+
+        /**
+         * @brief POST a ledger createProvingPayload(...) body to /prove.
+         */
+        std::vector<uint8_t> prove_contract_payload(const std::vector<uint8_t> &proving_payload);
+
+        /**
+         * @brief POST a ledger createCheckPayload(...) body to /check.
+         */
+        std::vector<uint8_t> check_contract_payload(const std::vector<uint8_t> &check_payload);
+
+        /**
+         * @brief POST a ledger createProvingTransactionPayload(...) body to /prove-tx.
+         */
+        std::vector<uint8_t> prove_transaction_payload(const std::vector<uint8_t> &prove_tx_payload);
 
         /**
          * @brief Native DUST registration (no Node.js)

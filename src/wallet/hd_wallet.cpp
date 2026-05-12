@@ -476,7 +476,7 @@ namespace midnight::wallet
         kp.secret_key.assign(sk, sk + 64);
         kp.public_key = pub_vec;
 
-        kp.address = address::encode_unshielded(pub_vec, address::Network::Preview);
+        kp.address = address::encode_unshielded(pub_vec, address::Network::PreProd);
         return kp;
     }
 
@@ -491,7 +491,7 @@ namespace midnight::wallet
         KeyPair kp;
         kp.secret_key.assign(sk, sk + 64);
         kp.public_key = pub_vec;
-        kp.address = address::encode_unshielded(pub_vec, address::Network::Preview);
+        kp.address = address::encode_unshielded(pub_vec, address::Network::PreProd);
         return kp;
     }
 
@@ -514,7 +514,7 @@ namespace midnight::wallet
         // The SDK does: DustAddress.encodePublicKey(network, DustPublicKey)
         // which stores the scalar as SCALE BigInt and encodes with Bech32m prefix "mn_dust_preview1"
         std::vector<uint8_t> dust_scalar_vec(dust_scalar.begin(), dust_scalar.end());
-        kp.address = address::encode_dust(dust_scalar_vec, address::Network::Preview);
+        kp.address = address::encode_dust(dust_scalar_vec, address::Network::PreProd);
         return kp;
     }
 
@@ -529,7 +529,7 @@ namespace midnight::wallet
         KeyPair kp;
         kp.secret_key.assign(sk, sk + 64);
         kp.public_key.assign(pk, pk + 32);
-        kp.address = address::encode_unshielded(pub_vec, address::Network::Preview);
+        kp.address = address::encode_unshielded(pub_vec, address::Network::PreProd);
         return kp;
     }
 

@@ -9,12 +9,9 @@ int main(int argc, char* argv[]) {
     }
 
     std::string address = argv[1];
-    std::string network = "preview";
+    std::string network = "preprod";
     
-    std::string graphql_url = 
-        network == "preview" 
-            ? "https://indexer.preview.midnight.network/api/v4/graphql"
-            : "https://indexer.preprod.midnight.network/api/v4/graphql";
+    std::string graphql_url = "https://indexer.preprod.midnight.network/api/v4/graphql";
 
     std::cout << "Querying balance for: " << address << "\n";
     std::cout << "Network: " << network << "\n\n";
@@ -42,7 +39,11 @@ int main(int argc, char* argv[]) {
         auto utxos = indexer.query_utxos(address, false);
         std::cout << "Total UTXOs: " << utxos.size() << "\n";
         for (const auto& utxo : utxos) {
-            std::cout << "  - Value: " << utxo.value << "\n";
+            std::cout << "  - TX: " << utxo.tx_hash
+                      << " #" << utxo.output_index
+                      << " Value: " << utxo.value
+                      << " Token: " << utxo.token_type
+                      << " Block: " << utxo.block_height << "\n";
         }
         
     } catch (const std::exception& e) {

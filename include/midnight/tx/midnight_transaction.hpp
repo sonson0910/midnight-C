@@ -7,7 +7,7 @@
  * Key differences from Cardano:
  * - Midnight uses CBOR for transaction body hashing
  * - Ed25519 signatures for unshielded transactions
- * - ZK proofs (128 bytes) for shielded operations
+ * - ZK proof bytes for shielded operations
  * - Commitment-based amounts (Pedersen commitments)
  *
  * Transaction Pipeline (matching ledger-v8):

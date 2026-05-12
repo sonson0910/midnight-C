@@ -31,8 +31,8 @@ int main() {
     };
 
     // Test both URLs: with and without /ws suffix
-    const char* url_http = "wss://indexer.preview.midnight.network/api/v4/graphql";
-    const char* url_ws = "wss://indexer.preview.midnight.network/api/v4/graphql/ws";
+    const char* url_http = "wss://indexer.preprod.midnight.network/api/v4/graphql";
+    const char* url_ws = "wss://indexer.preprod.midnight.network/api/v4/graphql/ws";
 
     cout << "========================================\n";
     cout << "  Midnight Indexer WebSocket Probe\n";
@@ -94,7 +94,7 @@ int main() {
 
     // 3. Try with httplib::Client WebSocket method if available
     cout << "\n--- [3] httplib::Client as WebSocket ---\n";
-    httplib::Client http_cli("indexer.preview.midnight.network", 443);
+    httplib::Client http_cli("indexer.preprod.midnight.network", 443);
     http_cli.set_read_timeout(10);
     http_cli.enable_server_certificate_verification(false);
 

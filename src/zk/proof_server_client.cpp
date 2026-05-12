@@ -1,5 +1,7 @@
 #include "midnight/zk/proof_server_client.hpp"
 #include "midnight/core/logger.hpp"
+#include "midnight/core/common_utils.hpp"
+#include "midnight/network/midnight_node_rpc.hpp"
 #include <fmt/format.h>
 #include <chrono>
 #include <sstream>
@@ -9,68 +11,6 @@
 
 namespace midnight::zk
 {
-
-    // Sanitize error messages to prevent internal information disclosure.
-    // Only allows printable ASCII, limits length, and strips sensitive patterns.
-    static std::string sanitize_error_message(const std::string &raw)
-    {
-        if (raw.empty())
-        {
-            return "An internal error occurred";
-        }
-
-        std::string sanitized;
-        sanitized.reserve(std::min(raw.size(), size_t(200)));
-
-        for (size_t i = 0; i < raw.size() && sanitized.size() < 200; ++i)
-        {
-            char c = raw[i];
-            // Allow printable ASCII (space through ~)
-            if (c >= 32 && c <= 126)
-            {
-                sanitized += c;
-            }
-            else
-            {
-                sanitized += '?';
-            }
-        }
-
-        // Truncate to prevent buffer issues
-        if (sanitized.size() > 200)
-        {
-            sanitized.resize(200);
-            sanitized += "...";
-        }
-
-        // Replace common sensitive patterns with redaction
-        const std::string sensitive_patterns[] = {
-            "password", "token", "secret", "api_key", "apikey",
-            "authorization", "private_key", "credential"
-        };
-        for (const auto &pattern : sensitive_patterns)
-        {
-            for (size_t pos = sanitized.find(pattern); pos != std::string::npos; pos = sanitized.find(pattern, pos))
-            {
-                // Redact the value after the pattern name
-                size_t colon_pos = sanitized.find(':', pos);
-                size_t newline_pos = sanitized.find('\n', pos);
-                size_t end = std::min(colon_pos, newline_pos);
-                if (end != std::string::npos && end > pos)
-                {
-                    sanitized.replace(pos, end - pos + 1, pattern + ": <redacted>");
-                }
-                else if (colon_pos != std::string::npos)
-                {
-                    size_t next_newline = sanitized.find('\n', colon_pos);
-                    sanitized.replace(colon_pos + 1, (next_newline != std::string::npos ? next_newline : sanitized.size()) - colon_pos - 1, " <redacted>");
-                }
-                pos = sanitized.find(pattern, pos + pattern.size() + 12);
-            }
-        }
-
-        return sanitized;
-    }
 
     std::string ProofServerClient::Config::base_url() const
     {
@@ -96,7 +36,8 @@ namespace midnight::zk
         try
         {
             json status_response = get_server_status();
-            return status_response.contains("version");
+            return status_response.value("status", "") == "ok" ||
+                   status_response.contains("version");
         }
         catch (const std::exception &e)
         {
@@ -114,8 +55,9 @@ namespace midnight::zk
 
         try
         {
-            auto response = network_client_->get_json("/status");
-            return response.contains("version");
+            auto response = network_client_->get_json("/health");
+            return response.value("status", "") == "ok" ||
+                   response.contains("version");
         }
         catch (...)
         {
@@ -131,6 +73,14 @@ namespace midnight::zk
     {
         ProofResult result;
         result.success = false;
+        (void)circuit_name;
+        (void)circuit_data;
+        (void)inputs;
+        (void)witnesses;
+        set_error("Proof generation requires a ledger-built binary payload. "
+                  "Use post_proving_payload() for createProvingPayload(...) bytes.");
+        result.error_message = last_error_;
+        return result;
 
         try
         {
@@ -157,9 +107,10 @@ namespace midnight::zk
             request.circuit_inputs = inputs.inputs;
             request.witnesses = witnesses;
 
-            // Send to Proof Server
+            // Legacy JSON path is unreachable; the live proof-server requires
+            // binary payloads on /prove.
             json response = network_client_->post_json(
-                "/generate",
+                "/prove",
                 request.to_json());
 
             // Parse response — do NOT override parse_proof_response's success flag
@@ -265,7 +216,7 @@ namespace midnight::zk
     {
         try
         {
-            json response = network_client_->get_json("/status");
+            json response = network_client_->get_json("/health");
             return response;
         }
         catch (const std::exception &e)
@@ -275,48 +226,50 @@ namespace midnight::zk
         }
     }
 
+    std::vector<uint8_t> ProofServerClient::post_check_payload(
+        const std::vector<uint8_t> &check_payload)
+    {
+        if (check_payload.empty())
+        {
+            throw std::runtime_error("Check payload cannot be empty");
+        }
+        return network_client_->post_bytes("/check", check_payload);
+    }
+
+    std::vector<uint8_t> ProofServerClient::post_proving_payload(
+        const std::vector<uint8_t> &proving_payload)
+    {
+        if (proving_payload.empty())
+        {
+            throw std::runtime_error("Proving payload cannot be empty");
+        }
+        return network_client_->post_bytes("/prove", proving_payload);
+    }
+
+    std::vector<uint8_t> ProofServerClient::post_prove_tx_payload(
+        const std::vector<uint8_t> &prove_tx_payload)
+    {
+        if (prove_tx_payload.empty())
+        {
+            throw std::runtime_error("Prove-tx payload cannot be empty");
+        }
+        return network_client_->post_bytes("/prove-tx", prove_tx_payload);
+    }
+
     std::string ProofServerClient::submit_proof_transaction(
         const ProofEnabledTransaction &transaction,
         const std::string &rpc_endpoint)
     {
         try
         {
-            // Create RPC call to submit transaction with proof
-            json rpc_request;
-            rpc_request["jsonrpc"] = "2.0";
-            rpc_request["id"] = 1;
-            rpc_request["method"] = "submitTransaction";
-
-            json params;
-            params["transaction"] = transaction.to_json();
-            rpc_request["params"] = params;
-
-            // Send to Midnight RPC node
-            midnight::network::NetworkClient rpc_client(
-                rpc_endpoint,
-                static_cast<uint32_t>(config_.timeout_ms.count()));
-            json response = rpc_client.post_json("/", rpc_request);
-
-            // Extract transaction hash from response
-            if (response.contains("result"))
+            if (transaction.transaction_hex.empty())
             {
-                return response["result"].get<std::string>();
-            }
-            else if (response.contains("error"))
-            {
-                std::string raw_err;
-                if (response["error"].is_string())
-                {
-                    raw_err = response["error"].get<std::string>();
-                }
-                else
-                {
-                    raw_err = response["error"].dump();
-                }
-                throw std::runtime_error(sanitize_error_message(raw_err));
+                throw std::runtime_error("Proof transaction has empty transaction_hex");
             }
 
-            throw std::runtime_error("No result in RPC response");
+            midnight::network::MidnightNodeRPC rpc(rpc_endpoint);
+            return rpc.submit_transaction(
+                midnight::util::ensure_hex_prefix(transaction.transaction_hex));
         }
         catch (const std::exception &e)
         {
@@ -333,6 +286,9 @@ namespace midnight::zk
     void ProofServerClient::set_config(const Config &config)
     {
         config_ = config;
+        network_client_ = std::make_shared<midnight::network::NetworkClient>(
+            config_.base_url(),
+            static_cast<uint32_t>(config_.timeout_ms.count()));
     }
 
     ProofResult ProofServerClient::prove(
@@ -343,6 +299,14 @@ namespace midnight::zk
     {
         ProofResult result;
         result.success = false;
+        (void)circuit_name;
+        (void)prover_key_data;
+        (void)witness_data;
+        (void)public_inputs;
+        set_error("Proof proving requires a ledger-built binary payload. "
+                  "Use post_proving_payload() for createProvingPayload(...) bytes.");
+        result.error_message = last_error_;
+        return result;
 
         try
         {
@@ -397,41 +361,19 @@ namespace midnight::zk
     {
         ProofResult result;
         result.success = false;
+        (void)zk_config;
 
         try
         {
             if (tx_data.empty())
                 throw std::runtime_error("Transaction data cannot be empty");
 
-            // Build /prove-tx request
-            json request;
-
-            // Encode tx data as hex
-            std::ostringstream hex_tx;
-            for (auto b : tx_data)
-                hex_tx << std::hex << std::setfill('0') << std::setw(2)
-                       << static_cast<int>(b);
-            request["txData"] = hex_tx.str();
-
-            if (!zk_config.empty())
-            {
-                std::ostringstream hex_zk;
-                for (auto b : zk_config)
-                    hex_zk << std::hex << std::setfill('0') << std::setw(2)
-                           << static_cast<int>(b);
-                request["zkConfig"] = hex_zk.str();
-            }
-
-            // POST to /prove-tx endpoint
-            json response = network_client_->post_json("/prove-tx", request);
-
-            result = parse_proof_response(response);
-            if (result.success)
-            {
-                result.proof.generated_at_timestamp =
-                    std::chrono::system_clock::now().time_since_epoch().count() / 1000000;
-                result.proof.proof_server_endpoint = config_.base_url();
-            }
+            const auto proven_tx = post_prove_tx_payload(tx_data);
+            result.success = true;
+            result.proof.proof.proof_bytes = proven_tx;
+            result.proof.generated_at_timestamp =
+                std::chrono::system_clock::now().time_since_epoch().count() / 1000000;
+            result.proof.proof_server_endpoint = config_.base_url();
         }
         catch (const std::exception &e)
         {

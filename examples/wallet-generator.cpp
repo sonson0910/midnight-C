@@ -471,7 +471,7 @@ int main(int argc, char *argv[])
         using midnight::network::MidnightNodeRPC;
         using midnight::network::NetworkClient;
 
-        const auto testnet = NetworkConfig::Network::TESTNET;
+        const auto testnet = NetworkConfig::Network::PREPROD;
         const std::string node_endpoint = NetworkConfig::get_rpc_endpoint(testnet);
         const std::string indexer_endpoint = "https://indexer.preprod.midnight.network/api/v4/graphql";
         const std::string faucet_endpoint = NetworkConfig::get_faucet_url(testnet);
@@ -704,7 +704,7 @@ int main(int argc, char *argv[])
     {
         if (network == "preview")
         {
-            return "https://faucet.preview.midnight.network/";
+            return "https://faucet.preprod.midnight.network/";
         }
         if (network == "preprod")
         {
@@ -716,7 +716,7 @@ int main(int argc, char *argv[])
     {
         if (network == "preview")
         {
-            return "https://indexer.preview.midnight.network/";
+            return "https://indexer.preprod.midnight.network/";
         }
         if (network == "preprod")
         {

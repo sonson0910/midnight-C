@@ -33,9 +33,9 @@ struct Endpoints {
 static Endpoints get_endpoints(const std::string& net) {
     if (net == "mainnet")
         return {"mainnet", "https://indexer.mainnet.midnight.network", "/api/v4/graphql"};
-    if (net == "preprod")
-        return {"preprod", "https://indexer.preprod.midnight.network", "/api/v4/graphql"};
-    return {"preview", "https://indexer.preview.midnight.network", "/api/v4/graphql"};
+    if (net == "preview")
+        return {"preview", "https://indexer.preview.midnight.network", "/api/v4/graphql"};
+    return {"preprod", "https://indexer.preprod.midnight.network", "/api/v4/graphql"};
 }
 
 static json raw_graphql(const Endpoints& ep, const std::string& query) {
@@ -63,7 +63,7 @@ static void print_result(const std::string& name, const json& j) {
 }
 
 int main(int argc, char* argv[]) {
-    std::string network = (argc > 1) ? argv[1] : "preview";
+    std::string network = (argc > 1) ? argv[1] : "preprod";
     auto ep = get_endpoints(network);
 
     std::cout << "========================================\n";

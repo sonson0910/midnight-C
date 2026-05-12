@@ -52,6 +52,8 @@ namespace midnight::network
         std::string token_type = "NIGHT";
         std::string owner;
         bool is_spent = false;
+        bool registered_for_dust_generation = false;
+        std::string initial_nonce;
         int64_t ctime = 0;
     };
 
@@ -59,6 +61,20 @@ namespace midnight::network
         uint64_t transaction_id = 0;
         std::vector<UtxoEvent> created;
         std::vector<UtxoEvent> spent;
+    };
+
+    struct DustGenerationEvent {
+        std::string event_type;
+        uint64_t highest_index = 0;
+        uint64_t commitment_mt_index = 0;
+        uint64_t generation_mt_index = 0;
+        std::string owner;
+        std::string value;
+        std::string initial_value;
+        std::string backing_night;
+        uint64_t ctime = 0;
+        uint64_t transaction_id = 0;
+        json collapsed_merkle_tree = json::object();
     };
 
     // ═══════════════════════════════════════════════════════════
@@ -162,6 +178,7 @@ namespace midnight::network
     using UnshieldedTxCallback = std::function<void(const UnshieldedTxEvent& evt)>;
     using BalanceCallback = std::function<void(const std::string& token, uint64_t balance)>;
     using ProgressCallback = std::function<void(uint64_t highest_transaction_id)>;
+    using DustGenerationCallback = std::function<void(const DustGenerationEvent& evt)>;
 
     // ═══════════════════════════════════════════════════════════
     // GraphQLSubscriptions (legacy interface)
@@ -284,6 +301,9 @@ namespace midnight::network
         // Subscription methods
         std::string subscribe_unshielded_transactions(const std::string& address,
                                                       uint64_t from_transaction_id = 0);
+        std::string subscribe_dust_generations(const std::string& dust_address,
+                                               uint64_t start_index,
+                                               uint64_t end_index);
         bool unsubscribe(const std::string& subscription_id);
 
         // State queries
@@ -297,6 +317,7 @@ namespace midnight::network
         void on_unshielded_tx(UnshieldedTxCallback cb);
         void on_balance_change(BalanceCallback cb);
         void on_progress_change(ProgressCallback cb);
+        void on_dust_generation(DustGenerationCallback cb);
 
     private:
         // WebSocket implementation (pimpl)
@@ -324,6 +345,7 @@ namespace midnight::network
         UnshieldedTxCallback utxo_cb_;
         BalanceCallback balance_cb_;
         ProgressCallback progress_cb_;
+        DustGenerationCallback dust_generation_cb_;
 
         // State tracking
         mutable std::mutex state_mutex_;
@@ -349,7 +371,9 @@ namespace midnight::network
         void send_connection_init(const std::string& auth_token = "");
         void send_subscribe(const std::string& id, const std::string& query, const json& variables);
         void parse_unshielded_transaction_event(const json& data);
+        void parse_dust_generations_event(const json& data);
         uint64_t parse_amount(const json& val);
+        std::string normalize_token_type(const std::string& token_type) const;
     };
 
     // ═══════════════════════════════════════════════════════════
@@ -366,6 +390,9 @@ namespace midnight::network
         void init_state(const std::string& address);
         bool subscribe(const std::string& address);
         bool subscribe_resume(const std::string& address, uint64_t applied_id);
+        std::string subscribe_dust_generations(const std::string& dust_address,
+                                               uint64_t start_index,
+                                               uint64_t end_index);
         void unsubscribe();
 
         void start();
@@ -379,6 +406,7 @@ namespace midnight::network
         void on_utxo(UnshieldedTxCallback cb);
         void on_connection(ConnectionCallback cb);
         void on_progress(ProgressCallback cb);
+        void on_dust_generation(DustGenerationCallback cb);
 
     private:
         GraphQLSubscriptionClient ws_client_;
@@ -394,6 +422,7 @@ namespace midnight::network
         UnshieldedTxCallback utxo_cb_;
         ConnectionCallback conn_cb_;
         ProgressCallback progress_cb_;
+        DustGenerationCallback dust_generation_cb_;
 
         void on_ws_balance(const std::string& token, uint64_t bal);
         void on_ws_utxo(const UnshieldedTxEvent& evt);

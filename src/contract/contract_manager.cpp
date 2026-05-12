@@ -234,6 +234,16 @@ namespace midnight::contract
                                           bool wait_finalized)
     {
         DeployResult result;
+        (void)params;
+        (void)signer;
+        (void)wait_finalized;
+
+        result.error =
+            "Native Compact deployment requires a ledger-built serialized transaction. "
+            "This Substrate contracts-pallet deploy path is not valid for Midnight Compact. "
+            "Use ProofServerClient raw payload methods and submit the ledger serialized transaction.";
+        midnight::g_logger->error(result.error);
+        return result;
 
         try
         {
@@ -436,6 +446,16 @@ namespace midnight::contract
                                       bool wait_finalized)
     {
         CallResult result;
+        (void)params;
+        (void)signer;
+        (void)wait_finalized;
+
+        result.error =
+            "Native Compact calls require a ledger-built serialized transaction. "
+            "This Substrate contracts-pallet call path is not valid for Midnight Compact. "
+            "Use ProofServerClient raw payload methods and submit the ledger serialized transaction.";
+        midnight::g_logger->error(result.error);
+        return result;
 
         try
         {
@@ -663,48 +683,15 @@ namespace midnight::contract
         const CallParams &params,
         const ContractArtifact &artifact)
     {
-        try
-        {
-            // Find the circuit's prover key
-            auto it = artifact.circuits.find(params.circuit_name);
-            if (it == artifact.circuits.end())
-            {
-                throw std::runtime_error(
-                    "Circuit not found in artifact: " + params.circuit_name);
-            }
+        (void)params;
+        (void)artifact;
 
-            // Build proof generation request for /prove-tx endpoint
-            zk::PublicInputs inputs;
-            inputs.inputs = {
-                {"contract_address", params.contract_address},
-                {"circuit_name", params.circuit_name}};
-
-            std::map<std::string, zk::WitnessOutput> witnesses;
-            // Witness outputs would be populated from circuit execution
-
-            auto proof_result = proof_server_->generate_proof(
-                params.circuit_name,
-                it->second, // circuit prover key
-                inputs,
-                witnesses);
-
-            if (proof_result.success)
-            {
-                midnight::g_logger->info("Proof generated for: " + params.circuit_name);
-                return proof_result.proof.proof.proof_bytes;
-            }
-            else
-            {
-                midnight::g_logger->error("Proof generation failed: " +
-                                           proof_result.error_message);
-                return {};
-            }
-        }
-        catch (const std::exception &e)
-        {
-            midnight::g_logger->error("Proof generation error: " + std::string(e.what()));
-            return {};
-        }
+        midnight::g_logger->error(
+            "ContractManager::generate_proof requires a ledger-built binary proving "
+            "payload. The Midnight proof server does not accept JSON circuit/prover-key "
+            "requests for Compact proofs; use ProofServerClient::post_proving_payload() "
+            "or post_prove_tx_payload() with bytes from midnight-ledger.");
+        return {};
     }
 
     // ─── Utilities ────────────────────────────────────────────

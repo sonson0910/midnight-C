@@ -140,8 +140,8 @@ TEST(HDWalletTest, AddressFormat)
     auto wallet = HDWallet::from_mnemonic(mnemonic);
     auto key = wallet.derive_night(0, 0);
 
-    // Address is Bech32m with mn_addr_preview1 prefix (74 chars)
-    EXPECT_EQ(key.address.substr(0, 16), "mn_addr_preview1");
+    // Address is Bech32m with mn_addr_preprod prefix (74 chars)
+    EXPECT_EQ(key.address.substr(0, 16), "mn_addr_preprod1");
     EXPECT_EQ(key.address.size(), 74u);
 }
 
@@ -213,10 +213,10 @@ TEST(Bech32mTest, EncodeUnshielded_CorrectPrefix)
 {
     // 32-byte fake public key
     std::vector<uint8_t> pubkey(32, 0xAB);
-    auto addr = address::encode_unshielded(pubkey, address::Network::Preview);
+    auto addr = address::encode_unshielded(pubkey, address::Network::PreProd);
 
-    // Must start with mn_addr_preview1
-    EXPECT_EQ(addr.substr(0, 16), "mn_addr_preview1");
+    // Must start with mn_addr_preprod
+    EXPECT_EQ(addr.substr(0, 16), "mn_addr_preprod1");
 }
 
 TEST(Bech32mTest, EncodeUnshielded_Mainnet)
@@ -240,7 +240,7 @@ TEST(Bech32mTest, RoundTrip_UnshieldedAddress)
     for (int i = 0; i < 32; i++)
         pubkey[i] = static_cast<uint8_t>(i);
 
-    auto encoded = address::encode_unshielded(pubkey, address::Network::Preview);
+    auto encoded = address::encode_unshielded(pubkey, address::Network::PreProd);
     auto decoded = address::decode_unshielded(encoded);
 
     EXPECT_EQ(decoded.size(), 32u);
@@ -251,24 +251,24 @@ TEST(Bech32mTest, EncodeShielded_CorrectPrefix)
 {
     std::vector<uint8_t> coin_pk(32, 0x11);
     std::vector<uint8_t> enc_pk(32, 0x22);
-    auto addr = address::encode_shielded(coin_pk, enc_pk, address::Network::Preview);
+    auto addr = address::encode_shielded(coin_pk, enc_pk, address::Network::PreProd);
 
-    EXPECT_EQ(addr.substr(0, 23), "mn_shield-addr_preview1");
+    EXPECT_EQ(addr.substr(0, 23), "mn_shield-addr_preprod1");
 }
 
 TEST(Bech32mTest, EncodeDust_CorrectPrefix)
 {
     std::vector<uint8_t> dust_data(32, 0x33);
-    auto addr = address::encode_dust(dust_data, address::Network::Preview);
+    auto addr = address::encode_dust(dust_data, address::Network::PreProd);
 
-    EXPECT_EQ(addr.substr(0, 16), "mn_dust_preview1");
+    EXPECT_EQ(addr.substr(0, 16), "mn_dust_preprod1");
 }
 
 TEST(Bech32mTest, DecodeInvalidChecksum)
 {
     // Tamper with a valid address
     std::vector<uint8_t> pubkey(32, 0xAA);
-    auto addr = address::encode_unshielded(pubkey, address::Network::Preview);
+    auto addr = address::encode_unshielded(pubkey, address::Network::PreProd);
     // Flip last char
     addr.back() = (addr.back() == 'q') ? 'p' : 'q';
     EXPECT_THROW(address::decode_unshielded(addr), std::runtime_error);
@@ -282,8 +282,8 @@ TEST(Bech32mTest, WalletDerived_RoundTrip)
     auto wallet = HDWallet::from_mnemonic(mnemonic);
     auto key = wallet.derive_night(0, 0);
 
-    auto addr = address::encode_unshielded(key.public_key, address::Network::Preview);
-    EXPECT_EQ(addr.substr(0, 16), "mn_addr_preview1");
+    auto addr = address::encode_unshielded(key.public_key, address::Network::PreProd);
+    EXPECT_EQ(addr.substr(0, 16), "mn_addr_preprod1");
 
     auto decoded = address::decode_unshielded(addr);
     EXPECT_EQ(decoded, key.public_key);

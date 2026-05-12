@@ -73,7 +73,7 @@ namespace address {
     /// Encode a 32-byte public key into a Midnight unshielded address
     /// e.g. "mn_addr_preview1qpz..."
     std::string encode_unshielded(const std::vector<uint8_t>& pubkey_32,
-                                   Network network = Network::Preview);
+                                   Network network = Network::PreProd);
 
     /// Decode a Midnight unshielded address back to a 32-byte public key
     std::vector<uint8_t> decode_unshielded(const std::string& address);
@@ -82,7 +82,7 @@ namespace address {
     /// SDK: ShieldedAddress.codec type="shield-addr", data = coinPubKey || encPubKey
     std::string encode_shielded(const std::vector<uint8_t>& coin_pk_32,
                                  const std::vector<uint8_t>& enc_pk_32,
-                                 Network network = Network::Preview);
+                                 Network network = Network::PreProd);
 
     /// Decode a shielded address back to coinPubKey (32) + encPubKey (32)
     struct ShieldedAddressData {
@@ -95,12 +95,12 @@ namespace address {
     /// SDK: DustAddress uses bigint → SCALE BigInt encoding → Bech32m
     /// @param dust_scalar_le Little-endian bytes of the BLS scalar (DustPublicKey)
     std::string encode_dust(const std::vector<uint8_t>& dust_scalar_le,
-                             Network network = Network::Preview);
+                             Network network = Network::PreProd);
 
     /// Encode a dust address from raw 32-byte public key
     /// Convenience: converts Ed25519 pubkey to BLS scalar format first
     std::string encode_dust_from_pubkey(const std::vector<uint8_t>& pubkey_32,
-                                         Network network = Network::Preview);
+                                         Network network = Network::PreProd);
 
     /// Decode a dust address back to BLS scalar bytes
     std::vector<uint8_t> decode_dust(const std::string& address);

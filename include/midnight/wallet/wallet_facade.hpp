@@ -260,7 +260,7 @@ struct WalletFacadeConfig {
     std::string indexer_ws_url;             ///< Indexer WebSocket (optional)
     std::string relay_url;                  ///< Node relay for TX submission
     std::string proving_server_url;         ///< Proof server (http://localhost:6300)
-    address::Network network = address::Network::Preview;
+    address::Network network = address::Network::PreProd;
     CoinSelectionStrategy coin_selection = CoinSelectionStrategy::LargestFirst;
 };
 
@@ -343,12 +343,12 @@ public:
     static WalletFacade from_mnemonic(
         const std::string& mnemonic,
         const std::string& indexer_url,
-        address::Network network = address::Network::Preview);
+        address::Network network = address::Network::PreProd);
 
     static WalletFacade from_wallet(
         const HDWallet& hd_wallet,
         const std::string& indexer_url,
-        address::Network network = address::Network::Preview);
+        address::Network network = address::Network::PreProd);
 
     /// Fetch Terms and Conditions from network indexer (SDK static method)
     /// Pre-initialization utility — no wallet instance required
@@ -565,7 +565,7 @@ private:
     std::string dust_addr_;
     std::string shielded_addr_;
     std::string indexer_url_;
-    address::Network network_ = address::Network::Preview;
+    address::Network network_ = address::Network::PreProd;
     FacadeState state_;
     bool cleared_ = false;
     bool running_ = false;

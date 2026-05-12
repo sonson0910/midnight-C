@@ -105,6 +105,40 @@ namespace midnight::zk
         json get_server_status();
 
         /**
+         * @brief Low-level Midnight proof-server /check endpoint.
+         *
+         * The official proof server expects a tagged binary payload produced by
+         * ledger createCheckPayload(serializedPreimage), not JSON.
+         *
+         * @param check_payload Tagged binary check payload.
+         * @return Tagged binary parseCheckResult payload from the proof server.
+         */
+        std::vector<uint8_t> post_check_payload(const std::vector<uint8_t> &check_payload);
+
+        /**
+         * @brief Low-level Midnight proof-server /prove endpoint.
+         *
+         * The official proof server expects a tagged binary payload produced by
+         * ledger createProvingPayload(serializedPreimage, overwriteBindingInput,
+         * keyMaterial), not JSON.
+         *
+         * @param proving_payload Tagged binary proving payload.
+         * @return Tagged binary Proof payload from the proof server.
+         */
+        std::vector<uint8_t> post_proving_payload(const std::vector<uint8_t> &proving_payload);
+
+        /**
+         * @brief Low-level Midnight proof-server /prove-tx endpoint.
+         *
+         * Deprecated upstream but useful for compatibility. The request body
+         * must be the ledger TransactionProvePayload binary serialization.
+         *
+         * @param prove_tx_payload Tagged binary transaction proving payload.
+         * @return Serialized proven transaction bytes.
+         */
+        std::vector<uint8_t> post_prove_tx_payload(const std::vector<uint8_t> &prove_tx_payload);
+
+        /**
          * @brief Submit proof to blockchain via RPC
          *
          * After proof is generated and verified, submit to network.

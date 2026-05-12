@@ -360,15 +360,14 @@ TEST_F(SigningSubmissionTest, BatchSign_MultipleTransactions_SignsAll)
 // Test 15: Recover Signer from Signature
 // ============================================================================
 
-TEST_F(SigningSubmissionTest, RecoverSigner_ValidSignature_RecoversSigner)
+TEST_F(SigningSubmissionTest, RecoverSigner_Sr25519_ReturnsEmpty)
 {
     auto tx_data = create_mock_transaction();
     std::string signature = "0x" + std::string(128, 'a');
 
     auto signer = SignatureVerifier::recover_signer(tx_data, signature);
 
-    ASSERT_TRUE(signer.has_value());
-    EXPECT_FALSE(signer->empty());
+    EXPECT_FALSE(signer.has_value());
 }
 
 // ============================================================================

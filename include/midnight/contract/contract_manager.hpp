@@ -130,6 +130,11 @@ namespace midnight::contract
     /**
      * @brief Midnight contract lifecycle manager
      *
+     * Production note: Compact deploy/call transactions are ledger-built
+     * serialized payloads, not Substrate contracts-pallet extrinsics. The
+     * high-level deploy()/call() methods currently fail safely until the native
+     * Midnight ledger transaction builder is bound into the SDK.
+     *
      * Provides a unified C++ API for the full contract lifecycle:
      *   1. Deploy    — compile artifacts + construct deployment extrinsic
      *   2. Call      — invoke circuit functions with ZK proof generation
@@ -145,9 +150,9 @@ namespace midnight::contract
      * Example:
      * ```cpp
      * ContractManager mgr(
-     *     "https://rpc.preview.midnight.network",
+     *     "https://rpc.preprod.midnight.network",
      *     "http://localhost:6300",
-     *     "https://indexer.preview.midnight.network/graphql"
+     *     "https://indexer.preprod.midnight.network/api/v4/graphql"
      * );
      *
      * auto wallet = HDWallet::from_mnemonic("...");
@@ -183,7 +188,12 @@ namespace midnight::contract
         // ─── Deployment ───────────────────────────────────────
 
         /**
-         * @brief Deploy a compiled contract to the network
+         * @brief Fail-safe placeholder for Compact deployment
+         *
+         * Midnight Compact deployment requires ledger-built serialized transaction
+         * bytes. This method intentionally does not construct Substrate
+         * contracts.instantiateWithCode calls because that format is not valid for
+         * Midnight Compact.
          *
          * Workflow:
          *   1. Build contracts.instantiateWithCode extrinsic
@@ -204,7 +214,10 @@ namespace midnight::contract
         // ─── Contract Calls ───────────────────────────────────
 
         /**
-         * @brief Call a contract circuit function
+         * @brief Fail-safe placeholder for Compact state-changing calls
+         *
+         * Midnight Compact calls require ledger-built serialized transaction bytes,
+         * not Substrate contracts.call extrinsics.
          *
          * Workflow:
          *   1. Generate ZK proof via Proof Server (if not pre-provided)

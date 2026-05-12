@@ -98,6 +98,13 @@ namespace midnight::network
         uint64_t get_balance(const std::string &address);
 
         /**
+         * @brief Query contract state (UTXOs and balance) for an address
+         * @param contract_address Bech32m-encoded address (unshielded/shielded/dust)
+         * @return JSON with contract state including UTXOs and unshielded_balances
+         */
+        json get_contract_state(const std::string &contract_address);
+
+        /**
          * @brief Evaluate script (for smart contract validation)
          * @param script Plutus/Compact script bytecode
          * @param redeemer Redeemer data

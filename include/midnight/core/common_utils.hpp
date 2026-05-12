@@ -35,6 +35,19 @@ namespace midnight::util
         return value;
     }
 
+    inline std::string ensure_hex_prefix(const std::string &value)
+    {
+        if (value.empty())
+        {
+            return value;
+        }
+        if (value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0)
+        {
+            return value;
+        }
+        return std::string("0x") + value;
+    }
+
     inline bool is_hex_string(const std::string &value)
     {
         if (value.empty() || (value.size() % 2) != 0)

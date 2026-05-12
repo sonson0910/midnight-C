@@ -512,13 +512,13 @@ namespace midnight::signing_submission
             // The public_key should be the 32-byte x-only key, encoded as Bech32m
             std::string hex_pk = strip_hex_prefix(keypair.public_key);
             std::vector<uint8_t> pk_bytes = midnight::util::hex_to_bytes(hex_pk);
-            return midnight::wallet::address::encode_unshielded(pk_bytes, midnight::wallet::address::Network::Preview);
+            return midnight::wallet::address::encode_unshielded(pk_bytes, midnight::wallet::address::Network::PreProd);
         }
         case KeyType::BLS:
             // BLS keys use dust address format with SCALE encoding
             return midnight::wallet::address::encode_dust_from_pubkey(
                 midnight::util::hex_to_bytes(strip_hex_prefix(keypair.public_key)),
-                midnight::wallet::address::Network::Preview);
+                midnight::wallet::address::Network::PreProd);
         }
         return "";
     }

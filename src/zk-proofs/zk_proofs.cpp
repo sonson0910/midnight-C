@@ -30,6 +30,8 @@ namespace
 
     using midnight::util::strip_hex_prefix;
     using midnight::util::is_hex_string;
+    using midnight::util::to_lower_copy;
+    using midnight::util::bytes_to_hex;
 
     // Sanitize error messages to prevent internal information disclosure.
     // Only allows printable ASCII, limits length, and strips sensitive patterns.
@@ -102,8 +104,25 @@ namespace
         return std::vector<uint8_t>(value.begin(), value.end());
     }
 
-    // Import shared bytes_to_hex from common_utils.hpp
-    using midnight::util::bytes_to_hex;
+    std::string normalize_hex_bytes(std::string value)
+    {
+        value = strip_hex_prefix(value);
+        if (value.empty())
+        {
+            return "00";
+        }
+        if (!is_hex_string(value))
+        {
+            value = bytes_to_hex(std::vector<uint8_t>(value.begin(), value.end()));
+        }
+        return to_lower_copy(value);
+    }
+
+    bool is_even_hex_payload(const std::string &value)
+    {
+        const std::string stripped = strip_hex_prefix(value);
+        return !stripped.empty() && is_hex_string(stripped);
+    }
 
     // Import shared JSON bridge from json_bridge_utils.hpp
     using midnight::util::nlohmann_to_jsoncpp;
@@ -209,8 +228,21 @@ namespace midnight::zk_proofs
         try
         {
             midnight::network::NetworkClient client(proof_server_url_, kProofServerTimeoutMs);
-            NJson response = client.get_json("/status");
-            return response.is_object() || response.is_array();
+            for (const auto &endpoint : {std::string("/health"), std::string("/status")})
+            {
+                try
+                {
+                    NJson response = client.get_json(endpoint);
+                    if (response.is_object() || response.is_array())
+                    {
+                        return true;
+                    }
+                }
+                catch (...)
+                {
+                }
+            }
+            return false;
         }
         catch (...)
         {
@@ -229,169 +261,13 @@ namespace midnight::zk_proofs
             return result;
         }
 
-        try
-        {
-            const auto started = std::chrono::high_resolution_clock::now();
-
-            const std::string circuit_name =
-                request.circuit_id.empty() ? "default_circuit" : request.circuit_id;
-
-            std::vector<uint8_t> circuit_data;
-            auto circuit_data_it = request.private_inputs.find("__circuit_data_hex");
-            if (circuit_data_it != request.private_inputs.end())
-            {
-                circuit_data = decode_hex_or_ascii(circuit_data_it->second);
-            }
-            if (circuit_data.empty())
-            {
-                circuit_data.assign(circuit_name.begin(), circuit_name.end());
-            }
-
-            NJson proof_request;
-            proof_request["circuit_name"] = circuit_name;
-            proof_request["circuit_data_hex"] = bytes_to_hex(circuit_data);
-
-            NJson inputs_json = NJson::object();
-            for (const auto &[key, value] : request.public_inputs)
-            {
-                std::string normalized = strip_hex_prefix(value);
-                if (normalized.empty())
-                {
-                    normalized = "00";
-                }
-                else if (!is_hex_string(normalized))
-                {
-                    normalized = bytes_to_hex(std::vector<uint8_t>(value.begin(), value.end()));
-                }
-                inputs_json[key] = normalized;
-            }
-            proof_request["circuit_inputs"] = inputs_json;
-
-            NJson witnesses_json = NJson::object();
-            for (const auto &[key, value] : request.private_inputs)
-            {
-                if (key == "__circuit_data_hex")
-                {
-                    continue;
-                }
-
-                const std::vector<uint8_t> witness_bytes = decode_hex_or_ascii(value);
-                NJson witness_json;
-                witness_json["witness_name"] = key;
-                witness_json["output_type"] = "Bytes";
-                witness_json["output_hex"] = bytes_to_hex(witness_bytes);
-                witness_json["size"] = witness_bytes.size();
-                witnesses_json[key] = witness_json;
-            }
-            proof_request["witnesses"] = witnesses_json;
-
-            midnight::network::NetworkClient client(proof_server_url_, kProofServerTimeoutMs);
-            const std::vector<std::string> generate_endpoints = {
-                "/generate",
-                "/proof/generate",
-            };
-
-            NJson response;
-            bool endpoint_hit = false;
-            std::string last_error;
-            for (const auto &endpoint : generate_endpoints)
-            {
-                try
-                {
-                    response = client.post_json(endpoint, proof_request);
-                    endpoint_hit = true;
-                    break;
-                }
-                catch (const std::exception &e)
-                {
-                    last_error = e.what();
-                }
-            }
-
-            if (!endpoint_hit)
-            {
-                throw std::runtime_error(last_error.empty() ? "No generate endpoint available" : last_error);
-            }
-
-            const auto finished = std::chrono::high_resolution_clock::now();
-            result.generation_time_ms =
-                static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(finished - started).count());
-
-            result.proof.circuit_id = circuit_name;
-            const NJson result_node = response.contains("result") ? response["result"] : response;
-
-            if (response.contains("success") && response["success"].is_boolean())
-            {
-                result.success = response["success"].get<bool>();
-            }
-            else
-            {
-                result.success = true;
-            }
-
-            if (response.contains("error"))
-            {
-                result.success = false;
-                if (response["error"].is_string())
-                {
-                    result.error_message = sanitize_error_message(response["error"].get<std::string>());
-                }
-                else
-                {
-                    result.error_message = sanitize_error_message(response["error"].dump());
-                }
-            }
-
-            const auto proof_hex = extract_proof_hex(result_node);
-            if (proof_hex.has_value())
-            {
-                std::string normalized_proof = *proof_hex;
-                if (normalized_proof.rfind("0x", 0) != 0 && normalized_proof.rfind("0X", 0) != 0)
-                {
-                    normalized_proof = "0x" + normalized_proof;
-                }
-                result.proof.proof_data = normalized_proof;
-            }
-
-            if (result_node.is_object() && result_node.contains("public_inputs") && result_node["public_inputs"].is_object())
-            {
-                for (const auto &[_, value] : result_node["public_inputs"].items())
-                {
-                    if (value.is_string())
-                    {
-                        result.proof.public_inputs.push_back(value.get<std::string>());
-                    }
-                }
-            }
-
-            if (result.proof.public_inputs.empty())
-            {
-                for (const auto &[_, value] : request.public_inputs)
-                {
-                    result.proof.public_inputs.push_back(value);
-                }
-            }
-
-            result.proof.verified = false;
-
-            if (!result.success && result.error_message.empty())
-            {
-                result.error_message = "Proof server returned an unsuccessful response";
-            }
-
-            if (result.success)
-            {
-                ProofPerformanceMonitor::record_generation_time(result.generation_time_ms);
-            }
-
-            return result;
-        }
-        catch (const std::exception &e)
-        {
-            result.success = false;
-            result.error_message = std::string("Proof generation failed: ") + e.what();
-            return result;
-        }
+        (void)request;
+        result.success = false;
+        result.error_message =
+            "ProofServerClient::request_proof requires ledger-built binary payloads. "
+            "Midnight proof-server exposes /check, /prove, and /prove-tx for serialized "
+            "payload bytes; JSON /generate and /proof/generate are not valid endpoints.";
+        return result;
     }
 
     std::optional<ProofGenResult> ProofServerClient::get_proof_status(const std::string &request_id)
@@ -533,11 +409,10 @@ namespace midnight::zk_proofs
     {
         auto start = std::chrono::high_resolution_clock::now();
 
-        // In production: Verify zk-SNARK using verification key
-        // For now: Basic validation
-
-        if (proof.proof_data.size() != 258)
-        { // "0x" + 256 hex chars = 128 bytes
+        const std::string proof_hex = strip_hex_prefix(proof.proof_data);
+        const size_t proof_bytes = proof_hex.size() / 2;
+        if (!is_even_hex_payload(proof.proof_data) || proof_bytes < 64 || proof_bytes > (10 * 1024 * 1024))
+        {
             return false;
         }
 
@@ -608,10 +483,10 @@ namespace midnight::zk_proofs
         /**
          * Step 2: Validate proof format
          * 
-         * A proper ZK proof has specific structure depending on the proving system:
-         * - Groth16: 3 elements (A, B, C) from pairing groups - ~128 bytes (compressed)
-         * - PLONK: larger proof with multiple elements - ~400+ bytes
-         * - Halo2: variable size depending on constraints - ~100-200 bytes
+     * Midnight proofs are PLONK transcript bytes. The exact size depends on the
+     * circuit, public inputs, and cost model, so validation here only checks
+     * the transport encoding and leaves cryptographic verification to the
+     * Midnight verifier/proof stack.
          * 
          * We check for minimum size and valid hex format.
          */
@@ -656,7 +531,12 @@ namespace midnight::zk_proofs
             vk_hex = vk_hex.substr(2);
         }
         
-        if (vk_hex.size() < 128) {  // Minimum reasonable VK size
+        if (!is_hex_string(vk_hex)) {
+            midnight::g_logger->error("ZK proof verification failed: verification key is not hex");
+            return false;
+        }
+        
+        if (vk_hex.size() < 128) {
             midnight::g_logger->warn("ZK verification key appears too small - may be malformed");
         }
         

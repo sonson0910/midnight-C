@@ -27,6 +27,7 @@
 
 #include <gtest/gtest.h>
 #include "midnight/zk-proofs/zk_proofs.hpp"
+#include "midnight/zk/proof_server_client.hpp"
 #include <thread>
 #include <chrono>
 
@@ -45,7 +46,7 @@ protected:
     {
         ZkCircuit circuit;
         circuit.circuit_id = "voting_circuit";
-        circuit.verification_key = "0x" + std::string(128, 'v');
+        circuit.verification_key = "0x" + std::string(128, 'a');
         circuit.gate_count = 50000;
         circuit.constraint_count = 45000;
         circuit.proof_size_bytes = 128;
@@ -168,7 +169,7 @@ TEST_F(ZkProofsTest, VerifyProof_ValidProof_ReturnsTrue)
     ProofVerifier verifier(circuit);
 
     ZkProof proof;
-    proof.proof_data = "0x" + std::string(256, 'p');
+    proof.proof_data = "0x" + std::string(256, 'b');
     proof.circuit_id = "voting_circuit";
     proof.public_inputs.push_back("1");
 
@@ -183,7 +184,7 @@ TEST_F(ZkProofsTest, VerifyProof_InvalidProofSize_ReturnsFalse)
     ProofVerifier verifier(circuit);
 
     ZkProof proof;
-    proof.proof_data = "0x" + std::string(100, 'p'); // Wrong size
+    proof.proof_data = "0x" + std::string(62, 'b'); // Too small: 31 bytes
     proof.circuit_id = "voting_circuit";
 
     bool verified = verifier.verify(proof);
@@ -204,7 +205,7 @@ TEST_F(ZkProofsTest, VerifyBatch_MultipleProofs_VerifiesAll)
     for (int i = 0; i < 3; ++i)
     {
         ZkProof proof;
-        proof.proof_data = "0x" + std::string(256, 'p');
+        proof.proof_data = "0x" + std::string(256, 'b');
         proof.circuit_id = "voting_circuit";
         proofs.push_back(proof);
     }
@@ -224,7 +225,7 @@ TEST_F(ZkProofsTest, VerifyProof_WrongCircuit_ReturnsFalse)
     ProofVerifier verifier(circuit);
 
     ZkProof proof;
-    proof.proof_data = "0x" + std::string(256, 'p');
+    proof.proof_data = "0x" + std::string(256, 'b');
     proof.circuit_id = "wrong_circuit"; // Mismatch
 
     bool verified = verifier.verify(proof);
@@ -240,7 +241,7 @@ TEST_F(ZkProofsTest, PedersenCommit_ValidInputs_ReturnsCommitment)
 {
     std::string commitment = CommitmentGenerator::pedersen_commit("value123", "random456");
 
-    EXPECT_EQ(commitment.size(), 66); // "0x" + 64 hex chars
+    EXPECT_EQ(commitment.size(), 68); // "0x" + compressed secp256k1 point
 }
 
 TEST_F(ZkProofsTest, PedersenCommit_EmptyInputs_ReturnsEmpty)
@@ -356,7 +357,7 @@ TEST_F(ZkProofsTest, BuildWitness_CompleteWitness_GeneratesCommitments)
 TEST_F(ZkProofsTest, CacheProof_ValidProof_CachesProof)
 {
     ZkProof proof;
-    proof.proof_data = "0x" + std::string(256, 'p');
+    proof.proof_data = "0x" + std::string(256, 'b');
     proof.circuit_id = "voting_circuit";
 
     std::vector<std::string> public_inputs = {"1"};
@@ -375,7 +376,7 @@ TEST_F(ZkProofsTest, CacheProof_ValidProof_CachesProof)
 TEST_F(ZkProofsTest, GetCachedProof_ExistingProof_ReturnsProof)
 {
     ZkProof original_proof;
-    original_proof.proof_data = "0x" + std::string(256, 'p');
+    original_proof.proof_data = "0x" + std::string(256, 'b');
     original_proof.circuit_id = "voting_circuit";
 
     std::vector<std::string> public_inputs = {"1"};
@@ -403,7 +404,7 @@ TEST_F(ZkProofsTest, GetCachedProof_NonexistentProof_ReturnsEmpty)
 TEST_F(ZkProofsTest, ClearCache_CachedProofs_ClearsAll)
 {
     ZkProof proof;
-    proof.proof_data = "0x" + std::string(256, 'p');
+    proof.proof_data = "0x" + std::string(256, 'b');
 
     ProofCache::cache_proof("circuit1", {"input1"}, proof);
     ProofCache::cache_proof("circuit2", {"input2"}, proof);
@@ -526,4 +527,19 @@ TEST_F(ZkProofsTest, VerifyBatch_EmptyProofs_ReturnsFalse)
     bool verified = verifier.verify_batch(empty_proofs);
 
     EXPECT_FALSE(verified);
+}
+
+TEST(ProofServerRawClientTest, Config_DefaultsToLocalProofServer)
+{
+    midnight::zk::ProofServerClient::Config config;
+    EXPECT_EQ(config.base_url(), "http://localhost:6300");
+}
+
+TEST(ProofServerRawClientTest, RawPayloadEndpoints_RejectEmptyPayload)
+{
+    midnight::zk::ProofServerClient client;
+
+    EXPECT_THROW(client.post_check_payload({}), std::runtime_error);
+    EXPECT_THROW(client.post_proving_payload({}), std::runtime_error);
+    EXPECT_THROW(client.post_prove_tx_payload({}), std::runtime_error);
 }

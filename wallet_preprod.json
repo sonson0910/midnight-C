@@ -1,0 +1,24 @@
+{
+  "config": {
+    "indexerHttpUrl": "https://indexer.preprod.midnight.network/api/v4/graphql",
+    "indexerWsUrl": "wss://indexer.preprod.midnight.network/api/v4/graphql",
+    "nodeHttpUrl": "https://node.preprod.midnight.network",
+    "proofServerUrl": "http://127.0.0.1:6300"
+  },
+  "derivation_paths": {
+    "night": "m/44'/2400'/0'/0/0",
+    "dust": "m/44'/2400'/0'/2/0",
+    "shielded": "m/44'/2400'/0'/3/0"
+  },
+  "network": "preprod",
+  "mnemonic": "hope ensure armor runway this tongue certain hold lend evolve novel catch enemy dutch police feel random dawn spider prevent motion cat rookie cry",
+  "night_address": "mn_addr_preprod1hp7hscgqcpy6mfj6ca8sx45mmrwl4rg4tp9ffjh5yjpsagrzl5mspp25nt",
+  "night_sk": "15b1dde6da8c18da86b638468871e08e2071d0b81b64a4f24dd6c435fa41d993b87d786100c049ada65ac74f03569bd8ddfa8d15584a94caf424830ea062fd37",
+  "night_pk": "b87d786100c049ada65ac74f03569bd8ddfa8d15584a94caf424830ea062fd37",
+  "dust_address": "mn_dust_preprod1wvqwajhnqrg82uyte80c2p58urz9q4wzq5w4lwrwg87ve88j8u3ccnxmhzd",
+  "dust_sk": "91eecb8400d074b4fb4530bbec78178b29bd372f137d56d6c851cbbff23f238c",
+  "dust_pk": "00eecaf300d075708bc9df850687e0c45055c2051d5fb86e41fccc9cf23f238c",
+  "shielded_address": "mn_shield-addr_preprod1y9ll2axypt2cvnuusa6s2l7xytm2svdr0f235rek23df570cg2lfvnusaux58e5ssjh3hzacsm6k7w2q5kxy7z9qqnqyyr5ha3txxyc2ngm42",
+  "shielded_coin_public_key": "217ff574c40ad5864f9c8775057fc622f6a831a37a551a0f36545a9a79f842be",
+  "shielded_encryption_public_key": "964f90ef0d43e69084af1b8bb886f56f3940a58c4f08a004c0420e97ec566313"
+}

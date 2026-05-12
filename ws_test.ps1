@@ -2,10 +2,10 @@
 # WebSocket test for Midnight Indexer
 
 param(
-    [string]$Address = "mn_addr_preview1gd6495fqs6q4euafwcgy53tgz0jqee355h2fk9qqcp3pf00azf6qjgyqhc"
+    [string]$Address = ""
 )
 
-$ws_url = "wss://indexer.preview.midnight.network/api/v4/graphql"
+$ws_url = "wss://indexer.preprod.midnight.network/api/v4/graphql"
 $timeout = 15
 
 Write-Host "=== Midnight Indexer WebSocket Test ===" -ForegroundColor Cyan

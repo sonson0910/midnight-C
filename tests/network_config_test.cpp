@@ -6,7 +6,7 @@ using midnight::network::NetworkConfig;
 
 TEST(NetworkConfigTest, FromString_AcceptsMidnightPreprodAlias)
 {
-    EXPECT_EQ(NetworkConfig::from_string("midnight-preprod"), NetworkConfig::Network::TESTNET);
+    EXPECT_EQ(NetworkConfig::from_string("midnight-preprod"), NetworkConfig::Network::PREPROD);
 }
 
 TEST(NetworkConfigTest, FromString_IsCaseInsensitiveForMidnightAliases)

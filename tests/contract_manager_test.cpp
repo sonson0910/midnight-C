@@ -179,9 +179,9 @@ class ContractManagerIntegrationTest : public ::testing::Test
 protected:
     std::unique_ptr<ContractManager> mgr_;
 
-    static constexpr const char *DEFAULT_RPC = "https://rpc.preview.midnight.network";
-    static constexpr const char *DEFAULT_PROOF = "https://proof.preview.midnight.network";
-    static constexpr const char *DEFAULT_INDEXER = "https://indexer.preview.midnight.network/api/v4/graphql";
+    static constexpr const char *DEFAULT_RPC = "https://rpc.preprod.midnight.network";
+    static constexpr const char *DEFAULT_PROOF = "https://proof.preprod.midnight.network";
+    static constexpr const char *DEFAULT_INDEXER = "https://indexer.preprod.midnight.network/api/v4/graphql";
 
     void SetUp() override
     {

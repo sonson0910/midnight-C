@@ -1,11 +1,11 @@
 /**
  * Phase 4: ZK Proofs (Zero-Knowledge SNARKs)
- * Generates and verifies 128-byte zk-SNARKs for Midnight transactions
+ * Handles Midnight ZK proof payloads for transactions
  *
  * Midnight uses zk-SNARKs for:
  * - Proving transaction correctness WITHOUT revealing amounts
  * - Privacy: Commitments provably correct without exposing values
- * - Compact proofs: 128 bytes (very small for on-chain)
+ * - Compact binary PLONK proofs whose size depends on the circuit
  */
 
 #pragma once
@@ -35,8 +35,8 @@ namespace midnight::zk_proofs
         uint32_t constraint_count = 0;
         uint32_t variable_count = 0;
 
-        // Proof size
-        uint32_t proof_size_bytes = 128; // Always 128 bytes for Midnight
+        // Expected proof size hint, when known.
+        uint32_t proof_size_bytes = 0;
 
         // Performance
         uint64_t prover_time_ms = 0; // Estimated proof generation time
@@ -62,11 +62,11 @@ namespace midnight::zk_proofs
 
     /**
      * ZK Proof
-     * 128-byte Midnight zk-SNARK proof
+     * Midnight proof bytes encoded as hex.
      */
     struct ZkProof
     {
-        std::string proof_data; // 128 bytes = 256 hex chars
+        std::string proof_data; // Hex payload, with or without 0x prefix.
         std::string circuit_id;
 
         // Metadata
@@ -123,7 +123,7 @@ namespace midnight::zk_proofs
     public:
         /**
          * Constructor
-         * @param proof_server_url: URL of Proof Server (e.g., https://proof.preprod.midnight.network)
+         * @param proof_server_url: URL of local Proof Server (e.g., http://localhost:6300)
          */
         explicit ProofServerClient(const std::string &proof_server_url);
 
@@ -143,9 +143,14 @@ namespace midnight::zk_proofs
         bool is_healthy();
 
         /**
-         * Request proof generation
+         * Legacy high-level proof request.
+         *
+         * Midnight proof-server accepts ledger-built binary payloads on /check,
+         * /prove, and /prove-tx. This method returns a clear error until the
+         * caller supplies serialized payload bytes from the ledger/Compact toolchain.
+         *
          * @param request: Witness data and parameters
-         * @return Generated proof or error
+         * @return Error explaining the required binary payload flow
          */
         ProofGenResult request_proof(const ProofRequest &request);
 

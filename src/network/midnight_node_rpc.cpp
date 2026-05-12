@@ -1,6 +1,7 @@
 #include "midnight/network/midnight_node_rpc.hpp"
+#include "midnight/core/common_utils.hpp"
 #include "midnight/core/logger.hpp"
-#include "midnight/codec/scale_codec.hpp"
+#include "midnight/wallet/bech32m.hpp"
 #include <sstream>
 #include <chrono>
 #include <thread>
@@ -54,7 +55,7 @@ namespace midnight::network
             // Use IndexerClient (GraphQL) instead:
             //
             //   midnight::network::IndexerClient indexer(
-            //       "https://indexer.preview.midnight.network/api/v4/graphql");
+            //       "https://indexer.preprod.midnight.network/api/v4/graphql");
             //   auto utxos = indexer.query_utxos(address);
             //
             // For real-time UTXO updates, use RealtimeIndexerClient or
@@ -209,7 +210,7 @@ namespace midnight::network
         // To query transaction details, use:
         //
         //   midnight::network::IndexerClient indexer(
-        //       "https://indexer.preview.midnight.network/api/v4/graphql");
+        //       "https://indexer.preprod.midnight.network/api/v4/graphql");
         //   auto tx = indexer.get_transaction(tx_id);
         //
         // The Indexer v4 GraphQL API provides:
@@ -334,189 +335,173 @@ namespace midnight::network
 
         midnight::g_logger->info("Querying balance for address: " + address);
 
-        // Midnight uses a Substrate-based node with ledger accounts.
-        // Storage key for Ledger.FreeDeposits(AccountId):
-        //   twox_128("MidnightLedger") ++ twox_128("FreeDeposits") ++ twox_128_concat(AccountId)
+        // IMPORTANT: This method uses get_contract_state which queries smart contracts
+        // via midnight_contractState RPC. This is NOT the correct method for user wallet
+        // balances. User wallet (unshielded NIGHT) balances live in the Zswap UTXO set,
+        // which is NOT accessible via Midnight Node RPC.
         //
-        // Correct Twox128 hashes (verified for Midnight runtime):
-        //   twox_128("MidnightLedger") = 0x9fc1e81e3da0a9c6e05f8791e6e9a24f
-        //   twox_128("FreeDeposits")  = 0x35df88098a0e2ca32a0c7e5c31ff80c6
+        // CORRECT WAY to query user wallet NIGHT balance:
+        //   midnight::network::IndexerClient indexer(
+        //       "https://indexer.preprod.midnight.network/api/v4/graphql");
+        //   auto state = indexer.query_wallet_state("mn_addr_preprod1...");
+        //   // state.unshielded_balance contains NIGHT balance
         //
-        // For Midnight preprod, try state_queryStorageAt with the address as storage key.
-        // If the address is already a valid Substrate AccountId (32 bytes hex), use it directly.
+        // Midnight Node RPC (this class) should ONLY be used for:
+        //   - Transaction submission (submit_transaction)
+        //   - Chain tip (get_chain_tip)
+        //   - Node health (is_ready, get_node_info)
+        //   - Protocol params (get_protocol_params)
+        //
+        // For ALL state queries (balances, UTXOs, transactions, contract state),
+        // use IndexerClient with GraphQL instead.
+
+        midnight::g_logger->warn(
+            "MidnightNodeRPC::get_balance is deprecated for user wallets. "
+            "Use IndexerClient::query_wallet_state() with the GraphQL endpoint instead. "
+            "This method only works for smart contract state queries via RPC.");
 
         try
         {
-            // Attempt 1: Query storage at current block with the address as hex key
-            // state_queryStorageAt takes an array of storage keys
-            std::string storage_key = address;
-            if (storage_key.substr(0, 2) != "0x")
-            {
-                storage_key = "0x" + storage_key;
-            }
+            json state = get_contract_state(address);
 
-            json params = json::array({json::array({storage_key})});
-            json response = rpc_call("state_queryStorageAt", params);
+            uint64_t total_balance = 0;
 
-            // Parse response - state_queryStorageAt returns an array of changes
-            // Format: [{block, changes: [[storage_key, value]]}]
-            if (response.is_array() && !response.empty())
+            if (state.is_object() && state.contains("message"))
             {
-                const auto &change = response[0];
-                if (change.contains("changes") && change["changes"].is_array())
+                std::string msg = state["message"].get<std::string>();
+                if (msg.find("No UTXOs") != std::string::npos)
                 {
-                    for (const auto &item : change["changes"])
-                    {
-                        if (item.is_array() && item.size() >= 2)
-                        {
-                            const auto &value = item[1];
-                            if (!value.is_null() && value.is_string())
-                            {
-                                std::string hex_value = value.get<std::string>();
-                                if (!hex_value.empty() && hex_value != "0x")
-                                {
-                                    // AccountData format on Substrate: nonce(u32) + consumers(u32) + providers(u32) + sufficients(u32) + data(AccountData)
-                                // AccountData: { free: u128, reserved: u128, misc_frozen: u128, fee_frozen: u128 }
-                                // Free balance is stored as SCALE u128 (little-endian 128-bit, compact-encoded)
-                                // If value is compact-encoded, decode as compact. Otherwise decode as raw little-endian u128.
-                                auto bytes = codec::util::hex_to_bytes(hex_value);
-
-                                uint64_t balance = 0;
-                                if (bytes.size() >= 16)
-                                {
-                                    // Raw u128 little-endian: lower 64 bits
-                                    for (size_t i = 0; i < 8; ++i)
-                                    {
-                                        balance |= (static_cast<uint64_t>(bytes[i]) << (i * 8));
-                                    }
-
-                                    std::ostringstream msg;
-                                    msg << "Balance query successful: " << balance << " base units";
-                                    midnight::g_logger->info(msg.str());
-                                    return balance;
-                                }
-                                else if (bytes.size() >= 8)
-                                {
-                                    // u64 (fallback)
-                                    for (size_t i = 0; i < 8; ++i)
-                                    {
-                                        balance |= (static_cast<uint64_t>(bytes[i]) << (i * 8));
-                                    }
-                                    return balance;
-                                }
-                                }
-                            }
-                        }
-                    }
+                    midnight::g_logger->info("No UTXOs found for address - balance is 0");
+                    return 0;
                 }
             }
 
-            midnight::g_logger->warn("No balance found for address: " + address);
+            if (state.is_object() && state.contains("utxos"))
+            {
+                const auto& utxos = state["utxos"];
+                if (utxos.is_array())
+                {
+                    for (const auto& utxo : utxos)
+                    {
+                        if (utxo.is_object() && utxo.contains("value"))
+                        {
+                            total_balance += utxo["value"].get<uint64_t>();
+                        }
+                    }
+                    midnight::g_logger->info("Balance from UTXOs: " + std::to_string(total_balance));
+                    return total_balance;
+                }
+            }
+
+            if (state.is_object() && state.contains("total_balance"))
+            {
+                total_balance = state["total_balance"].get<uint64_t>();
+                midnight::g_logger->info("Balance from total_balance: " + std::to_string(total_balance));
+                return total_balance;
+            }
+
+            midnight::g_logger->debug("Unexpected contract state response format: " + state.dump());
             return 0;
         }
         catch (const std::exception &e)
         {
-            midnight::g_logger->debug("Ledger balance query failed: " + std::string(e.what()));
+            midnight::g_logger->debug("get_balance failed: " + std::string(e.what()));
+            throw;
+        }
+    }
+
+    json MidnightNodeRPC::get_contract_state(const std::string &contract_address_input)
+    {
+        if (contract_address_input.empty())
+        {
+            throw std::runtime_error("Contract address cannot be empty");
         }
 
-        // Fallback: Try to use state_getStorage with computed MidnightLedger key
+        midnight::g_logger->info("Querying contract state for: " + contract_address_input);
+
+        // IMPORTANT: This method queries SMART CONTRACT state via midnight_contractState RPC.
+        // It is NOT designed for user wallet (unshielded NIGHT) balance queries.
+        //
+        // For USER WALLET queries (NIGHT unshielded address balance):
+        //   midnight::network::IndexerClient indexer(
+        //       "https://indexer.preprod.midnight.network/api/v4/graphql");
+        //   auto state = indexer.query_wallet_state("mn_addr_preprod1...");
+        //
+        // midnight_contractState RPC expects:
+        //   - For contract addresses: raw 32-byte hex WITHOUT 0x prefix
+        //   - User wallet addresses (Bech32m) will NOT work correctly with this RPC
+
+        std::string address_hex;
+        bool needs_decode = false;
+        std::string lower_input = midnight::util::to_lower_copy(contract_address_input);
+
+        if (lower_input.rfind("mn_", 0) == 0 || lower_input.rfind("stake", 0) == 0)
+        {
+            needs_decode = true;
+        }
+
+        if (needs_decode)
+        {
+            // Decode Bech32m address to get 32 raw bytes
+            try
+            {
+                midnight::wallet::bech32m::DecodeResult decoded =
+                    midnight::wallet::bech32m::decode(contract_address_input);
+                
+                // Convert raw bytes to hex string (without 0x prefix)
+                std::ostringstream oss;
+                for (uint8_t b : decoded.data)
+                {
+                    oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
+                }
+                address_hex = oss.str();
+                
+                midnight::g_logger->debug("Decoded Bech32m address to hex: " + address_hex);
+            }
+            catch (const std::exception &e)
+            {
+                midnight::g_logger->error("Failed to decode Bech32m address: " + std::string(e.what()));
+                throw std::runtime_error("Invalid Bech32m address: " + contract_address_input);
+            }
+        }
+        else
+        {
+            // Assume it's already a hex string - remove 0x prefix if present
+            address_hex = contract_address_input;
+            if (address_hex.substr(0, 2) == "0x")
+            {
+                address_hex = address_hex.substr(2);
+            }
+        }
+
         try
         {
-            if (sodium_init() < 0)
+            // Call midnight_contractState RPC with the raw 32-byte hex (no 0x prefix)
+            json params;
+            params["contract_address"] = address_hex;
+
+            json response = rpc_call("midnight_contractState", params);
+            
+            // Empty response ("") typically means no UTXOs found for this address
+            if (response.is_string() && response.get<std::string>().empty())
             {
-                throw std::runtime_error("libsodium initialization failed");
+                midnight::g_logger->info("Contract state query returned empty - no UTXOs for this address");
+                // Return a JSON indicating empty state rather than throwing
+                json empty_result = json::object();
+                empty_result["utxos"] = json::array();
+                empty_result["total_balance"] = 0;
+                empty_result["message"] = "No UTXOs found for address";
+                return empty_result;
             }
-
-            // Compute MidnightLedger.FreeDeposits storage key
-            // twox_128("MidnightLedger") || twox_128("FreeDeposits") || twox_128_concat(address)
-            std::string prefix = "0x"
-                                 "9fc1e81e3da0a9c6e05f8791e6e9a24f"  // twox_128("MidnightLedger")
-                                 "35df88098a0e2ca32a0c7e5c31ff80c6";  // twox_128("FreeDeposits")
-
-            std::string clean_hex = address;
-            if (clean_hex.substr(0, 2) == "0x")
-                clean_hex = clean_hex.substr(2);
-
-            // Pad or truncate address to 32 bytes for Twox128
-            std::vector<uint8_t> addr_bytes(32, 0);
-            size_t copy_len = std::min(clean_hex.size() / 2, static_cast<size_t>(32));
-            for (size_t i = 0; i < copy_len; ++i)
-            {
-                addr_bytes[i] = static_cast<uint8_t>(
-                    std::stoul(clean_hex.substr(i * 2, 2), nullptr, 16));
-            }
-
-            // Twox128 hash of the address (first 16 bytes of Twox256)
-            uint8_t hash[16];
-            crypto_generichash(hash, 16, addr_bytes.data(), addr_bytes.size(), nullptr, 0);
-
-            std::ostringstream oss;
-            for (int i = 0; i < 16; i++)
-                oss << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(hash[i]);
-            // Twox128 concat: hash || address
-            oss << clean_hex;
-
-            std::string storage_key = prefix + oss.str();
-            json storage_response = rpc_call("state_getStorage", json::array({storage_key}));
-
-            if (!storage_response.is_null() && !storage_response.empty())
-            {
-                std::string value_hex;
-                if (storage_response.is_string())
-                {
-                    value_hex = storage_response.get<std::string>();
-                }
-                else
-                {
-                    value_hex = storage_response.dump();
-                }
-
-                if (!value_hex.empty() && value_hex != "null")
-                {
-                    auto bytes = codec::util::hex_to_bytes(value_hex);
-                    if (bytes.size() >= 8)
-                    {
-                        uint64_t balance = 0;
-                        for (size_t i = 0; i < 8; ++i)
-                        {
-                            balance |= (static_cast<uint64_t>(bytes[i]) << (i * 8));
-                        }
-                        midnight::g_logger->info("Balance from MidnightLedger.FreeDeposits: " + std::to_string(balance));
-                        return balance;
-                    }
-                }
-            }
+            
+            midnight::g_logger->info("Contract state query successful");
+            return response;
         }
         catch (const std::exception &e)
         {
-            midnight::g_logger->debug("MidnightLedger storage key query failed: " + std::string(e.what()));
+            midnight::g_logger->error("get_contract_state failed: " + std::string(e.what()));
+            throw;
         }
-
-        // MidnightNodeRPC is not designed for balance queries.
-        // The UTXO model stores balance as a collection of UTXOs.
-        // Use IndexerClient (GraphQL) for balance queries:
-        //
-        //   midnight::network::IndexerClient indexer(
-        //       "https://indexer.preview.midnight.network/api/v4/graphql");
-        //   auto utxos = indexer.query_utxos(address);
-        //   uint64_t balance = 0;
-        //   for (const auto& utxo : utxos) balance += utxo.amount;
-        //
-        // Or use SubstrateRPC for Substrate-format account balances:
-        //
-        //   midnight::network::SubstrateRPC substrate(node_url);
-        //   auto account_info = substrate.get_account_info(account_id_hex);
-        //   uint64_t free_balance = account_info.free;
-        //
-        midnight::g_logger->warn(
-            "Balance query via node RPC returned empty. "
-            "Use IndexerClient (GraphQL) or SubstrateRPC for balance queries.");
-
-        throw std::runtime_error(
-            "get_balance via node RPC is not supported. "
-            "Balance in Midnight is derived from UTXOs. "
-            "Use midnight::network::IndexerClient with GraphQL endpoint, "
-            "or midnight::network::SubstrateRPC.get_free_balance() for Substrate-format accounts.");
     }
 
     json MidnightNodeRPC::evaluate_script(

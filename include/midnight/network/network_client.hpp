@@ -5,6 +5,8 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <vector>
+#include <cstdint>
 #include <nlohmann/json.hpp>
 
 namespace midnight::network
@@ -49,6 +51,19 @@ namespace midnight::network
          * @throws std::runtime_error on HTTP/network error
          */
         json post_json(const std::string &path, const json &payload);
+
+        /**
+         * @brief Make HTTP POST request with raw bytes.
+         * @param path URL path
+         * @param payload Binary request body
+         * @param content_type HTTP content type
+         * @return Raw response body bytes
+         * @throws std::runtime_error on HTTP/network error
+         */
+        std::vector<uint8_t> post_bytes(
+            const std::string &path,
+            const std::vector<uint8_t> &payload,
+            const std::string &content_type = "application/octet-stream");
 
         /**
          * @brief Make HTTP GET request

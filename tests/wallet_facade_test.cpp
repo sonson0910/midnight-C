@@ -54,21 +54,21 @@ TEST(NetworkIdTest, HrpGeneration)
 TEST(DustAddressTest, EncodeDust_ValidScalar)
 {
     std::vector<uint8_t> scalar(32, 0x42);
-    auto addr = address::encode_dust(scalar, address::Network::Preview);
-    EXPECT_EQ(addr.substr(0, 16), "mn_dust_preview1");
+    auto addr = address::encode_dust(scalar, address::Network::PreProd);
+    EXPECT_EQ(addr.substr(0, 16), "mn_dust_preprod1");
 }
 
 TEST(DustAddressTest, EncodeDustFromPubkey_32Bytes)
 {
     std::vector<uint8_t> pk(32, 0xAB);
-    auto addr = address::encode_dust_from_pubkey(pk, address::Network::Preview);
-    EXPECT_EQ(addr.substr(0, 16), "mn_dust_preview1");
+    auto addr = address::encode_dust_from_pubkey(pk, address::Network::PreProd);
+    EXPECT_EQ(addr.substr(0, 16), "mn_dust_preprod1");
 }
 
 TEST(DustAddressTest, DecodeDust_Roundtrip)
 {
     std::vector<uint8_t> scalar(32, 0x13);
-    auto addr = address::encode_dust(scalar, address::Network::Preview);
+    auto addr = address::encode_dust(scalar, address::Network::PreProd);
     auto decoded = address::decode_dust(addr);
     EXPECT_EQ(decoded, scalar);
 }
@@ -94,8 +94,8 @@ TEST(ShieldedAddressTest, EncodeDecodeRoundtrip)
     std::vector<uint8_t> coin_pk(32, 0xAA);
     std::vector<uint8_t> enc_pk(32, 0xBB);
 
-    auto addr = address::encode_shielded(coin_pk, enc_pk, address::Network::Preview);
-    EXPECT_EQ(addr.substr(0, 21), "mn_shield-addr_previe");
+    auto addr = address::encode_shielded(coin_pk, enc_pk, address::Network::PreProd);
+    EXPECT_EQ(addr.substr(0, 23), "mn_shield-addr_preprod1");
 
     auto decoded = address::decode_shielded(addr);
     EXPECT_EQ(decoded.coin_public_key, coin_pk);
@@ -115,7 +115,7 @@ TEST(WalletFacadeTest, FromMnemonic_CreatesValidFacade)
 {
     auto facade = WalletFacade::from_mnemonic(TEST_MNEMONIC, TEST_INDEXER);
     auto addr = facade.unshielded_address();
-    EXPECT_EQ(addr.substr(0, 16), "mn_addr_preview1");
+    EXPECT_EQ(addr.substr(0, 16), "mn_addr_preprod1");
     EXPECT_GT(addr.size(), 40u);
 }
 
@@ -123,7 +123,7 @@ TEST(WalletFacadeTest, FromMnemonic_HasDustAddress)
 {
     auto facade = WalletFacade::from_mnemonic(TEST_MNEMONIC, TEST_INDEXER);
     auto dust = facade.dust_address();
-    EXPECT_EQ(dust.substr(0, 16), "mn_dust_preview1");
+    EXPECT_EQ(dust.substr(0, 16), "mn_dust_preprod1");
 }
 
 TEST(WalletFacadeTest, FromMnemonic_Deterministic)
@@ -221,7 +221,7 @@ TEST(WalletFacadeTest, TransferTransaction_WithConfig_NoFunds)
     config.indexer_http_url = TEST_INDEXER;
     config.relay_url = "ws://localhost:9944";
     config.proving_server_url = "http://localhost:6300";
-    config.network = address::Network::Preview;
+    config.network = address::Network::PreProd;
 
     auto facade = WalletFacade::from_mnemonic_with_config(TEST_MNEMONIC, config);
     EXPECT_TRUE(facade.submission_service() != nullptr);
@@ -319,7 +319,7 @@ TEST(WalletFacadeTest, Serialize_ProducesValidJSON)
     auto serialized = facade.serialize();
     auto j = nlohmann::json::parse(serialized);
     EXPECT_EQ(j["version"], 3);  // v3 includes shielded address
-    EXPECT_EQ(j["network"], "preview");
+    EXPECT_EQ(j["network"], "preprod");
     EXPECT_TRUE(j.contains("unshielded_address"));
     EXPECT_TRUE(j.contains("dust_address"));
 }
@@ -458,7 +458,7 @@ TEST(ProvingServiceTest, ProveEmptyTx_ReturnsError)
     EXPECT_FALSE(result.success);
 }
 
-TEST(ProvingServiceTest, ProveValidTx_Succeeds)
+TEST(ProvingServiceTest, ProveArbitraryBytes_Fails)
 {
     ProvingServiceConfig config;
     config.proving_server_url = "http://localhost:6300";
@@ -466,18 +466,19 @@ TEST(ProvingServiceTest, ProveValidTx_Succeeds)
 
     std::vector<uint8_t> data = {0x01, 0x02, 0x03};
     auto result = svc.prove(data);
-    EXPECT_TRUE(result.success);
-    EXPECT_FALSE(result.proof_hash.empty());
+    EXPECT_FALSE(result.success);
+    EXPECT_FALSE(result.error.empty());
 }
 
-TEST(ProvingServiceTest, ProveJson)
+TEST(ProvingServiceTest, ProveJson_Fails)
 {
     ProvingServiceConfig config;
     config.proving_server_url = "http://localhost:6300";
     ProvingService svc(config);
 
     auto result = svc.prove_json(nlohmann::json{{"tx", "test"}});
-    EXPECT_TRUE(result.success);
+    EXPECT_FALSE(result.success);
+    EXPECT_FALSE(result.error.empty());
 }
 
 // ═══════════════════════════════════════════════════════════════

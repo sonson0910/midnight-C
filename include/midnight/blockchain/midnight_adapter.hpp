@@ -64,6 +64,9 @@ namespace midnight::blockchain
         std::string token_type = "NIGHT";              // Token type: "NIGHT", "DUST", etc.
         std::map<std::string, std::string> multi_assets; // Multi-assets: {asset_id -> commitment}
         uint32_t block_height = 0;                       // Block height (optional)
+        uint64_t ctime = 0;                              // Creation time in seconds (optional)
+        std::string initial_nonce;                       // Initial nonce for DUST generation tracking
+        bool registered_for_dust_generation = false;     // Indexer registeredForDustGeneration flag
     };
 
     /**

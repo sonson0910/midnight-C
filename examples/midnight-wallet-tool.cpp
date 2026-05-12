@@ -58,8 +58,8 @@ static void track_realtime(midnight::wallet::WalletFacade& wallet,
     std::cout << "  Address: " << unshielded_addr << "\n";
     std::cout << "  Will watch for " << watch_seconds << "s (or Ctrl+C to stop)...\n";
 
-    const std::string ws_url  = "wss://indexer.preview.midnight.network/api/v4/graphql";
-    const std::string http_url = "https://indexer.preview.midnight.network/api/v4/graphql";
+    const std::string ws_url  = "wss://indexer.preprod.midnight.network/api/v4/graphql";
+    const std::string http_url = "https://indexer.preprod.midnight.network/api/v4/graphql";
 
     midnight::network::RealtimeIndexerClient client(ws_url, http_url);
 
@@ -267,14 +267,14 @@ int main(int argc, char* argv[]) {
     std::cout << "=================================================\n";
 
     // ── Wallet setup ─────────────────────────────────────────────────────────
-    const std::string indexer_url = "https://indexer.preview.midnight.network/api/v4/graphql";
+    const std::string indexer_url = "https://indexer.preprod.midnight.network/api/v4/graphql";
 
     midnight::wallet::WalletFacadeConfig cfg;
     cfg.indexer_http_url    = indexer_url;
-    cfg.indexer_ws_url      = "wss://indexer.preview.midnight.network/api/v4/graphql";
-    cfg.relay_url          = "https://rpc.preview.midnight.network";
+    cfg.indexer_ws_url      = "wss://indexer.preprod.midnight.network/api/v4/graphql";
+    cfg.relay_url          = "https://rpc.preprod.midnight.network";
     cfg.proving_server_url = "http://127.0.0.1:6300";
-    cfg.network            = midnight::wallet::address::Network::Preview;
+    cfg.network            = midnight::wallet::address::Network::PreProd;
     cfg.coin_selection     = midnight::wallet::CoinSelectionStrategy::LargestFirst;
 
     std::cout << "\n[1/6] Creating wallet from mnemonic...\n";
@@ -332,7 +332,7 @@ int main(int argc, char* argv[]) {
             register_dust(wallet, night_balance);
         } else {
             std::cout << "  No NIGHT balance — cannot register.\n";
-            std::cout << "  Request NIGHT from faucet: https://faucet.preview.midnight.network/\n";
+            std::cout << "  Request NIGHT from faucet: https://faucet.preprod.midnight.network/\n";
         }
     } else {
         std::cout << "  Skipped (--no-register flag).\n";

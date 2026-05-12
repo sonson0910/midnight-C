@@ -42,6 +42,22 @@ add_executable(midnight-wallet-tool midnight-wallet-tool.cpp)
 target_link_libraries(midnight-wallet-tool PRIVATE midnight-core)
 target_include_directories(midnight-wallet-tool PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
+add_executable(wallet-generator-new wallet_generator_new.cpp)
+target_link_libraries(wallet-generator-new PRIVATE midnight-core)
+target_include_directories(wallet-generator-new PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(fast_balance_checker fast_balance_checker.cpp)
+target_link_libraries(fast_balance_checker PRIVATE midnight-core)
+target_include_directories(fast_balance_checker PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(balance_checker balance_checker.cpp)
+target_link_libraries(balance_checker PRIVATE midnight-core)
+target_include_directories(balance_checker PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(decode_address decode_address.cpp)
+target_link_libraries(decode_address PRIVATE midnight-core)
+target_include_directories(decode_address PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
 add_executable(indexer-probe indexer-probe.cpp)
 target_link_libraries(indexer-probe PRIVATE midnight-core)
 target_include_directories(indexer-probe PRIVATE

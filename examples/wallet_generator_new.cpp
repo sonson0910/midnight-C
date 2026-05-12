@@ -1,4 +1,4 @@
-// Midnight Wallet Generator - Preview Network
+// Midnight Wallet Generator - Preview/Preprod Network
 // Generates a completely NEW wallet with NIGHT, DUST, and Shielded addresses
 
 #include "midnight/wallet/hd_wallet.hpp"
@@ -10,8 +10,8 @@
 #include <sstream>
 #include <iomanip>
 
+using namespace midnight;
 using namespace midnight::wallet;
-using namespace midnight::address;
 
 // Helper to convert bytes to hex string
 std::string bytes_to_hex(const std::vector<uint8_t>& bytes) {
@@ -24,15 +24,23 @@ std::string bytes_to_hex(const std::vector<uint8_t>& bytes) {
 
 int main() {
     std::cout << "\n";
+    std::string network_name = "PREPROD";
+    std::string network_id = "preprod";
+    std::string indexer_http = "https://indexer.preprod.midnight.network";
+    std::string indexer_ws = "wss://indexer.preprod.midnight.network";
+    std::string node_http = "https://node.preprod.midnight.network";
+    std::string faucet_url = "https://faucet.preprod.midnight.network";
+    auto network_enum = address::Network::PreProd;
+
     std::cout << "╔════════════════════════════════════════════════════════════════╗\n";
     std::cout << "║                                                                ║\n";
-    std::cout << "║          MIDNIGHT WALLET GENERATOR - PREVIEW NETWORK          ║\n";
+    std::cout << "║          MIDNIGHT WALLET GENERATOR - PREPROD NETWORK         ║\n";
     std::cout << "║                                                                ║\n";
     std::cout << "╚════════════════════════════════════════════════════════════════╝\n";
     std::cout << "\n";
-    std::cout << "Network:     PREVIEW\n";
-    std::cout << "Indexer:    https://indexer.preview.midnight.network\n";
-    std::cout << "Faucet:     https://faucet.preview.midnight.network\n";
+    std::cout << "Network:     PREPROD\n";
+    std::cout << "Indexer:    " << indexer_http << "\n";
+    std::cout << "Faucet:     " << faucet_url << "\n";
     std::cout << "\n";
 
     try {
@@ -59,7 +67,7 @@ int main() {
         // Create Bech32m address for Night
         std::string night_address = address::encode_unshielded(
             night_key.public_key,
-            Network::Preview
+            network_enum
         );
 
         std::cout << "✓ NIGHT Address: " << night_address << "\n";
@@ -73,7 +81,7 @@ int main() {
         // Create Bech32m address for Dust
         std::string dust_address = address::encode_dust(
             dust_key.public_key,
-            Network::Preview
+            network_enum
         );
 
         std::cout << "✓ DUST Address: " << dust_address << "\n";
@@ -91,7 +99,7 @@ int main() {
         std::string shielded_address = address::encode_shielded(
             shielded_key.public_key,
             enc_pub_key,
-            Network::Preview
+            network_enum
         );
 
         std::cout << "✓ Shielded Address: " << shielded_address << "\n";
@@ -102,9 +110,9 @@ int main() {
         std::ostringstream json;
         json << "{\n";
         json << "  \"config\": {\n";
-        json << "    \"indexerHttpUrl\": \"https://indexer.preview.midnight.network/api/v4/graphql\",\n";
-        json << "    \"indexerWsUrl\": \"wss://indexer.preview.midnight.network/api/v4/graphql\",\n";
-        json << "    \"nodeHttpUrl\": \"https://node.preview.midnight.network\",\n";
+        json << "    \"indexerHttpUrl\": \"" << indexer_http << "/api/v4/graphql\",\n";
+        json << "    \"indexerWsUrl\": \"" << indexer_ws << "/api/v4/graphql\",\n";
+        json << "    \"nodeHttpUrl\": \"" << node_http << "\",\n";
         json << "    \"proofServerUrl\": \"http://127.0.0.1:6300\"\n";
         json << "  },\n";
         json << "  \"derivation_paths\": {\n";
@@ -112,7 +120,7 @@ int main() {
         json << "    \"dust\": \"m/44'/2400'/0'/2/0\",\n";
         json << "    \"shielded\": \"m/44'/2400'/0'/3/0\"\n";
         json << "  },\n";
-        json << "  \"network\": \"preview\",\n";
+        json << "  \"network\": \"preprod\",\n";
         json << "  \"mnemonic\": \"" << mnemonic << "\",\n";
         json << "  \"night_address\": \"" << night_address << "\",\n";
         json << "  \"night_sk\": \"" << bytes_to_hex(night_key.secret_key) << "\",\n";
@@ -125,7 +133,7 @@ int main() {
         json << "  \"shielded_encryption_public_key\": \"" << bytes_to_hex(enc_pub_key) << "\"\n";
         json << "}\n";
 
-        std::string filename = "wallet_new_preview.json";
+        std::string filename = "wallet_preprod.json";
         std::ofstream out(filename);
         if (out.is_open()) {
             out << json.str();
@@ -150,7 +158,7 @@ int main() {
         std::cout << "═══════════════════════════════════════════════════════════════════\n";
         std::cout << "                    WALLET SUMMARY                               \n";
         std::cout << "═══════════════════════════════════════════════════════════════════\n";
-        std::cout << "  Network:     PREVIEW\n";
+        std::cout << "  Network:     PREPROD\n";
         std::cout << "  NIGHT:       " << night_address << "\n";
         std::cout << "  DUST:         " << dust_address << "\n";
         std::cout << "  SHIELDED:     " << shielded_address << "\n\n";
@@ -160,7 +168,7 @@ int main() {
         std::cout << "═══════════════════════════════════════════════════════════════════\n\n";
 
         std::cout << "  1️⃣  FUND YOUR WALLET:\n";
-        std::cout << "     → Visit: https://faucet.preview.midnight.network/\n";
+        std::cout << "     → Visit: " << faucet_url << "/\n";
         std::cout << "     → Enter NIGHT address: " << night_address << "\n\n";
 
         std::cout << "  2️⃣  CHECK BALANCE:\n";
