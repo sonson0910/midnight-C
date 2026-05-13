@@ -138,7 +138,7 @@ namespace midnight::contract
      *   - SubstrateRPC for extrinsic submission
      *   - ProofServerClient for ZK proof generation
      *   - IndexerClient for state queries
-     *   - ExtrinsicBuilder + HDWallet for native signing
+     *   - unsigned Midnight::send_mn_transaction wrapping for ledger bytes
      *
      * Example:
      * ```cpp

@@ -10,14 +10,6 @@ add_executable(http_connectivity_test http_connectivity_test.cpp)
 target_link_libraries(http_connectivity_test PRIVATE midnight-core)
 target_include_directories(http_connectivity_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
-add_executable(phase4b_private_state_example phase4b_private_state_example.cpp)
-target_link_libraries(phase4b_private_state_example PRIVATE midnight-core)
-target_include_directories(phase4b_private_state_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
-
-add_executable(native_contract_interactor_example native_contract_interactor_example.cpp)
-target_link_libraries(native_contract_interactor_example PRIVATE midnight-core)
-target_include_directories(native_contract_interactor_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
-
 add_executable(wallet-generator-new wallet_generator_new.cpp)
 target_link_libraries(wallet-generator-new PRIVATE midnight-core)
 target_include_directories(wallet-generator-new PRIVATE ${CMAKE_SOURCE_DIR}/include)

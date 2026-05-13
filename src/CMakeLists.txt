@@ -156,10 +156,10 @@ if(ENABLE_BLOCKCHAIN)
         blockchain/midnight_adapter.cpp
         utxo-transactions/utxo_transactions.cpp
         ledger/transaction_builder.cpp
-        compact-contracts/compact_contracts.cpp
         monitoring-finality/monitoring_finality.cpp
         signing-submission/signing_submission.cpp
         production/midnight_client.cpp
+        production/artifact_manager.cpp
         contracts/contract_interactor.cpp
         contract/contract_manager.cpp
     )
@@ -177,16 +177,6 @@ add_library(midnight-core
     ${MIDNIGHT_ZK_SOURCES}
     ${MIDNIGHT_BLOCKCHAIN_SOURCES}
 )
-
-# Suppress Windows SDK intrinsic conflicts for compact_contracts.cpp
-# These errors occur due to conflicts between Windows SDK winnt.h and MSVC intrinsics
-if(WIN32)
-    set_source_files_properties(
-        src/compact-contracts/compact_contracts.cpp
-        APPEND
-        PROPERTY COMPILE_OPTIONS "/wd2371;/wd2733;/wd2116"
-    )
-endif()
 
 if(WIN32 AND BUILD_SHARED_LIBS)
     # Ensure an import library is generated for examples linking against the DLL.

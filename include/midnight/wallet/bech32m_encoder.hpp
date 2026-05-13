@@ -145,8 +145,9 @@ namespace midnight::wallet
         }
 
         // Encode dust from 32-byte scalar (BIP32 HD key)
-        // Note: DustSecretKey.fromSeed does WASM transformation
-        // Use Node.js SDK for actual dust address encoding
+        // Note: DustSecretKey.fromSeed applies ledger-specific key transforms.
+        // Prefer addresses derived by the official Midnight wallet/toolkit when
+        // starting from a mnemonic or seed phrase.
         static std::string encode_dust_from_scalar(const std::vector<uint8_t>& scalar_le,
                                                   const std::string& network)
         {

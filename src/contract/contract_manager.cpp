@@ -1,7 +1,6 @@
 #include "midnight/core/logger.hpp"
 #include "midnight/core/common_utils.hpp"
 #include "midnight/contract/contract_manager.hpp"
-#include "midnight/compact-contracts/compact_contracts.hpp"
 #include <sstream>
 #include <iomanip>
 #include <fstream>

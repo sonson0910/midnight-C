@@ -82,28 +82,6 @@ int main() {
 }
 ```
 
-### Transfer NIGHT (via wallet alias)
-
-```cpp
-#include "midnight/blockchain/official_sdk_bridge.hpp"
-#include <iostream>
-
-int main() {
-    // Register wallet alias once
-    midnight::blockchain::register_wallet_seed_hex(
-        "mywallet", "<seed_hex_32_bytes>", "preprod");
-
-    // Transfer NIGHT using alias
-    const auto tx = midnight::blockchain::transfer_official_night_with_wallet(
-        "mywallet", "<to_address>", "1", "preprod");
-
-    if (tx.success)
-        std::cout << "txid=" << tx.txid << std::endl;
-
-    return 0;
-}
-```
-
 ## Module Quick Start (2–6)
 
 ### 2 — Network & RPC
@@ -162,7 +140,7 @@ std::string body = coap.send_request(
 // ── HTTP (standard REST / indexer) ───────────────────────────
 #include "midnight/protocols/http/http_client.hpp"
 midnight::protocols::http::HttpClient http;
-auto resp = http.get("https://indexer.preprod.midnight.network/api/v3/graphql");
+auto resp = http.get("https://indexer.preprod.midnight.network/api/v4/graphql");
 
 // ── WebSocket (real-time block subscription) ─────────────────
 #include "midnight/protocols/websocket/ws_client.hpp"
@@ -202,7 +180,7 @@ Deploy Compact contracts and query state through ledger-built transaction bytes 
 #include "midnight/contract/contract_manager.hpp"
 #include "midnight/production/midnight_client.hpp"
 
-midnight::contract::ContractManager mgr(node_rpc_url, proof_server_url);
+midnight::contract::ContractManager mgr(node_rpc_url, proof_server_url, indexer_url);
 
 // Transaction bytes must be produced by the Midnight ledger/proof pipeline.
 auto deployed = mgr.submit_deploy_transaction(ledger_built_deploy_tx_bytes);
@@ -218,10 +196,17 @@ The C++ library builds production transactions by delegating to the official
 `midnight-node-toolkit` from `midnight-research/midnight-node/util/toolkit`.
 The returned `.mn` file is parsed as `SerializedTx`, the raw tagged
 `tx.Midnight` bytes are wrapped as `Midnight::send_mn_transaction`, then
-submitted via `author_submitExtrinsic`.
+submitted via `author_submitExtrinsic`. The production pipeline can also save
+artifacts and wait until the indexer sees the ledger transaction hash.
 
 ```cpp
 #include "midnight/production/midnight_client.hpp"
+
+midnight::production::ClientConfig config;
+config.node_url = "https://rpc.preprod.midnight.network";
+config.indexer_url = "https://indexer.preprod.midnight.network/api/v4/graphql";
+config.proof_server_url = "http://127.0.0.1:6300";
+midnight::production::MidnightClient client(config);
 
 midnight::ledger::ToolkitConfig toolkit;
 toolkit.toolkit_binary = "midnight-node-toolkit";
@@ -233,7 +218,16 @@ tx.source_seed = "<wallet-seed-hex>";
 tx.destination_addresses = {"mn_addr_preprod1..."};
 tx.amount = "1000000000"; // u128 decimal string
 
-auto result = client.transfer_night(toolkit, tx);
+midnight::production::PipelineOptions options;
+options.toolkit = toolkit;
+options.artifacts.root_dir = "midnight-artifacts";
+options.artifacts.network = "preprod";
+options.artifacts.wallet_id = "wallet-a";
+
+auto result = client.transfer_night(options, tx);
+if (!result.success) {
+    throw std::runtime_error(result.error.message + ": " + result.error.detail);
+}
 ```
 
 ---
@@ -246,7 +240,7 @@ Subscribe to new blocks, detect reorgs, track a transaction from mempool to fina
 #include "midnight/monitoring-finality/monitoring_finality.hpp"
 
 const std::string rpc     = "https://rpc.preprod.midnight.network";
-const std::string indexer = "https://indexer.preprod.midnight.network/api/v3/graphql";
+const std::string indexer = "https://indexer.preprod.midnight.network/api/v4/graphql";
 
 // --- Subscribe to new blocks (polls every ~4–6 s) ---
 midnight::monitoring_finality::BlockMonitor block_monitor(rpc, indexer);
@@ -327,190 +321,14 @@ cmake --build . --target midnight-examples
 # HTTP example
 ./bin/http_example
 
-# Official SDK bridge example (address/transfer/state/indexer/deploy)
-./bin/official_sdk_bridge_example --help
-
 # Connectivity and compatibility check with Midnight Preprod
 # Returns exit code 0 when READY for production
 ./bin/http_connectivity_test
 
-# Deploy FaucetAMM to undeployed network (via official JS bridge)
-# Requirement: dependencies installed in midnight-research and wallet has NIGHT + DUST
-MIDNIGHT_DEPLOY_SEED_HEX=<seed_hex_32_bytes> \
-    ./bin/compact_contract_deploy_undeployed_example
-
-# Deploy a custom contract (outside FaucetAMM) via bridge
-# ContractDeployer constructor_args configuration:
-#   use_official_sdk_bridge=true
-#   contract=<ContractName>
-#   contract_module=<path or package specifier to JS contract export module>
-#   contract_export=<export name in module>
-#   zk_config_path=<path to managed assets for the contract>
-#   private_state_id=<private state id>
-#   constructor_args_json=<constructor args JSON, supports typed bigint/bytes>
-
-# Run C++ example for direct custom deploy
-./bin/compact_contract_deploy_custom_example \
-    --contract FaucetAMM \
-    --contract-module @midnight-ntwrk/counter-contract \
-    --contract-export FaucetAMM \
-    --zk-config-path midnight-research/node_modules/@midnight-ntwrk/counter-contract/dist/managed/FaucetAMM
+# Production ledger transaction pipeline
+# Requires midnight-node-toolkit built from midnight-research/midnight-node/util/toolkit.
+./bin/production_transactions_example
 ```
-
-## Official SDK Bridge (Recommended for Real-World Flows)
-
-### Preparation
-
-```bash
-# Install dependencies for the official JS bridge
-cd midnight-research && npm install
-
-# Return to project root
-cd ..
-
-# Required when using wallet alias (seed is encrypted at rest)
-export MIDNIGHT_WALLET_STORE_PASSPHRASE="your-strong-passphrase-16+-chars"
-
-# Optional: customize wallet alias storage directory
-# export MIDNIGHT_WALLET_STORE_DIR=/path/to/wallet-store
-```
-
-### Quick usage with C++ binary
-
-```bash
-# 1) Register alias once (seed will be encrypted when stored)
-./bin/official_sdk_bridge_example wallet-add mywallet <seed_hex> preprod
-
-# 2) Transfer NIGHT using alias (without passing seed on command line)
-./bin/official_sdk_bridge_example transfer-wallet preprod mywallet <to_address> <amount>
-
-# 3) Query wallet snapshot using alias
-./bin/official_sdk_bridge_example state-wallet preprod mywallet
-
-# 4) Query indexer diagnostics using alias
-./bin/official_sdk_bridge_example indexer-wallet preprod mywallet
-
-# 5) Deploy contract using alias
-./bin/official_sdk_bridge_example deploy-wallet undeployed mywallet FaucetAMM
-```
-
-### Call JS bridge directly (supports --seed-file)
-
-```bash
-# Deploy (recommended: use --seed-file instead of --seed)
-node tools/official-deploy-contract.mjs \
-  --network undeployed \
-  --contract FaucetAMM \
-  --seed-file /path/to/seed.txt
-
-# Transfer
-node tools/official-transfer-night.mjs \
-  --network preprod \
-  --seed-file /path/to/seed.txt \
-  --to <to_address> \
-  --amount <amount>
-```
-
-## C++ Examples (Wallet Alias + Transfer/Deploy)
-
-### 1) Register alias + transfer NIGHT
-
-```cpp
-#include "midnight/blockchain/official_sdk_bridge.hpp"
-#include <iostream>
-
-int main() {
-    std::string error;
-    const bool saved = midnight::blockchain::register_wallet_seed_hex(
-        "mywallet",
-        "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
-        "preprod",
-        "",
-        &error);
-
-    if (!saved) {
-        std::cerr << "Wallet alias registration failed: " << error << std::endl;
-        return 1;
-    }
-
-    const auto tx = midnight::blockchain::transfer_official_night_with_wallet(
-        "mywallet",
-        "mn_addr_destination_here",
-        "1",
-        "preprod");
-
-    if (!tx.success) {
-        std::cerr << "NIGHT transfer failed: " << tx.error << std::endl;
-        return 1;
-    }
-
-    std::cout << "txid=" << tx.txid << std::endl;
-    return 0;
-}
-```
-
-### 2) Deploy contract with wallet alias
-
-```cpp
-#include "midnight/blockchain/official_sdk_bridge.hpp"
-#include <iostream>
-
-int main() {
-    const auto deploy = midnight::blockchain::deploy_official_compact_contract_with_wallet(
-        "mywallet",
-        "FaucetAMM",
-        "undeployed",
-        10);
-
-    if (!deploy.success) {
-        std::cerr << "Deployment failed: " << deploy.error << std::endl;
-        return 1;
-    }
-
-    std::cout << "contract=" << deploy.contract_address << " txid=" << deploy.txid << std::endl;
-    return 0;
-}
-```
-
-### 3) Query state + indexer diagnostics with wallet alias
-
-```cpp
-#include "midnight/blockchain/official_sdk_bridge.hpp"
-#include <iostream>
-
-int main() {
-    const auto state = midnight::blockchain::query_official_wallet_state_with_wallet(
-        "mywallet",
-        "preprod");
-
-    if (!state.success) {
-        std::cerr << "State query failed: " << state.error << std::endl;
-        return 1;
-    }
-
-    std::cout << "address=" << state.source_address
-              << " balance=" << state.unshielded_balance << std::endl;
-
-    const auto idx = midnight::blockchain::query_official_indexer_sync_status_with_wallet(
-        "mywallet",
-        "preprod");
-
-    if (!idx.success) {
-        std::cerr << "Indexer diagnostics query failed: " << idx.error << std::endl;
-        return 1;
-    }
-
-    std::cout << "facade_synced=" << (idx.facade_is_synced ? "true" : "false")
-              << " all_connected=" << (idx.all_connected ? "true" : "false") << std::endl;
-    return 0;
-}
-```
-
-Security notes:
-
-- Do not use `--seed` and `--seed-file` together.
-- For alias flow, `MIDNIGHT_WALLET_STORE_PASSPHRASE` is required (>= 16 chars).
-- Prefer `transfer-wallet` / `deploy-wallet` to avoid exposing seed in process args.
 
 ## Run Tests
 
@@ -527,11 +345,12 @@ ctest --output-on-failure
 - ✅ Project structure setup
 - ✅ Core components (Config, Logger, SessionManager)
 - ✅ Protocol clients (MQTT, CoAP, HTTP, WebSocket)
-- ✅ Blockchain components (Transaction, Wallet, MidnightBlockchain)
-- ⏳ Complete protocol implementations with third-party libraries
-- ⏳ Add encryption and security features
-- ⏳ Support multi-sig transactions
-- ⏳ On-chain smart contract interactions
+- ✅ Indexer v4 wallet, UTXO, transaction, and block queries
+- ✅ Node JSON-RPC submission for ledger-built Midnight transactions
+- ✅ Production transaction builder bridge through `midnight-node-toolkit`
+- ✅ DUST registration, NIGHT transfer, Compact deploy/call, custom intent submission
+- ✅ Artifact saving and indexer confirmation pipeline
+- ⏳ Optional protocol integrations such as CoAPS/DTLS
 
 ## Documentation
 

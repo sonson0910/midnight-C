@@ -8,6 +8,7 @@ int main()
     using midnight::ledger::TransferNightParams;
     using midnight::production::ClientConfig;
     using midnight::production::MidnightClient;
+    using midnight::production::PipelineOptions;
 
     ClientConfig client_cfg;
     client_cfg.node_url = "https://rpc.preprod.midnight.network";
@@ -29,16 +30,24 @@ int main()
 
     MidnightClient client(client_cfg);
 
+    PipelineOptions options;
+    options.toolkit = toolkit;
+    options.artifacts.root_dir = "midnight-artifacts";
+    options.artifacts.network = "preprod";
+    options.artifacts.wallet_id = "example-wallet";
+    options.wait_for_confirmation = true;
+
     // This builds the tagged midnight-ledger Transaction through the official
-    // toolkit, wraps it as Midnight::send_mn_transaction, and submits it via
-    // author_submitExtrinsic.
-    auto result = client.transfer_night(toolkit, transfer);
+    // toolkit, wraps it as Midnight::send_mn_transaction, submits it via
+    // author_submitExtrinsic, saves artifacts, and waits for the indexer.
+    auto result = client.transfer_night(options, transfer);
     if (!result.success)
     {
-        std::cerr << result.error << "\n";
+        std::cerr << result.error.message << " " << result.error.detail << "\n";
         return 1;
     }
 
-    std::cout << result.submit.extrinsic_hash << "\n";
+    std::cout << result.transaction.submit.extrinsic_hash << "\n";
+    std::cout << result.confirmation.block_height << "\n";
     return 0;
 }

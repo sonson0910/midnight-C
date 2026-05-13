@@ -354,7 +354,7 @@ def main():
    Paste: {wallet['addresses']['unshielded']}
 
 2. CHECK BALANCE:
-   https://indexer.{network}.midnight.network/api/v3/graphql
+   https://indexer.{network}.midnight.network/api/v4/graphql
 
 3. SHIELD TOKENS (NIGHT -> Zswap):
    midnight-cli shield --amount 100 --to {wallet['addresses']['shielded'][:30]}...

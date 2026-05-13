@@ -74,8 +74,7 @@ namespace midnight::contracts
      * ledger transaction or proof payload bytes produced by the Midnight
      * ledger/Compact toolchain, then submitted through the raw payload helpers.
      *
-     * Replaces the Node.js bridge (`official_sdk_bridge.cpp` → popen("node ..."))
-     * with pure C++ calls to the Midnight network:
+     * Uses pure C++ calls to the Midnight network:
      *
      *   1. Read contract state → Indexer (GraphQL, native HTTP)
      *   2. Send ledger-built proof payloads → Proof Server (native HTTP)

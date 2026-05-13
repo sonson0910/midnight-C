@@ -3,8 +3,11 @@
 #include "midnight/network/indexer_client.hpp"
 #include "midnight/network/midnight_node_rpc.hpp"
 #include "midnight/ledger/transaction_builder.hpp"
+#include "midnight/production/artifact_manager.hpp"
+#include "midnight/production/errors.hpp"
 #include "midnight/zk/proof_server_client.hpp"
 #include <nlohmann/json.hpp>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -27,6 +30,7 @@ namespace midnight::production
         bool success = false;
         std::string extrinsic_hash;
         std::string error;
+        SdkError error_info;
     };
 
     struct BuildSubmitResult
@@ -35,6 +39,43 @@ namespace midnight::production
         ledger::BuildResult build;
         SubmitResult submit;
         std::string error;
+        SdkError error_info;
+    };
+
+    struct ConfirmationConfig
+    {
+        std::chrono::milliseconds timeout{120000};
+        std::chrono::milliseconds poll_interval{2000};
+    };
+
+    struct ConfirmationResult
+    {
+        bool success = false;
+        bool found = false;
+        std::string transaction_hash;
+        uint64_t transaction_id = 0;
+        uint64_t block_height = 0;
+        std::string block_hash;
+        json transaction = json::object();
+        SdkError error;
+    };
+
+    struct PipelineOptions
+    {
+        ledger::ToolkitConfig toolkit;
+        ConfirmationConfig confirmation;
+        ArtifactConfig artifacts;
+        bool save_artifacts = true;
+        bool wait_for_confirmation = true;
+    };
+
+    struct PipelineResult
+    {
+        bool success = false;
+        BuildSubmitResult transaction;
+        ConfirmationResult confirmation;
+        ArtifactSaveResult artifacts;
+        SdkError error;
     };
 
     /**
@@ -101,6 +142,34 @@ namespace midnight::production
         BuildSubmitResult submit_custom_contract_intents(
             const ledger::ToolkitConfig &toolkit,
             const ledger::CustomContractIntentParams &params);
+
+        PipelineResult transfer_night(
+            const PipelineOptions &options,
+            const ledger::TransferNightParams &params);
+
+        PipelineResult register_dust(
+            const PipelineOptions &options,
+            const ledger::RegisterDustParams &params);
+
+        PipelineResult deregister_dust(
+            const PipelineOptions &options,
+            const ledger::DeregisterDustParams &params);
+
+        PipelineResult deploy_simple_contract(
+            const PipelineOptions &options,
+            const ledger::SimpleContractDeployParams &params);
+
+        PipelineResult call_simple_contract(
+            const PipelineOptions &options,
+            const ledger::SimpleContractCallParams &params);
+
+        PipelineResult submit_custom_contract_intents(
+            const PipelineOptions &options,
+            const ledger::CustomContractIntentParams &params);
+
+        ConfirmationResult wait_for_transaction(
+            const std::string &transaction_hash,
+            const ConfirmationConfig &confirmation = {});
 
         std::vector<uint8_t> check_payload(const std::vector<uint8_t> &check_payload);
         std::vector<uint8_t> prove_payload(const std::vector<uint8_t> &proving_payload);
