@@ -78,24 +78,10 @@ static std::vector<uint8_t> hex_to_bytes(const std::string& hex) {
 
 // ─── SerializedTransaction ────────────────────────────────────
 
-SerializedTransaction SerializedTransaction::from_json(const json& tx_json) {
-    (void)tx_json;
-    throw std::runtime_error(
-        "SerializedTransaction::from_json is disabled: Midnight nodes require "
-        "ledger serialized transaction bytes, not JSON payloads");
-}
-
 SerializedTransaction SerializedTransaction::from_bytes(const std::vector<uint8_t>& data) {
     SerializedTransaction st;
     st.data = data;
     return st;
-}
-
-SerializedTransaction SerializedTransaction::make_midnight_extrinsic(const std::string& midnight_tx_hex) {
-    (void)midnight_tx_hex;
-    throw std::runtime_error(
-        "SerializedTransaction::make_midnight_extrinsic is disabled: submit "
-        "ledger serialized Midnight transaction bytes through the correct node API/path");
 }
 
 // ─── SubmissionService ───────────────────────────────────────
@@ -152,9 +138,8 @@ SubmissionEvent SubmissionService::submit_via_http(const SerializedTransaction& 
         rpc_body["id"] = 1;
         rpc_body["method"] = "author_submitExtrinsic";
 
-        // Encode TX data as hex — the node expects SCALE-encoded extrinsic bytes
-        // For midnight.sendMnTransaction, the tx.data should already contain
-        // the SCALE-encoded extrinsic (see make_midnight_extrinsic)
+        // Encode TX data as hex; tx.data must already contain complete
+        // ledger/extrinsic bytes for the target node API.
         rpc_body["params"] = json::array({to_hex_string(tx.data)});
 
         // Create HTTP client for relay
@@ -283,15 +268,6 @@ ProvedTransaction ProvingService::prove(const std::vector<uint8_t>& unproven_tx)
         }
     }
 
-    return result;
-}
-
-ProvedTransaction ProvingService::prove_json(const json& tx_json) {
-    (void)tx_json;
-    ProvedTransaction result;
-    result.error =
-        "ProvingService::prove_json is disabled: proof-server /prove expects "
-        "ledger createProvingPayload(...) bytes, not JSON";
     return result;
 }
 

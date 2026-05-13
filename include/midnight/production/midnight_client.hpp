@@ -2,6 +2,7 @@
 
 #include "midnight/network/indexer_client.hpp"
 #include "midnight/network/midnight_node_rpc.hpp"
+#include "midnight/ledger/transaction_builder.hpp"
 #include "midnight/zk/proof_server_client.hpp"
 #include <nlohmann/json.hpp>
 #include <memory>
@@ -25,6 +26,14 @@ namespace midnight::production
     {
         bool success = false;
         std::string extrinsic_hash;
+        std::string error;
+    };
+
+    struct BuildSubmitResult
+    {
+        bool success = false;
+        ledger::BuildResult build;
+        SubmitResult submit;
         std::string error;
     };
 
@@ -53,6 +62,45 @@ namespace midnight::production
          * @brief Submit an already SCALE-encoded extrinsic.
          */
         SubmitResult submit_extrinsic_hex(const std::string &extrinsic_hex);
+
+        /**
+         * @brief Build and submit a NIGHT transfer using official ledger tooling.
+         */
+        BuildSubmitResult transfer_night(
+            const ledger::ToolkitConfig &toolkit,
+            const ledger::TransferNightParams &params);
+
+        /**
+         * @brief Build and submit DUST address registration.
+         */
+        BuildSubmitResult register_dust(
+            const ledger::ToolkitConfig &toolkit,
+            const ledger::RegisterDustParams &params);
+
+        BuildSubmitResult deregister_dust(
+            const ledger::ToolkitConfig &toolkit,
+            const ledger::DeregisterDustParams &params);
+
+        /**
+         * @brief Build and submit toolkit built-in Compact contract deployment.
+         */
+        BuildSubmitResult deploy_simple_contract(
+            const ledger::ToolkitConfig &toolkit,
+            const ledger::SimpleContractDeployParams &params);
+
+        /**
+         * @brief Build and submit toolkit built-in Compact contract call.
+         */
+        BuildSubmitResult call_simple_contract(
+            const ledger::ToolkitConfig &toolkit,
+            const ledger::SimpleContractCallParams &params);
+
+        /**
+         * @brief Build and submit a custom Compact transaction from intent files.
+         */
+        BuildSubmitResult submit_custom_contract_intents(
+            const ledger::ToolkitConfig &toolkit,
+            const ledger::CustomContractIntentParams &params);
 
         std::vector<uint8_t> check_payload(const std::vector<uint8_t> &check_payload);
         std::vector<uint8_t> prove_payload(const std::vector<uint8_t> &proving_payload);

@@ -14,8 +14,6 @@ namespace midnight::network
 namespace midnight::blockchain
 {
 
-    class Transaction;
-
     /**
      * @brief Result type for blockchain operations
      */
@@ -122,28 +120,8 @@ namespace midnight::blockchain
         static bool validate_address(const std::string &address);
 
         /**
-         * @brief Build transaction using UTXOs
-         * @param utxos List of UTXOs to spend
-         * @param outputs Map of address->amount for outputs
-         * @param change_address Where to send change
-         * @return Built transaction or error
-         */
-        Result build_transaction(
-            const std::vector<UTXO> &utxos,
-            const std::vector<std::pair<std::string, uint64_t>> &outputs,
-            const std::string &change_address);
-
-        /**
-         * @brief Sign transaction with private key
-         * @param transaction_hex Transaction serialized format
-         * @param private_key Private key in hex
-         * @return Signed transaction or error
-         */
-        Result sign_transaction(const std::string &transaction_hex, const std::string &private_key);
-
-        /**
          * @brief Submit transaction to network
-         * @param signed_tx Transaction data
+         * @param signed_tx Serialized Midnight ledger transaction bytes as hex
          * @return Transaction ID or error
          */
         Result submit_transaction(const std::string &signed_tx);
@@ -187,7 +165,6 @@ namespace midnight::blockchain
 
         // Helper methods
         uint64_t calculate_min_fee(size_t tx_size);
-        bool validate_transaction(const Transaction &tx);
     };
 
 } // namespace midnight::blockchain

@@ -819,14 +819,6 @@ namespace midnight::utxo_transactions
         fees_manually_set_ = true;
     }
 
-    std::optional<Transaction> TransactionBuilder::build()
-    {
-        midnight::g_logger->error(
-            "utxo_transactions::TransactionBuilder::build is disabled: production "
-            "Midnight transactions require midnight-ledger tagged binary serialization");
-        return {};
-    }
-
     bool TransactionBuilder::validate()
     {
         if (tx_.inputs.empty() || tx_.outputs.empty())

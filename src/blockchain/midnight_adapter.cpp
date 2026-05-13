@@ -1,9 +1,7 @@
 #include "midnight/blockchain/midnight_adapter.hpp"
-#include "midnight/blockchain/transaction.hpp"
 #include "midnight/core/logger.hpp"
 #include "midnight/core/common_utils.hpp"
 #include "midnight/network/midnight_node_rpc.hpp"
-#include "midnight/crypto/ed25519_signer.hpp"
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <iomanip>
@@ -147,60 +145,6 @@ namespace midnight::blockchain
             return bech32_polymod(values) == kBech32mConst;
         }
 
-        using midnight::util::strip_hex_prefix;
-
-        std::string extract_submission_payload(const std::string &signed_tx)
-        {
-            const auto first_non_ws = signed_tx.find_first_not_of(" \t\r\n");
-            if (first_non_ws == std::string::npos || signed_tx[first_non_ws] != '{')
-            {
-                return signed_tx;
-            }
-
-            try
-            {
-                auto envelope = nlohmann::json::parse(signed_tx);
-                if (!envelope.is_object())
-                {
-                    return signed_tx;
-                }
-
-                if (envelope.contains("signedPayload") && envelope["signedPayload"].is_string())
-                {
-                    const std::string payload = envelope["signedPayload"].get<std::string>();
-                    if (!payload.empty())
-                    {
-                        return payload;
-                    }
-                }
-
-                if (envelope.contains("payload") && envelope["payload"].is_string())
-                {
-                    const std::string payload = envelope["payload"].get<std::string>();
-                    if (!payload.empty())
-                    {
-                        return payload;
-                    }
-                }
-
-                if (envelope.contains("transaction") && envelope["transaction"].is_string() &&
-                    envelope.contains("signature") && envelope["signature"].is_string())
-                {
-                    const std::string tx = envelope["transaction"].get<std::string>();
-                    const std::string sig = strip_hex_prefix(envelope["signature"].get<std::string>());
-                    if (!tx.empty() && !sig.empty())
-                    {
-                        return tx + sig;
-                    }
-                }
-            }
-            catch (...)
-            {
-                return signed_tx;
-            }
-
-            return signed_tx;
-        }
     } // namespace
 
     MidnightBlockchain::MidnightBlockchain() : connected_(false) {}
@@ -291,129 +235,6 @@ namespace midnight::blockchain
         return bech32m_validate_address(address);
     }
 
-    Result MidnightBlockchain::build_transaction(
-        const std::vector<UTXO> &utxos,
-        const std::vector<std::pair<std::string, uint64_t>> &outputs,
-        const std::string &change_address)
-    {
-        Result result{false, "", ""};
-
-        if (utxos.empty())
-        {
-            result.error_message = "No UTXOs provided";
-            midnight::g_logger->error(result.error_message);
-            return result;
-        }
-
-        if (outputs.empty())
-        {
-            result.error_message = "No outputs specified";
-            midnight::g_logger->error(result.error_message);
-            return result;
-        }
-
-        midnight::g_logger->info("Building Midnight transaction with UTXO selection");
-
-        (void)change_address;
-        result.error_message =
-            "MidnightBlockchain::build_transaction cannot build a valid Midnight ledger "
-            "transaction in pure C++ yet. Use the ledger transaction builder/proof payload "
-            "path; this method no longer creates placeholder zero commitments or local CBOR "
-            "that would be rejected by the chain.";
-        midnight::g_logger->error(result.error_message);
-        return result;
-    }
-
-    Result MidnightBlockchain::sign_transaction(const std::string &transaction_hex, const std::string &private_key)
-    {
-        Result result{false, "", ""};
-
-        if (transaction_hex.empty() || private_key.empty())
-        {
-            result.error_message = "Transaction or private key is empty";
-            midnight::g_logger->error(result.error_message);
-            return result;
-        }
-
-        try
-        {
-            midnight::g_logger->info("Signing transaction with Ed25519...");
-
-            // Initialize crypto library (idempotent - safe to call multiple times)
-            midnight::crypto::Ed25519Signer::initialize();
-
-            // Parse private key from hex string
-            midnight::crypto::Ed25519Signer::PrivateKey priv_key_bytes{};
-            if (!hex_to_fixed_bytes(private_key, priv_key_bytes.data(), priv_key_bytes.size()))
-            {
-                result.error_message = "Private key must be exactly 128 hex characters (64 bytes), optional 0x prefix";
-                midnight::g_logger->error(result.error_message);
-                return result;
-            }
-
-            // Sign the transaction (transaction_hex is treated as the message)
-            // NOTE: We convert hex to raw bytes before signing (line 478-495) to match
-            // TypeScript SDK behavior. Using the string-based sign_message directly would
-            // sign UTF-8 bytes, producing incorrect signatures.
-            std::string tx_hex_normalized = transaction_hex;
-            if (tx_hex_normalized.rfind("0x", 0) == 0 || tx_hex_normalized.rfind("0X", 0) == 0) {
-                tx_hex_normalized = tx_hex_normalized.substr(2);
-            }
-            std::vector<uint8_t> tx_bytes;
-            tx_bytes.reserve(tx_hex_normalized.size() / 2);
-            for (size_t i = 0; i < tx_hex_normalized.size(); i += 2) {
-                auto nibble = [](char c) -> int {
-                    if (c >= '0' && c <= '9') return c - '0';
-                    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
-                    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
-                    return -1;
-                };
-                int hi = nibble(tx_hex_normalized[i]);
-                int lo = nibble(tx_hex_normalized[i + 1]);
-                if (hi < 0 || lo < 0) {
-                    result.error_message = "Invalid hex character in transaction_hex";
-                    midnight::g_logger->error(result.error_message);
-                    return result;
-                }
-                tx_bytes.push_back(static_cast<uint8_t>((hi << 4) | lo));
-            }
-
-            // Sign the raw bytes (matching TypeScript SDK)
-            auto signature = midnight::crypto::Ed25519Signer::sign_message(
-                tx_bytes.data(), tx_bytes.size(), priv_key_bytes);
-
-            // Convert signature to hex string
-            std::string signature_hex = midnight::crypto::Ed25519Signer::signature_to_hex(signature);
-            const auto public_key = midnight::crypto::Ed25519Signer::extract_public_key(priv_key_bytes);
-
-            const std::string signed_payload = transaction_hex + signature_hex;
-            nlohmann::json envelope = {
-                {"format", "midnight-signed-v1"},
-                {"algorithm", "ed25519"},
-                {"transaction", transaction_hex},
-                {"signature", "0x" + signature_hex},
-                {"publicKey", "0x" + midnight::crypto::Ed25519Signer::public_key_to_hex(public_key)},
-                {"signedPayload", signed_payload},
-            };
-
-            // Construct structured output while keeping canonical payload available for submission.
-            result.success = true;
-            result.result = envelope.dump();
-
-            midnight::g_logger->info("Transaction signed successfully");
-            midnight::g_logger->debug("Signature length: " + std::to_string(signature_hex.length()) + " hex chars");
-
-            return result;
-        }
-        catch (const std::exception &e)
-        {
-            result.success = false;
-            result.error_message = std::string("Signing failed: ") + e.what();
-            midnight::g_logger->error(result.error_message);
-            return result;
-        }
-    }
-
     Result MidnightBlockchain::submit_transaction(const std::string &signed_tx)
     {
         Result result{false, "", ""};
@@ -431,12 +252,10 @@ namespace midnight::blockchain
         }
 
         midnight::g_logger->info("Submitting transaction to Midnight network");
-        const std::string submission_payload = extract_submission_payload(signed_tx);
-
         try
         {
             // Submit via RPC node
-            std::string tx_id = rpc_->submit_transaction(submission_payload);
+            std::string tx_id = rpc_->submit_transaction(signed_tx);
 
             result.success = true;
             result.result = tx_id;
@@ -533,12 +352,6 @@ namespace midnight::blockchain
     {
         // Fee formula: fee = minFeeA * size + minFeeB
         return protocol_params_.min_fee_a * tx_size + protocol_params_.min_fee_b;
-    }
-
-    bool MidnightBlockchain::validate_transaction(const Transaction &tx)
-    {
-        // Validate transaction structure
-        return !tx.get_inputs().empty() && !tx.get_outputs().empty();
     }
 
 } // namespace midnight::blockchain

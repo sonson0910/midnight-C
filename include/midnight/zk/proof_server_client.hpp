@@ -58,47 +58,6 @@ namespace midnight::zk
         bool is_connected() const;
 
         /**
-         * @brief Generate a ZK proof for circuit execution
-         *
-         * Legacy JSON helper. Midnight proof generation requires a ledger-built
-         * binary payload; use post_proving_payload().
-         *
-         * @param circuit_name Name of circuit (e.g., "post", "takeDown")
-         * @param circuit_data Compiled circuit data (.zkir bytes)
-         * @param inputs Circuit public inputs
-         * @param witnesses Witness outputs from witness functions
-         * @return ProofResult with generated proof or error
-         */
-        ProofResult generate_proof(
-            const std::string &circuit_name,
-            const std::vector<uint8_t> &circuit_data,
-            const PublicInputs &inputs,
-            const std::map<std::string, WitnessOutput> &witnesses);
-
-        /**
-         * @brief Verify a generated proof
-         *
-         * Legacy JSON helper. Midnight proof verification is performed by the
-         * ledger/proof stack or by node submission; this method only validates
-         * local structure and returns false with a clear error.
-         *
-         * @param proof CircuitProof to verify
-         * @return true if proof is valid
-         */
-        bool verify_proof(const CircuitProof &proof);
-
-        /**
-         * @brief Get circuit metadata from Proof Server
-         *
-         * Legacy JSON helper. Circuit metadata is not exposed by the proof server;
-         * load it from Compact/ledger artifacts.
-         *
-         * @param circuit_name Circuit identifier
-         * @return Circuit metadata (constraints, version, etc.)
-         */
-        CircuitProofMetadata get_circuit_metadata(const std::string &circuit_name);
-
-        /**
          * @brief Get Proof Server status
          *
          * Check if server is running and responsive.
@@ -142,76 +101,6 @@ namespace midnight::zk
         std::vector<uint8_t> post_prove_tx_payload(const std::vector<uint8_t> &prove_tx_payload);
 
         /**
-         * @brief Submit proof to blockchain via RPC
-         *
-         * After proof is generated and verified, submit to network.
-         *
-         * @param transaction Proof-enabled transaction to submit
-         * @param rpc_endpoint Midnight RPC node endpoint
-         * @return Transaction hash if successful
-         */
-        std::string submit_proof_transaction(
-            const ProofEnabledTransaction &transaction,
-            const std::string &rpc_endpoint);
-
-        /**
-         * @brief Production proof endpoint (/prove)
-         *
-         * Legacy JSON helper. Use post_proving_payload() with ledger-built
-         * createProvingPayload(...) bytes.
-         *
-         * @param circuit_name Circuit to prove
-         * @param prover_key_data Prover key bytes (.prover file contents)
-         * @param witness_data Witness inputs
-         * @param public_inputs Public input values
-         * @return ProofResult with ZK proof bytes
-         */
-        ProofResult prove(
-            const std::string &circuit_name,
-            const std::vector<uint8_t> &prover_key_data,
-            const json &witness_data,
-            const json &public_inputs);
-
-        /**
-         * @brief Transaction-level proof endpoint (/prove-tx)
-         *
-         * Calls /prove-tx to generate proofs for a complete transaction.
-         * Used for Zswap balancing and multi-circuit transactions.
-         *
-         * @param tx_data Serialized transaction data
-         * @param zk_config ZK configuration (from compact compile output)
-         * @return ProofResult with transaction proof
-         */
-        ProofResult prove_tx(
-            const std::vector<uint8_t> &tx_data,
-            const std::vector<uint8_t> &zk_config);
-
-        /**
-         * @brief Check circuit capability (/check)
-         *
-         * Legacy JSON helper. Use post_check_payload() with ledger-built
-         * createCheckPayload(...) bytes.
-         *
-         * @param circuit_name Circuit to check
-         * @param prover_key_data Prover key data
-         * @return true if server can prove this circuit
-         */
-        bool check_circuit(
-            const std::string &circuit_name,
-            const std::vector<uint8_t> &prover_key_data);
-
-        /**
-         * @brief Create dummy proof fixture for local tests only
-         *
-         * Useful for development tests before Proof Server is available. Never
-         * submit or verify it as a Midnight ledger proof.
-         *
-         * @param circuit_name Circuit name for test proof
-         * @return Test CircuitProof
-         */
-        CircuitProof create_test_proof(const std::string &circuit_name);
-
-        /**
          * @brief Set Proof Server configuration
          * @param config New configuration
          */
@@ -233,15 +122,6 @@ namespace midnight::zk
         Config config_;
         std::shared_ptr<midnight::network::NetworkClient> network_client_;
         std::string last_error_;
-
-        // Internal helper methods
-        json build_proof_request(
-            const std::string &circuit_name,
-            const std::vector<uint8_t> &circuit_data,
-            const PublicInputs &inputs,
-            const std::map<std::string, WitnessOutput> &witnesses);
-
-        ProofResult parse_proof_response(const json &response);
 
         void set_error(const std::string &error_msg);
     };

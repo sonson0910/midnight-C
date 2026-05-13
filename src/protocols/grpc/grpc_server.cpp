@@ -618,28 +618,30 @@ namespace midnight::protocols::grpc
 
         try
         {
-            std::vector<uint8_t> code(request->code().begin(), request->code().end());
-            std::vector<uint8_t> args(request->constructor_args().begin(),
-                                      request->constructor_args().end());
+            std::vector<uint8_t> tx_bytes(request->code().begin(), request->code().end());
+            if (tx_bytes.empty())
+            {
+                response->set_success("false");
+                response->set_error("DeployContract requires ledger-built deployment transaction bytes in code");
+                return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, response->error());
+            }
 
             if (logger)
             {
-                logger->info("DeployContract: deploying contract with " +
-                             std::to_string(code.size()) + " bytes");
+                logger->info("DeployContract: submitting ledger-built deployment transaction with " +
+                             std::to_string(tx_bytes.size()) + " bytes");
             }
 
-            // Deployment via gRPC requires the full signing pipeline to be injected.
-            // This stub cannot complete deployment without wallet/key injection.
-            // Return UNIMPLEMENTED so clients know this path is not yet wired.
-            if (logger)
+            const auto result = contract_mgr_->submit_deploy_transaction(tx_bytes);
+            response->set_success(result.success ? "true" : "false");
+            response->set_result(result.tx_hash);
+            response->set_error(result.error);
+            if (!result.success)
             {
-                logger->warn("DeployContract: gRPC path not implemented — "
-                             "wallet signer integration required");
+                return grpc::Status(grpc::StatusCode::INTERNAL, result.error);
             }
 
-            return grpc::Status(grpc::StatusCode::UNIMPLEMENTED,
-                               "Contract deployment via gRPC is not implemented. "
-                               "Submit ledger-built deployment bytes through the production client.");
+            return grpc::Status::OK;
         }
         catch (const std::exception& e)
         {
@@ -674,27 +676,31 @@ namespace midnight::protocols::grpc
 
         try
         {
-            const std::string& contract_addr = request->contract_address();
-            const std::string& circuit = request->circuit_name();
-            std::vector<uint8_t> call_data(request->call_data().begin(),
-                                           request->call_data().end());
+            std::vector<uint8_t> tx_bytes(request->call_data().begin(),
+                                          request->call_data().end());
+            if (tx_bytes.empty())
+            {
+                response->set_success("false");
+                response->set_error("CallContract requires ledger-built call transaction bytes in call_data");
+                return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, response->error());
+            }
 
             if (logger)
             {
-                logger->info("CallContract: calling " + circuit + " on " + contract_addr);
+                logger->info("CallContract: submitting ledger-built call transaction with " +
+                             std::to_string(tx_bytes.size()) + " bytes");
             }
 
-            // Contract calls via gRPC require wallet/key injection that is not yet wired.
-            // Return UNIMPLEMENTED so clients know this path is not available.
-            if (logger)
+            const auto result = contract_mgr_->submit_call_transaction(tx_bytes);
+            response->set_success(result.success ? "true" : "false");
+            response->set_result(result.tx_hash);
+            response->set_error(result.error);
+            if (!result.success)
             {
-                logger->warn("CallContract: gRPC path not implemented — "
-                             "wallet signer integration required");
+                return grpc::Status(grpc::StatusCode::INTERNAL, result.error);
             }
 
-            return grpc::Status(grpc::StatusCode::UNIMPLEMENTED,
-                               "Contract calls via gRPC are not implemented. "
-                               "Submit ledger-built call bytes through the production client.");
+            return grpc::Status::OK;
         }
         catch (const std::exception& e)
         {

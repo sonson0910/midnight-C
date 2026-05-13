@@ -2,6 +2,7 @@
 #include "midnight/core/common_utils.hpp"
 #include <chrono>
 #include <stdexcept>
+#include <utility>
 
 namespace midnight::production
 {
@@ -133,6 +134,112 @@ namespace midnight::production
             result.error = e.what();
         }
         return result;
+    }
+
+    namespace
+    {
+        BuildSubmitResult submit_built_transaction(
+            MidnightClient &client,
+            ledger::BuildResult build)
+        {
+            BuildSubmitResult result;
+            result.build = std::move(build);
+            if (!result.build.success)
+            {
+                result.error = result.build.error.empty()
+                    ? "Transaction build failed"
+                    : result.build.error;
+                return result;
+            }
+
+            result.submit = client.submit_midnight_transaction(result.build.transaction_bytes);
+            result.success = result.submit.success;
+            if (!result.success)
+            {
+                result.error = result.submit.error.empty()
+                    ? "Transaction submission failed"
+                    : result.submit.error;
+            }
+            return result;
+        }
+    }
+
+    BuildSubmitResult MidnightClient::transfer_night(
+        const ledger::ToolkitConfig &toolkit,
+        const ledger::TransferNightParams &params)
+    {
+        auto cfg = toolkit;
+        if (cfg.proof_server_url.empty())
+        {
+            cfg.proof_server_url = config_.proof_server_url;
+        }
+        ledger::TransactionBuilder builder(cfg);
+        return submit_built_transaction(*this, builder.build_transfer_night(params));
+    }
+
+    BuildSubmitResult MidnightClient::register_dust(
+        const ledger::ToolkitConfig &toolkit,
+        const ledger::RegisterDustParams &params)
+    {
+        auto cfg = toolkit;
+        if (cfg.proof_server_url.empty())
+        {
+            cfg.proof_server_url = config_.proof_server_url;
+        }
+        ledger::TransactionBuilder builder(cfg);
+        return submit_built_transaction(*this, builder.build_register_dust(params));
+    }
+
+    BuildSubmitResult MidnightClient::deregister_dust(
+        const ledger::ToolkitConfig &toolkit,
+        const ledger::DeregisterDustParams &params)
+    {
+        auto cfg = toolkit;
+        if (cfg.proof_server_url.empty())
+        {
+            cfg.proof_server_url = config_.proof_server_url;
+        }
+        ledger::TransactionBuilder builder(cfg);
+        return submit_built_transaction(*this, builder.build_deregister_dust(params));
+    }
+
+    BuildSubmitResult MidnightClient::deploy_simple_contract(
+        const ledger::ToolkitConfig &toolkit,
+        const ledger::SimpleContractDeployParams &params)
+    {
+        auto cfg = toolkit;
+        if (cfg.proof_server_url.empty())
+        {
+            cfg.proof_server_url = config_.proof_server_url;
+        }
+        ledger::TransactionBuilder builder(cfg);
+        return submit_built_transaction(*this, builder.build_simple_contract_deploy(params));
+    }
+
+    BuildSubmitResult MidnightClient::call_simple_contract(
+        const ledger::ToolkitConfig &toolkit,
+        const ledger::SimpleContractCallParams &params)
+    {
+        auto cfg = toolkit;
+        if (cfg.proof_server_url.empty())
+        {
+            cfg.proof_server_url = config_.proof_server_url;
+        }
+        ledger::TransactionBuilder builder(cfg);
+        return submit_built_transaction(*this, builder.build_simple_contract_call(params));
+    }
+
+    BuildSubmitResult MidnightClient::submit_custom_contract_intents(
+        const ledger::ToolkitConfig &toolkit,
+        const ledger::CustomContractIntentParams &params)
+    {
+        auto cfg = toolkit;
+        if (cfg.proof_server_url.empty())
+        {
+            cfg.proof_server_url = config_.proof_server_url;
+        }
+        ledger::TransactionBuilder builder(cfg);
+        return submit_built_transaction(*this, builder.build_custom_contract_transaction(params));
     }
 
     std::vector<uint8_t> MidnightClient::check_payload(

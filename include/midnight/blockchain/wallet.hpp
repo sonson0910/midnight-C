@@ -162,7 +162,7 @@ namespace midnight::blockchain
         /**
          * @brief Sign ledger-provided transaction payload with private key
          * @param tx_hex Hex-encoded ledger signing payload
-         * @return Hex-encoded signed payload
+         * @return Hex-encoded signature
          */
         std::string sign_transaction(const std::string &tx_hex);
 

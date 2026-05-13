@@ -116,16 +116,6 @@ namespace midnight::network
         json get_contract_state(const std::string &contract_address);
 
         /**
-         * @brief Unsupported off-chain Compact script evaluation placeholder
-         * @param script Compact script bytecode
-         * @param redeemer Redeemer data
-         * @return Execution result
-         */
-        json evaluate_script(
-            const std::string &script,
-            const std::string &redeemer);
-
-        /**
          * @brief Get node version info
          * @return JSON object with version, network, etc.
          */

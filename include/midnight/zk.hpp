@@ -47,24 +47,8 @@
  *     return;
  * }
  *
- * // Generate ZK proof
- * ProofResult result = client.generate_proof(
- *     "post",                    // circuit name
- *     circuit_data,             // compiled circuit
- *     public_inputs,            // disclosed values
- *     witnesses                 // private witness functions
- * );
- *
- * if (result.success) {
- *     // Verify proof locally
- *     if (client.verify_proof(result.proof)) {
- *         // Submit to blockchain
- *         std::string tx_hash = client.submit_proof_transaction(
- *             proof_transaction,
- *             "https://preprod.midnight.network/api"
- *         );
- *     }
- * }
+ * // Submit ledger-built payload bytes to the proof server
+ * auto proven = client.post_prove_tx_payload(prove_tx_payload);
  * ```
  *
  * @section witness_functions Witness Functions
@@ -131,5 +115,3 @@
 #include "midnight/zk/proof_types.hpp"
 #include "midnight/zk/proof_server_client.hpp"
 #include "midnight/zk/private_state.hpp"
-#include "midnight/zk/proof_server_resilient_client.hpp"
-#include "midnight/zk/ledger_state_sync.hpp"

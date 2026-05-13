@@ -88,12 +88,6 @@ namespace midnight::signing_submission
         FAILED,
     };
 
-    enum class SubmissionTransportMode
-    {
-        MOCK,
-        REAL_RPC,
-    };
-
     /**
      * Transaction Submission Result
      */
@@ -329,11 +323,7 @@ namespace midnight::signing_submission
          * @param node_rpc_url: Node RPC endpoint
          */
         explicit TransactionSubmitter(const std::string &node_rpc_url);
-        TransactionSubmitter(const std::string &node_rpc_url, SubmissionTransportMode mode);
         ~TransactionSubmitter();
-
-        void set_transport_mode(SubmissionTransportMode mode);
-        SubmissionTransportMode get_transport_mode() const;
 
         /**
          * Submit signed transaction
@@ -361,7 +351,6 @@ namespace midnight::signing_submission
 
     private:
         std::string rpc_url_;
-        SubmissionTransportMode transport_mode_ = SubmissionTransportMode::MOCK;
         std::map<std::string, SubmissionResult> submission_cache_;
         mutable std::mutex submission_cache_mutex_; ///< Protects submission_cache_ against concurrent access
 

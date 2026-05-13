@@ -445,28 +445,6 @@ namespace midnight::network
         }
     }
 
-    json MidnightNodeRPC::evaluate_script(
-        const std::string &script,
-        const std::string &redeemer)
-    {
-        (void)redeemer;
-
-        if (script.empty())
-        {
-            throw std::runtime_error("Script cannot be empty");
-        }
-
-        midnight::g_logger->warn(
-            "evaluate_script is not a Midnight Compact execution interface; "
-            "contracts_call/rpc_callWithProof are not used for ledger Compact transactions");
-
-        return json::object({
-            {"success", false},
-            {"error", "Off-chain Compact script evaluation is not supported by this C++ client"},
-            {"recommendation", "Build the ledger transaction/proof payload and submit the serialized bytes"}
-        });
-    }
-
     json MidnightNodeRPC::get_node_info()
     {
         midnight::g_logger->info("Querying node info");

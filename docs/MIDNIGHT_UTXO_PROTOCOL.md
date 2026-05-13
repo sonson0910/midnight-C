@@ -216,7 +216,7 @@ size_t skip_cbor_element() {
 }
 ```
 
-**Location**: `include/midnight/tx/midnight_transaction.hpp`
+**Status**: the legacy local CBOR transaction module has been removed. Production transaction bytes must come from the Midnight ledger serializer.
 
 ### 6. Thread-Safety Fix (BUG FIXED)
 **Issue**: `FacadeState` không có mutex protection - race condition khi multi-thread access

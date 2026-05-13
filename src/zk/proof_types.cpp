@@ -513,33 +513,6 @@ namespace midnight::zk
             return true;
         }
 
-        CircuitProof create_test_proof(const std::string &circuit_name)
-        {
-            CircuitProof proof;
-
-            // Dummy local fixture data only. It is intentionally not a
-            // Midnight ledger/proof-server compatible proof.
-            ProofData pd;
-            pd.proof_bytes.resize(128, 0xAA);
-            proof.proof = pd;
-
-            // Create dummy public inputs
-            proof.public_inputs.add_input("state", "0000000000000000000000000000000000000000000000000000000000000000");
-            proof.public_inputs.add_input("owner", "1111111111111111111111111111111111111111111111111111111111111111");
-
-            // Create metadata
-            proof.metadata.circuit_name = circuit_name;
-            proof.metadata.circuit_hash = "test_hash_" + circuit_name;
-            proof.metadata.num_constraints = 4569;
-            proof.metadata.compilation_version = "0.22.0";
-
-            proof.generated_at_timestamp = 0;
-            proof.proof_server_endpoint = "http://localhost:6300";
-            proof.verification_status = CircuitProof::VerificationStatus::UNVERIFIED;
-
-            return proof;
-        }
-
     } // namespace types_util
 
 } // namespace midnight::zk

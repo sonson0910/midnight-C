@@ -144,18 +144,6 @@ struct BalancingRecipe {
     }
 };
 
-// ─── Swap Types (SDK CombinedSwapInputs / CombinedSwapOutputs) ──
-
-struct SwapInputs {
-    std::map<std::string, uint64_t> shielded;     ///< token_type → amount
-    std::map<std::string, uint64_t> unshielded;   ///< token_type → amount
-};
-
-struct SwapOutputs {
-    std::vector<TokenTransfer> shielded_outputs;
-    std::vector<TokenTransfer> unshielded_outputs;
-};
-
 // ─── Transfer Result ────────────────────────────────────────
 
 struct TransferResult {
@@ -176,32 +164,6 @@ struct TransferResult {
         }
         return {};
     }
-};
-
-// ─── Dust Registration ──────────────────────────────────────
-
-struct DustRegistrationResult {
-    bool success = false;
-    std::string tx_hash;
-    uint64_t estimated_dust_per_epoch = 0;
-    
-    using ErrorType = errors::WalletError;
-    std::optional<ErrorType> error;
-    
-    std::string error_message() const {
-        if (error) {
-            return errors::get_message(*error);
-        }
-        return {};
-    }
-};
-
-// ─── Fee Estimation ─────────────────────────────────────────
-
-struct FeeEstimation {
-    uint64_t tx_fee = 0;                   ///< Fee for this transaction only
-    uint64_t total_fee = 0;                ///< Total fee including balancing tx
-    uint64_t dust_generation_rate = 0;     ///< Estimated DUST/epoch for registration
 };
 
 // ─── Coin Selection Strategy ────────────────────────────────
@@ -401,105 +363,6 @@ public:
         const std::string& token_type = "NIGHT") const;
 
     void set_coin_selection_strategy(CoinSelectionStrategy strategy);
-
-    // ─── Transfer Pipeline (matching SDK transferTransaction) ─
-
-    /**
-     * @brief Build + Sign + Prove + Balance + Submit a transfer
-     *
-     * Full pipeline matching WalletFacade.transferTransaction():
-     *   1. build: select UTXOs, create inputs/outputs
-     *   2. sign: Ed25519 sign input segments
-     *   3. prove: generate ZK proof via proof server
-     *   4. balance: pay DUST fees via dust wallet
-     *   5. submit: send to relay node
-     *
-     * @param outputs Transfer outputs
-     * @param pay_fees Whether to auto-pay DUST fees (default: true)
-     * @param ttl Transaction time-to-live
-     * @return TransferResult with full pipeline result
-     */
-    TransferResult transfer_transaction(
-        const std::vector<TokenTransfer>& outputs,
-        bool pay_fees = true,
-        std::chrono::system_clock::time_point ttl = {});
-
-    /// Build only (step 1) — no signing/proving/submitting
-    TransferResult build_transfer(
-        const std::vector<TokenTransfer>& outputs,
-        std::chrono::system_clock::time_point ttl = {});
-
-    /// Sign a built transfer (step 2)
-    TransferResult sign_transaction(TransferResult& tx_result) const;
-
-    /// Submit a signed+proved transaction (step 5)
-    SubmissionEvent submit_transaction(const TransferResult& tx_result);
-
-    // ─── Fee Estimation ──────────────────────────────────────
-
-    FeeEstimation calculate_transaction_fee(const TransferResult& tx) const;
-    FeeEstimation estimate_transaction_fee(const std::vector<TokenTransfer>& outputs) const;
-
-    // ─── Dust Registration ───────────────────────────────────
-
-    DustRegistrationResult register_for_dust(uint64_t night_amount);
-    bool deregister_from_dust();
-    uint64_t estimate_dust_generation(uint64_t night_amount) const;
-    FeeEstimation estimate_registration(const std::vector<UtxoWithMeta>& night_utxos) const;
-
-    // ─── Transaction Balancing (SDK balanceFinalizedTransaction) ─
-
-    /**
-     * @brief Balance a finalized transaction (SDK #8)
-     *
-     * Runs unshielded, shielded, and dust/fee balancing on a finalized TX.
-     * Produces a FinalizedTransactionRecipe containing the original TX
-     * and the merged balancing TX.
-     *
-     * SDK equivalent: WalletFacade.balanceFinalizedTransaction(tx, secretKeys, options)
-     */
-    BalancingRecipe balance_finalized_transaction(
-        const json& finalized_tx,
-        std::chrono::system_clock::time_point ttl = {},
-        TokenKindsToBalance token_kinds = TokenKindsToBalance::all());
-
-    /**
-     * @brief Balance an unbound transaction
-     *
-     * For unbound TXs, unshielded balancing happens in-place.
-     * SDK equivalent: WalletFacade.balanceUnboundTransaction()
-     */
-    BalancingRecipe balance_unbound_transaction(
-        const json& unbound_tx,
-        std::chrono::system_clock::time_point ttl = {},
-        TokenKindsToBalance token_kinds = TokenKindsToBalance::all());
-
-    /**
-     * @brief Balance an unproven transaction
-     *
-     * Merges all balancing into a single UnprovenTransactionRecipe.
-     * SDK equivalent: WalletFacade.balanceUnprovenTransaction()
-     */
-    BalancingRecipe balance_unproven_transaction(
-        const json& unproven_tx,
-        std::chrono::system_clock::time_point ttl = {},
-        TokenKindsToBalance token_kinds = TokenKindsToBalance::all());
-
-    // ─── Atomic Swap (SDK initSwap #14) ──────────────────────
-
-    /**
-     * @brief Initialize an atomic swap transaction
-     *
-     * Creates a swap TX combining shielded and/or unshielded
-     * inputs and outputs, with optional fee payment.
-     *
-     * SDK equivalent: WalletFacade.initSwap(desiredInputs, desiredOutputs, secretKeys, options)
-     */
-    BalancingRecipe init_swap(
-        const SwapInputs& desired_inputs,
-        const std::vector<SwapOutputs>& desired_outputs,
-        bool pay_fees = false,
-        std::chrono::system_clock::time_point ttl = {});
 
     // ─── Transaction Revert (matching SDK revert) ────────────
 

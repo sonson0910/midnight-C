@@ -185,76 +185,60 @@ Generate proofs via the local Proof Server, isolate private witnesses, and embed
 
 ```cpp
 #include "midnight/zk/proof_server_client.hpp"
-#include "midnight/zk/proof_server_resilient_client.hpp"
-#include "midnight/zk/proof_types.hpp"
 
-// --- Base client (proof server at localhost:6300 by default) ---
+// --- Proof server at localhost:6300 by default ---
 midnight::zk::ProofServerClient::Config cfg;   // host=localhost, port=6300
-auto base = std::make_shared<midnight::zk::ProofServerClient>(cfg);
-base->connect();
-
-// --- Resilient wrapper: circuit breaker + exponential backoff ---
-midnight::zk::ResilienceConfig res;
-res.max_retries        = 3;
-res.failure_threshold  = 5;   // open circuit after 5 failures
-midnight::zk::ProofServerResilientClient client(base, res);
-
-// --- Public inputs (appear on-chain) ---
-midnight::zk::PublicInputs inputs;
-inputs.add_input("recipient", "0xaabbccdd...");
-
-// --- Witness output (private — never leaves the prover) ---
-midnight::zk::WitnessOutput witness;
-witness.witness_name  = "localSecretKey";
-witness.output_bytes  = { /* 32 secret bytes */ };
-
-// --- Generate proof (auto-retries if server crashes mid-process) ---
-auto result = client.generate_proof_resilient(
-    "transfer",          // circuit name
-    circuit_bytes,       // compiled .zkir data
-    inputs,
-    witness);
-
-if (result.success) {
-    std::string proof_hex = result.proof.to_hex();
-    // include proof_hex in your transaction payload
-}
+midnight::zk::ProofServerClient client(cfg);
+auto result = client.post_prove_tx_payload(ledger_built_prove_tx_payload);
 ```
 
 ---
 
 ### 5 — State & Compact Contracts
 
-Deploy Compact contracts, sync on-chain ledger state, and manage off-chain private state.
+Deploy Compact contracts and query state through ledger-built transaction bytes and the indexer/RPC clients.
 
 ```cpp
-#include "midnight/compact-contracts/compact_contracts.hpp"
-#include "midnight/zk/ledger_state_sync.hpp"
+#include "midnight/contract/contract_manager.hpp"
+#include "midnight/production/midnight_client.hpp"
 
-// --- Deploy a Compact contract ---
-midnight::compact_contracts::ContractDeployer deployer(node_rpc_url);
-auto deployed = deployer.deploy_contract(
-    "FaucetAMM", compiled_contract, constructor_args);
+midnight::contract::ContractManager mgr(node_rpc_url, proof_server_url);
 
-if (deployed.success)
-    std::cout << "contract=" << deployed.contract_address << "\n";
+// Transaction bytes must be produced by the Midnight ledger/proof pipeline.
+auto deployed = mgr.submit_deploy_transaction(ledger_built_deploy_tx_bytes);
+auto called = mgr.submit_call_transaction(ledger_built_call_tx_bytes);
 
-// --- Interact with a deployed contract ---
-midnight::compact_contracts::ContractInteractor interactor(
-    node_rpc_url, deployed.contract_address);
-auto call_result = interactor.call_function("increment", call_args);
+midnight::production::MidnightClient client(config);
+auto state = client.query_contract_state(contract_hex);
+```
 
-// --- Ledger state sync (on-chain + off-chain private state) ---
-midnight::zk::LedgerStateSyncManager sync(
-    "https://rpc.preprod.midnight.network",
-    std::chrono::seconds(6));
-sync.start_monitoring();
-sync.trigger_full_sync();          // pull latest state snapshot
+### 6 — Production Transaction Building
+
+The C++ library builds production transactions by delegating to the official
+`midnight-node-toolkit` from `midnight-research/midnight-node/util/toolkit`.
+The returned `.mn` file is parsed as `SerializedTx`, the raw tagged
+`tx.Midnight` bytes are wrapped as `Midnight::send_mn_transaction`, then
+submitted via `author_submitExtrinsic`.
+
+```cpp
+#include "midnight/production/midnight_client.hpp"
+
+midnight::ledger::ToolkitConfig toolkit;
+toolkit.toolkit_binary = "midnight-node-toolkit";
+toolkit.proof_server_url = "http://127.0.0.1:6300";
+
+midnight::ledger::TransferNightParams tx;
+tx.source.src_url = "wss://rpc.preprod.midnight.network";
+tx.source_seed = "<wallet-seed-hex>";
+tx.destination_addresses = {"mn_addr_preprod1..."};
+tx.amount = "1000000000"; // u128 decimal string
+
+auto result = client.transfer_night(toolkit, tx);
 ```
 
 ---
 
-### 6 — Monitoring & GRANDPA Finality
+### 7 — Monitoring & GRANDPA Finality
 
 Subscribe to new blocks, detect reorgs, track a transaction from mempool to finality, and await GRANDPA confirmation.
 

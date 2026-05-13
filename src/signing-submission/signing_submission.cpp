@@ -713,15 +713,8 @@ namespace midnight::signing_submission
     // ============================================================================
 
     TransactionSubmitter::TransactionSubmitter(const std::string &node_rpc_url)
-        : TransactionSubmitter(node_rpc_url, SubmissionTransportMode::REAL_RPC)
-    {
-    }
-
-    TransactionSubmitter::TransactionSubmitter(const std::string &node_rpc_url,
-                                               SubmissionTransportMode mode)
         : rpc_url_(node_rpc_url)
     {
-        transport_mode_ = mode;
     }
 
     TransactionSubmitter::~TransactionSubmitter()
@@ -730,16 +723,6 @@ namespace midnight::signing_submission
         {
             wait_thread_.join();
         }
-    }
-
-    void TransactionSubmitter::set_transport_mode(SubmissionTransportMode mode)
-    {
-        transport_mode_ = mode;
-    }
-
-    SubmissionTransportMode TransactionSubmitter::get_transport_mode() const
-    {
-        return transport_mode_;
     }
 
     SubmissionResult TransactionSubmitter::submit(const SignedTransaction &signed_tx)
@@ -848,13 +831,6 @@ namespace midnight::signing_submission
 
     Json::Value TransactionSubmitter::rpc_submit_extrinsic(const SignedTransaction &signed_tx)
     {
-        if (transport_mode_ == SubmissionTransportMode::MOCK)
-        {
-            Json::Value response;
-            response["result"] = signed_tx.transaction_hash;
-            return response;
-        }
-
         midnight::network::NetworkClient client(rpc_url_, kSubmitRpcTimeoutMs);
 
         std::string extrinsic_hex;

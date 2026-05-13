@@ -36,14 +36,8 @@ struct SerializedTransaction {
     std::vector<uint8_t> data;           ///< Ledger serialized TX or extrinsic bytes
     std::string tx_hash;                 ///< Node-returned hash after submission
 
-    /// Disabled: Midnight transactions are not JSON payloads.
-    static SerializedTransaction from_json(const json& tx_json);
-
     /// Create from already ledger-serialized bytes.
     static SerializedTransaction from_bytes(const std::vector<uint8_t>& data);
-
-    /// Disabled: pallet index/call index must not be guessed locally.
-    static SerializedTransaction make_midnight_extrinsic(const std::string& midnight_tx_hex);
 };
 
 // ─── Submission Service ─────────────────────────────────────
@@ -108,9 +102,6 @@ public:
     /// Prove an unproven transaction
     /// Matching SDK: prove(transaction: UnprovenTransaction): Promise<UnboundTransaction>
     ProvedTransaction prove(const std::vector<uint8_t>& unproven_tx);
-
-    /// Disabled: proof-server /prove expects ledger binary payloads.
-    ProvedTransaction prove_json(const json& tx_json);
 
     /// Check if proof server is available
     bool is_available() const;

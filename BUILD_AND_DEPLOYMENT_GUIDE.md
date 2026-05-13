@@ -162,19 +162,6 @@ cmake .. -DBUILD_SHARED_LIBS=OFF
 # [INFO] Verifying signature... ✓ Valid
 ```
 
-### Phase 4A: ZK Proofs
-
-```bash
-./example_phase4a_zk_proofs --proof-server localhost:6300
-
-# Expected output:
-# [INFO] Connecting to proof server...
-# [INFO] Creating zk proof type
-# [INFO] Sending to proof server...
-# [INFO] Proof generated: 0x...
-# [INFO] Proof size: 512 bytes
-```
-
 ### Phase 4B: Private State Management
 
 ```bash
@@ -186,57 +173,6 @@ cmake .. -DBUILD_SHARED_LIBS=OFF
 # [INFO] Building witness context...
 # [INFO] Witness context ready for TypeScript
 # [INFO] Result: Private witness executed successfully
-```
-
-### Phase 4C: Proof Server Resilience
-
-```bash
-./example_phase4c_resilience --flaky-server
-
-# Expected output:
-# [INFO] Testing exponential backoff...
-# [INFO] Attempt 1 failed (connection timeout)
-# [INFO] Waiting 100ms...
-# [INFO] Attempt 2 failed (server busy)
-# [INFO] Waiting 200ms...
-# [INFO] Attempt 3 succeeded
-# [INFO] Circuit breaker state: CLOSED
-```
-
-### Phase 4D: State Synchronization
-
-```bash
-./example_phase4d_state_sync --rpc http://localhost:3030
-
-# Expected output:
-# [INFO] Monitoring block events...
-# [INFO] Block #105 arrived
-# [INFO] Syncing state for contract: 0x...
-# [INFO] Cache hit rate: 85%
-# [INFO] Reorg detected (depth=2)
-# [INFO] State invalidated and re-synced
-```
-
-### Phase 4E: End-to-End Voting Application
-
-```bash
-./example_phase4e_voting_app --voting-contract 0x... --voters 100
-
-# Expected output:
-# [INFO] Midnight SDK Voting Application - Phase 4E
-# [INFO] Initializing voting app...
-# [INFO] Contract address: 0x...
-# [INFO] Processing 100 votes...
-# [INFO] Voter 1: cast vote (proof verified)
-# [INFO] Voter 2: cast vote (proof verified)
-# ...
-# [INFO] Voting statistics:
-#   - Total votes: 100
-#   - Proofs verified: 100
-#   - Failed proofs: 0
-#   - Average proof latency: 250ms
-#   - Circuit breaker: CLOSED
-#   - Cache hit rate: 92%
 ```
 
 ---
@@ -256,11 +192,8 @@ ctest --output-on-failure
 # Phase 1 tests
 ctest -R phase1 --output-on-failure
 
-# Phase 4C (Resilience) tests
-ctest -R phase4c --output-on-failure
-
-# Phase 4D (State Sync) tests
-ctest -R phase4d --output-on-failure
+# Midnight communication tests
+ctest -R indexer --output-on-failure
 ```
 
 ### Verbose Test Output
@@ -318,8 +251,8 @@ COPY --from=builder /opt/midnight-sdk /opt/midnight-sdk
 ENV PATH="/opt/midnight-sdk/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/opt/midnight-sdk/lib:${LD_LIBRARY_PATH}"
 
-# Run voting app
-ENTRYPOINT ["example_phase4e_voting_app"]
+# Run the preprod format checker
+ENTRYPOINT ["preprod_midnight_format_check"]
 ```
 
 ### Build Image
@@ -463,9 +396,8 @@ echo "Exit code: $?"  # Should be 0
 ./scan_secrets.sh
 ./check_dependencies.sh
 
-# ✓ Performance baseline
-./benchmark_phase4c_resilience
-./benchmark_phase4d_state_sync
+# ✓ Production communication check
+./preprod_midnight_format_check
 
 # ✓ Documentation complete
 ls -la PHASE*.md
@@ -529,12 +461,8 @@ ctest --output-on-failure
 # 4. Load environment
 source ../.env.production
 
-# 5. Start service
-./example_phase4e_voting_app \
-    --rpc $RPC_ENDPOINT \
-    --proof-server $PROOF_SERVER_ENDPOINT \
-    --workers 8 \
-    --cache-size $LEDGER_SYNC_CACHE_SIZE
+# 5. Run production communication check
+./preprod_midnight_format_check
 
 # 6. Verify health
 curl http://localhost:6300/health
@@ -647,7 +575,7 @@ ps aux | grep midnight-sdk
 export LEDGER_SYNC_POLL_INTERVAL_MS=5000  # Increase from 2000
 
 # Profile with perf
-perf record ./example_phase4e_voting_app
+perf record ./preprod_midnight_format_check
 perf report
 ```
 

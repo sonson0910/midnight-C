@@ -133,7 +133,6 @@ set(MIDNIGHT_TX_SOURCES)
 if(ENABLE_BLOCKCHAIN)
     list(APPEND MIDNIGHT_TX_SOURCES
         tx/extrinsic_builder.cpp
-        tx/midnight_transaction.cpp
     )
 endif()
 
@@ -144,8 +143,6 @@ if(ENABLE_BLOCKCHAIN)
         zk/proof_types.cpp
         zk/proof_server_client.cpp
         zk/private_state.cpp
-        zk/proof_server_resilient_client.cpp
-        zk/ledger_state_sync.cpp
     )
 endif()
 
@@ -153,14 +150,13 @@ endif()
 if(ENABLE_BLOCKCHAIN)
     list(APPEND MIDNIGHT_BLOCKCHAIN_SOURCES
         blockchain/chain_manager.cpp
-        blockchain/transaction.cpp
         blockchain/block.cpp
         blockchain/wallet.cpp
         blockchain/wallet_manager.cpp
         blockchain/midnight_adapter.cpp
         utxo-transactions/utxo_transactions.cpp
+        ledger/transaction_builder.cpp
         compact-contracts/compact_contracts.cpp
-        zk-proofs/zk_proofs.cpp
         monitoring-finality/monitoring_finality.cpp
         signing-submission/signing_submission.cpp
         production/midnight_client.cpp

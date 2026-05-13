@@ -534,10 +534,9 @@ namespace midnight::blockchain
             throw;
         }
 #else
-        // Fallback: produce a clearly-marked stub signature when crypto is unavailable.
         if (midnight::g_logger)
         {
-            midnight::g_logger->warn("Wallet::sign_transaction: libsodium unavailable — throwing instead of returning stub signature");
+            midnight::g_logger->warn("Wallet::sign_transaction: libsodium unavailable");
         }
         throw std::runtime_error("Cannot sign transaction: libsodium crypto is unavailable");
 #endif
