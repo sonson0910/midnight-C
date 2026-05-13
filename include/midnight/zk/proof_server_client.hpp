@@ -11,15 +11,16 @@ namespace midnight::zk
     /**
      * @brief Client for communicating with the Midnight Proof Server
      *
-     * The Proof Server (Docker: midnightntwrk/proof-server:8.0.3)
-     * runs at http://localhost:6300 and generates zero-knowledge proofs
-     * for circuit execution.
+     * The Proof Server runs at http://localhost:6300 by default and accepts
+     * ledger-built tagged binary payloads.
      *
-     * This client handles:
-     * - Proof generation requests
-     * - Proof verification
-     * - Circuit metadata retrieval
-     * - Witness context management
+     * The canonical production endpoints are:
+     * - /check with createCheckPayload(...) bytes
+     * - /prove with createProvingPayload(...) bytes
+     * - /prove-tx with TransactionProvePayload bytes
+     *
+     * Legacy JSON helpers return explicit errors so callers do not accidentally
+     * build non-Midnight proof requests.
      */
     class ProofServerClient
     {
@@ -59,8 +60,8 @@ namespace midnight::zk
         /**
          * @brief Generate a ZK proof for circuit execution
          *
-         * Sends circuit data, inputs, and witness outputs to Proof Server.
-         * Proof Server performs the cryptographic computation to generate a ZK proof.
+         * Legacy JSON helper. Midnight proof generation requires a ledger-built
+         * binary payload; use post_proving_payload().
          *
          * @param circuit_name Name of circuit (e.g., "post", "takeDown")
          * @param circuit_data Compiled circuit data (.zkir bytes)
@@ -77,8 +78,9 @@ namespace midnight::zk
         /**
          * @brief Verify a generated proof
          *
-         * Local verification using public inputs and proof data.
-         * Can be used to validate proof before submission to network.
+         * Legacy JSON helper. Midnight proof verification is performed by the
+         * ledger/proof stack or by node submission; this method only validates
+         * local structure and returns false with a clear error.
          *
          * @param proof CircuitProof to verify
          * @return true if proof is valid
@@ -88,7 +90,8 @@ namespace midnight::zk
         /**
          * @brief Get circuit metadata from Proof Server
          *
-         * Retrieves information about available circuits and their constraints.
+         * Legacy JSON helper. Circuit metadata is not exposed by the proof server;
+         * load it from Compact/ledger artifacts.
          *
          * @param circuit_name Circuit identifier
          * @return Circuit metadata (constraints, version, etc.)
@@ -154,9 +157,8 @@ namespace midnight::zk
         /**
          * @brief Production proof endpoint (/prove)
          *
-         * Calls the Midnight Proof Server's /prove endpoint directly.
-         * This is the endpoint used by httpClientProofProvider for
-         * contract-specific ZK proof generation.
+         * Legacy JSON helper. Use post_proving_payload() with ledger-built
+         * createProvingPayload(...) bytes.
          *
          * @param circuit_name Circuit to prove
          * @param prover_key_data Prover key bytes (.prover file contents)
@@ -187,8 +189,8 @@ namespace midnight::zk
         /**
          * @brief Check circuit capability (/check)
          *
-         * Validates that the Proof Server can handle a specific circuit
-         * before attempting proof generation.
+         * Legacy JSON helper. Use post_check_payload() with ledger-built
+         * createCheckPayload(...) bytes.
          *
          * @param circuit_name Circuit to check
          * @param prover_key_data Prover key data
@@ -199,9 +201,10 @@ namespace midnight::zk
             const std::vector<uint8_t> &prover_key_data);
 
         /**
-         * @brief Create empty proof for testing
+         * @brief Create dummy proof fixture for local tests only
          *
-         * Useful for development and tests before Proof Server is available.
+         * Useful for development tests before Proof Server is available. Never
+         * submit or verify it as a Midnight ledger proof.
          *
          * @param circuit_name Circuit name for test proof
          * @return Test CircuitProof

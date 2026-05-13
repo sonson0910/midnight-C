@@ -51,15 +51,6 @@ namespace midnight::signing_submission
         constexpr bool kHasSodium = false;
 #endif
 
-        Keypair make_ed25519_fallback_keypair()
-        {
-            Keypair fallback;
-            fallback.type = KeyType::ED25519;
-            fallback.public_key = "0x" + std::string(64, 'e');
-            fallback.private_key = "0x" + std::string(128, 'd');
-            return fallback;
-        }
-
         std::string to_hex(const std::vector<uint8_t> &data)
         {
             static const char *hex = "0123456789abcdef";
@@ -157,69 +148,6 @@ namespace midnight::signing_submission
             }
 
             target.insert(target.end(), hash.begin(), hash.end());
-        }
-
-        /**
-         * Encode uint64_t in Substrate compact encoding format
-         * Compact encoding is used for nonce, tip, and other variable-length integers
-         * Format:
-         *   0-63:     single byte, value << 2
-         *   64-16383: two bytes, (value << 2) | 1
-         *   16384+:   four bytes, (value << 2) | 2
-         */
-        void encode_compact_u64(std::vector<uint8_t> &buf, uint64_t val)
-        {
-            if (val < 64)
-            {
-                buf.push_back(static_cast<uint8_t>(val << 2));
-            }
-            else if (val < 16384)
-            {
-                uint16_t v = static_cast<uint16_t>((val << 2) | 1);
-                buf.push_back(v & 0xFF);
-                buf.push_back((v >> 8) & 0xFF);
-            }
-            else
-            {
-                // four-byte mode
-                uint32_t v = (static_cast<uint32_t>(val) << 2) | 2;
-                buf.push_back((v >> 0) & 0xFF);
-                buf.push_back((v >> 8) & 0xFF);
-                buf.push_back((v >> 16) & 0xFF);
-                buf.push_back((v >> 24) & 0xFF);
-            }
-        }
-
-        /**
-         * Build proper Midnight transaction signing payload
-         * Format: network_id || era || nonce || tip || transaction_body
-         */
-        std::vector<uint8_t> build_signing_payload(
-            uint8_t network_id,
-            uint8_t era,
-            uint64_t nonce,
-            uint64_t tip,
-            const std::vector<uint8_t> &tx_body)
-        {
-            std::vector<uint8_t> payload;
-            payload.reserve(1 + 1 + 8 + 8 + tx_body.size());
-
-            // 1. Network ID (0 = testnet, 1 = mainnet)
-            payload.push_back(network_id);
-
-            // 2. Era (0x00 = immortal/immortal era)
-            payload.push_back(era);
-
-            // 3. Nonce (compact-encoded)
-            encode_compact_u64(payload, nonce);
-
-            // 4. Tip (compact-encoded, usually 0)
-            encode_compact_u64(payload, tip);
-
-            // 5. Transaction body
-            payload.insert(payload.end(), tx_body.begin(), tx_body.end());
-
-            return payload;
         }
 
         // Ed25519Signer for GRANDPA finality votes ONLY
@@ -616,43 +544,24 @@ namespace midnight::signing_submission
 
     std::string TransactionSigner::sign_transaction(const std::vector<uint8_t> &tx_body)
     {
-        // Build proper Midnight signing payload
-        // Format: network_id || era || nonce || tip || transaction_body
-        auto signing_payload = build_signing_payload(
-            network_id_,
-            era_,
-            nonce_,
-            tip_,
-            tx_body);
+        if (tx_body.empty())
+        {
+            throw std::runtime_error("Cannot sign empty ledger payload");
+        }
 
-        midnight::g_logger->debug("Signing payload: network_id=" +
-            std::to_string(network_id_) + ", era=" + std::to_string(era_) +
-            ", nonce=" + std::to_string(nonce_) + ", tip=" + std::to_string(tip_));
-
-        // Fix #6: Store original signing payload for later verification
-        last_signed_payload_ = signing_payload;
-
-        return bip340_sign(signing_payload);
+        midnight::g_logger->debug("Signing ledger-provided payload bytes");
+        last_signed_payload_ = tx_body;
+        return bip340_sign(tx_body);
     }
 
     bool TransactionSigner::verify_signature(const std::vector<uint8_t> &tx_body,
                                           const std::string &signature) const
     {
-        // Build the same signing payload for verification
-        auto signing_payload = build_signing_payload(
-            network_id_,
-            era_,
-            nonce_,
-            tip_,
-            tx_body);
-
-        // Fix #6: Use the original signing payload stored during sign_transaction
-        // This ensures we verify against the exact payload that was signed
         const std::vector<uint8_t> &payload_to_verify = last_signed_payload_.empty()
-            ? signing_payload  // Fallback to rebuilt payload if no original stored
+            ? tx_body
             : last_signed_payload_;
 
-        return bip340_verify(tx_body, signature, payload_to_verify);
+        return bip340_verify(payload_to_verify, signature, payload_to_verify);
     }
 
     std::string TransactionSigner::get_signer_address() const
@@ -689,10 +598,8 @@ namespace midnight::signing_submission
                                           const std::string &signature,
                                           const std::vector<uint8_t> &original_payload) const
     {
-        // Fix #6: Use the original signing payload that was used when the signature was created
-        // This ensures verification works even if current context (nonce, tip) has changed
-        // Fix #4: Remove redundant inner try-catch that was defeating verification
-        // The fallback was incorrectly accepting all signatures when crypto verification threw
+        (void)message;
+
         try
         {
             return midnight::crypto::Bip340Signer::verify_signature(
@@ -782,8 +689,7 @@ namespace midnight::signing_submission
         }
         catch (...)
         {
-            // Compatibility fallback for environments without libsodium.
-            return vote.signature.size() == 130;
+            return false;
         }
     }
 
@@ -1393,4 +1299,3 @@ namespace midnight::signing_submission
     }
 
 } // namespace midnight::signing_submission
-

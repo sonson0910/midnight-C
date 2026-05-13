@@ -226,7 +226,8 @@ namespace midnight::zk
         bool is_valid_public_inputs(const PublicInputs &inputs);
 
         /**
-         * Create empty proof for testing
+         * Create a dummy proof for local tests only. Never submit or verify as
+         * a Midnight ledger proof.
          */
         CircuitProof create_test_proof(const std::string &circuit_name);
     }

@@ -328,35 +328,11 @@ std::vector<uint8_t> WalletFacade::sign(const std::vector<uint8_t>& data) const 
 TransferResult WalletFacade::sign_transaction(TransferResult& tx_result) const {
     ensure_not_cleared();
 
-    if (!tx_result.success || tx_result.tx_hash.empty()) {
-        tx_result.error = errors::serialization_error("Cannot sign: transaction not built");
-        return tx_result;
-    }
-
-    std::vector<uint8_t> hash_bytes;
-    for (size_t i = 0; i < tx_result.tx_hash.size(); i += 2) {
-        if (i + 2 > tx_result.tx_hash.size()) {
-            tx_result.error = errors::serialization_error("Invalid tx_hash: odd-length hex string");
-            return tx_result;
-        }
-        auto byte_str = tx_result.tx_hash.substr(i, 2);
-        try {
-            size_t pos = 0;
-            unsigned long byte_val = std::stoul(byte_str, &pos, 16);
-            if (pos != 2) {
-                tx_result.error = errors::serialization_error("Invalid tx_hash: non-hex character found");
-                return tx_result;
-            }
-            hash_bytes.push_back(static_cast<uint8_t>(byte_val));
-        } catch (const std::exception &) {
-            tx_result.error = errors::serialization_error("Invalid tx_hash: failed to parse hex byte");
-            return tx_result;
-        }
-    }
-
-    auto sig = night_key_.sign(hash_bytes);
-    // Store signature separately from tx_hash (fix: was appending to tx_hash)
-    tx_result.tx_signature = to_hex(sig);
+    (void)tx_result;
+    tx_result.error = errors::serialization_error(
+        "WalletFacade::sign_transaction is disabled: signing a local tx_hash is "
+        "not a Midnight ledger transaction signature. Sign the ledger-provided "
+        "payload bytes instead.");
     return tx_result;
 }
 
@@ -375,93 +351,10 @@ TransferResult WalletFacade::build_transfer(
         return result;
     }
 
-    std::map<std::string, uint64_t> required;
-    for (const auto& out : outputs) {
-        required[out.token_type] += out.amount;
-    }
-
-    for (const auto& [token, amount] : required) {
-        auto selected = select_coins(amount, token);
-        if (selected.empty()) {
-            result.error = errors::insufficient_funds(balance(token), amount, token);
-            return result;
-        }
-
-        uint64_t input_total = 0;
-        for (const auto& coin : selected) {
-            input_total += coin.amount;
-            result.inputs_used.push_back(coin);
-        }
-
-        uint64_t change = input_total - amount;
-        if (change > 0) {
-            UtxoWithMeta change_utxo;
-            change_utxo.amount = change;
-            change_utxo.token_type = token;
-            change_utxo.ctime = std::chrono::system_clock::now();
-            // Fix: Populate all required fields for change UTXO
-            change_utxo.receiver_address = night_addr_;
-            change_utxo.tx_hash = "";  // Will be set when transaction is finalized
-            change_utxo.output_index = 0;  // Will be set when transaction is finalized
-            change_utxo.utxo_hash = "";  // Will be set when transaction is finalized
-            result.change_outputs.push_back(change_utxo);
-        }
-    }
-
-    if (ttl == std::chrono::system_clock::time_point{}) {
-        ttl = std::chrono::system_clock::now() + std::chrono::hours(1);
-    }
-
-    json tx_json;
-    tx_json["type"] = "unshielded_transfer";
-    tx_json["sender"] = night_addr_;
-    tx_json["ttl"] = std::chrono::duration_cast<std::chrono::seconds>(
-                         ttl.time_since_epoch()).count();
-
-    json inputs_arr = json::array();
-    for (const auto& input : result.inputs_used) {
-        inputs_arr.push_back({
-            {"utxo_hash", input.utxo_hash},
-            {"amount", input.amount},
-            {"token_type", input.token_type}
-        });
-    }
-    tx_json["inputs"] = inputs_arr;
-
-    json outputs_arr = json::array();
-    for (const auto& out : outputs) {
-        outputs_arr.push_back({
-            {"receiver", out.receiver_address},
-            {"amount", out.amount},
-            {"token_type", out.token_type}
-        });
-    }
-    for (const auto& ch : result.change_outputs) {
-        outputs_arr.push_back({
-            {"receiver", night_addr_},
-            {"amount", ch.amount},
-            {"token_type", ch.token_type}
-        });
-    }
-    tx_json["outputs"] = outputs_arr;
-
-    std::string tx_str = tx_json.dump();
-    std::vector<uint8_t> tx_bytes(tx_str.begin(), tx_str.end());
-    result.tx_hash = sha256_hex_internal(tx_bytes);
-    result.success = true;
-    // TODO: Replace hardcoded fee_estimate with fee from ProtocolParams (min_fee_a, min_fee_b, max_tx_size)
-    result.fee_estimate = 1000;
-
-    for (const auto& input : result.inputs_used) {
-        state_.unshielded.pending_coins.push_back(input);
-    }
-
-    if (midnight::g_logger) {
-        midnight::g_logger->info("Transfer TX built: " + result.tx_hash.substr(0, 16) +
-                                  "... (" + std::to_string(result.inputs_used.size()) +
-                                  " inputs, " + std::to_string(outputs.size()) + " outputs)");
-    }
-
+    (void)ttl;
+    result.error = errors::serialization_error(
+        "WalletFacade::build_transfer cannot build a valid Midnight ledger transaction "
+        "from local JSON. Use the ledger transaction builder/proof payload path.");
     return result;
 }
 
@@ -525,13 +418,14 @@ SubmissionEvent WalletFacade::submit_transaction(const TransferResult& tx_result
                                0, "", "No submission service configured"};
     }
 
-    auto st = SerializedTransaction::from_json(json{
-        {"tx_hash", tx_result.tx_hash},
-        {"inputs", tx_result.inputs_used.size()},
-        {"fee", tx_result.fee_estimate}
-    });
-
-    return submission_service_->submit_transaction(st, SubmissionEventTag::InBlock);
+    (void)tx_result;
+    return SubmissionEvent{
+        SubmissionEventTag::Submitted,
+        "",
+        0,
+        "",
+        "WalletFacade::submit_transaction requires ledger serialized transaction bytes; "
+        "TransferResult does not contain a valid Midnight transaction payload"};
 }
 
 // ─── Fee Estimation ──────────────────────────────────────────
@@ -562,112 +456,10 @@ DustRegistrationResult WalletFacade::register_for_dust(uint64_t night_amount) {
     try {
         ensure_not_cleared();
 
-        if (balance("NIGHT") < night_amount) {
-            result.error = errors::insufficient_funds(balance("NIGHT"), night_amount, "NIGHT");
-            return result;
-        }
-
-        auto selected = select_coins(night_amount, "NIGHT");
-        if (selected.empty()) {
-            result.error = errors::serialization_error("Failed to select coins for dust registration: no coins selected");
-            return result;
-        }
-
-        // ═══════════════════════════════════════════════════════════════════════════
-        // Build the DUST registration payload
-        //
-        // This matches the Midnight ledger's DustRegistration structure:
-        //   struct DustRegistration<S> {
-        //     night_key: VerifyingKey,     // 32-byte Ed25519 public key
-        //     dust_address: Option<DustPublicKey>,  // 32-byte BLS12-381 scalar
-        //     allow_fee_payment: u128,     // boolean as u128
-        //     signature: S,               // Ed25519/BIP-340 signature
-        //   }
-        //
-        // The signature covers: Intent::data_to_sign(segment_id)
-        // which is a serialized representation of the intent.
-        //
-        // Since we don't have the full ledger serialization (Rust SCALE codec),
-        // we build a compatible payload that can be verified.
-        // ═══════════════════════════════════════════════════════════════════════════
-
-        json reg_tx;
-        reg_tx["type"] = "dust_registration";
-        reg_tx["night_address"] = night_addr_;
-        reg_tx["dust_address"] = dust_addr_;
-        reg_tx["night_amount"] = night_amount;
-
-        // Add selected inputs
-        json inputs_arr = json::array();
-        for (const auto& coin : selected) {
-            inputs_arr.push_back({
-                {"utxo_hash", coin.utxo_hash},
-                {"amount", coin.amount}
-            });
-        }
-        reg_tx["inputs"] = inputs_arr;
-
-        // Compute TX hash from canonical JSON bytes
-        std::string tx_str = reg_tx.dump();
-        std::vector<uint8_t> tx_bytes(tx_str.begin(), tx_str.end());
-        result.tx_hash = sha256_hex_internal(tx_bytes);
-
-        midnight::g_logger->info("DUST registration payload: " + std::to_string(tx_bytes.size()) +
-                                  " bytes, hash=" + result.tx_hash.substr(0, 16) + "...");
-
-        // ─── Sign the transaction ────────────────────────────────────────────────
-        // Ed25519 sign the raw tx bytes with the NIGHT key
-        auto signature = night_key_.sign(tx_bytes);
-        std::string sig_hex = to_hex(signature);
-
-        // Attach signature to the payload
-        reg_tx["signature"] = sig_hex;
-
-        midnight::g_logger->info("Signature: " + sig_hex.substr(0, 16) + "...");
-
-        // ─── Submit to relay node ───────────────────────────────────────────────
-        if (!submission_service_) {
-            // No submission service — mark local state only
-            result.success = true;
-            result.estimated_dust_per_epoch = night_amount / 1000;
-            state_.dust.registered = true;
-            state_.dust.registered_night_amount = night_amount;
-            midnight::g_logger->warn("No submission service — TX not broadcast. State updated locally.");
-            return result;
-        }
-
-        // Build a proper SCALE-encoded Substrate extrinsic for Midnight pallet.
-        // The extrinsic format:
-        //   Extrinsic = [compact(length)][pallet_idx(0x58)][call_idx(0x00)][args...]
-        // For send_mn_transaction, the args are: [compact(bytes_len)][midnight_tx_bytes]
-        //
-        // We send the full JSON registration payload as the midnight_tx.
-        // The node will SCALE-decode it and pass to the Midnight pallet.
-        auto st = SerializedTransaction::make_midnight_extrinsic(tx_str);
-
-        midnight::g_logger->info("Submitting extrinsic: " + std::to_string(st.data.size()) +
-                                  " bytes, TX hash=" + st.tx_hash.substr(0, 16) + "...");
-
-        auto submit_result = submission_service_->submit_transaction(st, SubmissionEventTag::InBlock);
-
-        if (submit_result.is_error()) {
-            result.error = errors::serialization_error("Submission failed: " + submit_result.error);
-            midnight::g_logger->error("DUST registration submission failed: " + submit_result.error);
-            return result;
-        }
-
-        // Update state
-        result.success = true;
-        result.estimated_dust_per_epoch = night_amount / 1000;
-        state_.dust.registered = true;
-        state_.dust.registered_night_amount = night_amount;
-
-        if (midnight::g_logger) {
-            midnight::g_logger->info("DUST registration submitted: " + submit_result.tx_hash +
-                                  " | " + std::to_string(night_amount) + " NIGHT -> ~" +
-                                  std::to_string(result.estimated_dust_per_epoch) + " DUST/epoch");
-        }
-
+        (void)night_amount;
+        result.error = errors::serialization_error(
+            "DUST registration requires Midnight ledger serialization and proof payloads; "
+            "the legacy JSON extrinsic builder has been disabled.");
         return result;
 
     } catch (const std::exception& e) {
@@ -882,6 +674,13 @@ BalancingRecipe WalletFacade::balance_finalized_transaction(
     recipe.type = BalancingRecipeType::FinalizedTransaction;
     recipe.original_transaction = finalized_tx;
 
+    (void)ttl;
+    (void)token_kinds;
+    recipe.error =
+        "WalletFacade balancing cannot create ledger-compatible Midnight transactions from JSON. "
+        "Use the ledger transaction builder/proof payload path.";
+    return recipe;
+
     if (ttl == std::chrono::system_clock::time_point{}) {
         ttl = std::chrono::system_clock::now() + std::chrono::hours(1);
     }
@@ -1004,6 +803,14 @@ BalancingRecipe WalletFacade::balance_unbound_transaction(
 
     BalancingRecipe recipe;
     recipe.type = BalancingRecipeType::UnboundTransaction;
+
+    (void)unbound_tx;
+    (void)ttl;
+    (void)token_kinds;
+    recipe.error =
+        "WalletFacade balancing cannot create ledger-compatible Midnight transactions from JSON. "
+        "Use the ledger transaction builder/proof payload path.";
+    return recipe;
 
     if (ttl == std::chrono::system_clock::time_point{}) {
         ttl = std::chrono::system_clock::now() + std::chrono::hours(1);
@@ -1131,6 +938,14 @@ BalancingRecipe WalletFacade::balance_unproven_transaction(
     BalancingRecipe recipe;
     recipe.type = BalancingRecipeType::UnprovenTransaction;
 
+    (void)unproven_tx;
+    (void)ttl;
+    (void)token_kinds;
+    recipe.error =
+        "WalletFacade balancing cannot create ledger-compatible Midnight transactions from JSON. "
+        "Use the ledger transaction builder/proof payload path.";
+    return recipe;
+
     if (ttl == std::chrono::system_clock::time_point{}) {
         ttl = std::chrono::system_clock::now() + std::chrono::hours(1);
     }
@@ -1248,6 +1063,15 @@ BalancingRecipe WalletFacade::init_swap(
 
     BalancingRecipe recipe;
     recipe.type = BalancingRecipeType::UnprovenTransaction;
+
+    (void)desired_inputs;
+    (void)desired_outputs;
+    (void)pay_fees;
+    (void)ttl;
+    recipe.error =
+        "WalletFacade::init_swap cannot build a ledger-compatible Midnight swap from local JSON. "
+        "Use the ledger transaction builder/proof payload path.";
+    return recipe;
 
     if (ttl == std::chrono::system_clock::time_point{}) {
         ttl = std::chrono::system_clock::now() + std::chrono::hours(1);

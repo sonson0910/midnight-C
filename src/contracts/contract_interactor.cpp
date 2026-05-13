@@ -253,23 +253,14 @@ namespace midnight::contracts
     // Contract Deployment (Native — No Node.js)
     // ════════════════════════════════════════════════
 
-    DeployResult ContractInteractor::deploy(
-        const std::string &contract_name,
-        const json &constructor_args,
-        const std::string &zk_config_path)
+    DeployResult ContractInteractor::submit_deploy_transaction(
+        const std::vector<uint8_t> &transaction_bytes)
     {
         DeployResult result;
-        (void)contract_name;
-        (void)constructor_args;
-        (void)zk_config_path;
-
-        result.error =
-            "Native Compact deployment requires ledger-built serialized payloads. "
-            "Build the deploy transaction/proving payload with midnight-ledger, then use "
-            "prove_contract_payload(), prove_transaction_payload(), and "
-            "submit_serialized_transaction().";
-        midnight::g_logger->error(result.error);
-
+        auto submit = submit_serialized_transaction(transaction_bytes);
+        result.success = submit.success;
+        result.txid = submit.txid;
+        result.error = submit.error;
         return result;
     }
 
@@ -277,175 +268,20 @@ namespace midnight::contracts
     // Circuit Call (State-Changing — Native)
     // ════════════════════════════════════════════════
 
-    CallResult ContractInteractor::call_circuit(
-        const std::string &contract_address,
-        const std::string &circuit_name,
-        const json &args)
+    CallResult ContractInteractor::submit_call_transaction(
+        const std::vector<uint8_t> &transaction_bytes)
     {
-        CallResult result;
-        (void)contract_address;
-        (void)circuit_name;
-        (void)args;
-
-        result.error =
-            "Native Compact circuit calls require a ledger-built transaction/proving payload. "
-            "Use read_state()/read_fields() for indexer reads, and the raw payload methods "
-            "for /check, /prove, /prove-tx, then submit_serialized_transaction().";
-        midnight::g_logger->error(result.error);
-
-        return result;
+        return submit_serialized_transaction(transaction_bytes);
     }
 
     // ════════════════════════════════════════════════
     // Native NIGHT Transfer
     // ════════════════════════════════════════════════
 
-    CallResult ContractInteractor::transfer_night(
-        const std::string &to_address,
-        const std::string &amount)
+    CallResult ContractInteractor::submit_transfer_transaction(
+        const std::vector<uint8_t> &transaction_bytes)
     {
-        CallResult result;
-        (void)to_address;
-        (void)amount;
-
-        result.error =
-            "Native NIGHT transfer construction is not implemented yet. "
-            "The node only accepts real Midnight transaction bytes, not JSON transfer bodies; "
-            "build the transfer with the ledger/wallet transaction builder and call "
-            "submit_serialized_transaction().";
-        midnight::g_logger->error(result.error);
-        return result;
-
-        if (seed_hex_.empty())
-        {
-            result.error = "No wallet seed. Call set_seed_hex() first.";
-            return result;
-        }
-
-        try
-        {
-            midnight::g_logger->info("Transferring " + amount + " NIGHT to " +
-                                     to_address.substr(0, 20) + "...");
-
-            // 1. Query UTXOs (native GraphQL)
-            auto utxos = indexer_->query_utxos(derived_address_);
-            if (utxos.empty())
-            {
-                result.error = "No UTXOs available for transfer";
-                return result;
-            }
-
-            // 2. Build transfer transaction (native UTXO builder)
-            uint64_t amount_val = std::stoull(amount);
-            uint64_t total_input = 0;
-            std::vector<blockchain::UTXO> selected;
-
-            for (const auto &utxo : utxos)
-            {
-                selected.push_back(utxo);
-                // NOTE: The indexer decrypts Pedersen commitments and returns plaintext `value`.
-                // The commitment itself is stored separately (amount_commitment) and is verified
-                // by the node via ZK proof arithmetic — we use the decrypted value here.
-                // If the indexer ever returns encrypted values, decryption via the viewing key
-                // would be required before accumulating `total_input`.
-                total_input += utxo.value;
-                if (total_input >= amount_val + 200000) // TODO: replace 200000 with fee from ProtocolParams
-                {
-                    break;
-                }
-            }
-
-            if (total_input < amount_val)
-            {
-                result.error = "Insufficient funds: have " + std::to_string(total_input) +
-                               ", need " + amount;
-                return result;
-            }
-
-            // 3. Build outputs
-            std::vector<std::pair<std::string, uint64_t>> outputs;
-            outputs.emplace_back(to_address, amount_val);
-
-            uint64_t change = total_input - amount_val - 200000; // TODO: replace 200000 with fee from ProtocolParams
-            if (change > 0)
-            {
-                outputs.emplace_back(derived_address_, change);
-            }
-
-            // 4. Sign the transaction (native Ed25519)
-            // Normalize seed - remove 0x prefix if present
-            std::string normalized_seed = seed_hex_;
-            if (normalized_seed.rfind("0x", 0) == 0 || normalized_seed.rfind("0X", 0) == 0) {
-                normalized_seed = normalized_seed.substr(2);
-            }
-            
-            crypto::Ed25519Signer::PrivateKey priv_key{};
-            size_t key_bytes = std::min(normalized_seed.size() / 2, size_t(64));
-            
-            for (size_t i = 0; i < key_bytes; ++i)
-            {
-                if (i * 2 + 1 >= normalized_seed.size()) {
-                    midnight::g_logger->error("Invalid seed hex in transfer");
-                    return result;
-                }
-                
-                int hi = midnight::util::hex_nibble(normalized_seed[i * 2]);
-                int lo = midnight::util::hex_nibble(normalized_seed[i * 2 + 1]);
-                
-                // Validate hex values
-                if (hi < 0 || lo < 0) {
-                    midnight::g_logger->error("Invalid hex character in seed during transfer");
-                    return result;
-                }
-                
-                priv_key[i] = static_cast<uint8_t>((hi << 4) | lo);
-            }
-
-            // 5. Build transaction hex representation
-            json tx_body = {
-                {"type", "transfer"},
-                {"from", derived_address_},
-                {"to", to_address},
-                {"amount", amount},
-                {"inputs", json::array()},
-                {"outputs", json::array()},
-            };
-
-            for (const auto &utxo : selected)
-            {
-                tx_body["inputs"].push_back({{"txHash", utxo.tx_hash},
-                                             {"index", utxo.output_index}});
-            }
-
-            for (const auto &[addr, val] : outputs)
-            {
-                tx_body["outputs"].push_back({{"address", addr},
-                                              {"value", std::to_string(val)}});
-            }
-
-            std::string tx_hex = tx_body.dump();
-
-            // Sign
-            auto signature = crypto::Ed25519Signer::sign_message(tx_hex, priv_key);
-            std::string sig_hex = crypto::Ed25519Signer::signature_to_hex(signature);
-
-            // 6. Submit via RPC (native JSON-RPC)
-            std::string submission = tx_hex + sig_hex;
-            result.txid = rpc_->submit_transaction(submission);
-            result.success = !result.txid.empty();
-
-            if (result.success)
-            {
-                midnight::g_logger->info("Transfer submitted: " + result.txid);
-            }
-        }
-        catch (const std::exception &e)
-        {
-            result.error = "Transfer failed: " + std::string(e.what());
-            midnight::g_logger->error(result.error);
-        }
-
-        return result;
+        return submit_serialized_transaction(transaction_bytes);
     }
 
     // ════════════════════════════════════════════════
@@ -500,101 +336,10 @@ namespace midnight::contracts
         return proof_server_->post_prove_tx_payload(prove_tx_payload);
     }
 
-    CallResult ContractInteractor::register_dust()
+    CallResult ContractInteractor::submit_dust_registration_transaction(
+        const std::vector<uint8_t> &transaction_bytes)
     {
-        CallResult result;
-
-        result.error =
-            "Native DUST registration transaction construction is not implemented yet. "
-            "Build the registration transaction with the ledger/wallet transaction builder "
-            "and call submit_serialized_transaction().";
-        midnight::g_logger->error(result.error);
-        return result;
-
-        if (seed_hex_.empty())
-        {
-            result.error = "No wallet seed. Call set_seed_hex() first.";
-            return result;
-        }
-
-        try
-        {
-            // Check current DUST status
-            auto status = query_dust_status();
-            if (status == network::DustRegistrationStatus::REGISTERED)
-            {
-                result.success = true;
-                result.result = {{"status", "already_registered"}};
-                return result;
-            }
-
-            midnight::g_logger->info("Registering DUST for " + derived_address_.substr(0, 20) + "...");
-
-            // DUST registration is effectively a self-transfer that triggers
-            // the NIGHT → DUST conversion. Build a minimal self-transfer.
-            auto utxos = indexer_->query_utxos(derived_address_);
-            if (utxos.empty())
-            {
-                result.error = "No UTXOs available. Need NIGHT to register DUST.";
-                return result;
-            }
-
-            // Build minimal self-transfer to trigger DUST allocation
-            json dust_tx = {
-                {"type", "dust_registration"},
-                {"address", derived_address_},
-                {"utxo_count", utxos.size()},
-            };
-
-            // Sign and submit
-            // Normalize seed - remove 0x prefix if present
-            std::string normalized_seed = seed_hex_;
-            if (normalized_seed.rfind("0x", 0) == 0 || normalized_seed.rfind("0X", 0) == 0) {
-                normalized_seed = normalized_seed.substr(2);
-            }
-            
-            crypto::Ed25519Signer::PrivateKey priv_key{};
-            size_t key_bytes = std::min(normalized_seed.size() / 2, size_t(64));
-            
-            for (size_t i = 0; i < key_bytes; ++i)
-            {
-                if (i * 2 + 1 >= normalized_seed.size()) {
-                    midnight::g_logger->error("Invalid seed hex in dust registration");
-                    return result;
-                }
-                
-                int hi = midnight::util::hex_nibble(normalized_seed[i * 2]);
-                int lo = midnight::util::hex_nibble(normalized_seed[i * 2 + 1]);
-                
-                // Validate hex values
-                if (hi < 0 || lo < 0) {
-                    midnight::g_logger->error("Invalid hex character in seed during dust registration");
-                    return result;
-                }
-                
-                priv_key[i] = static_cast<uint8_t>((hi << 4) | lo);
-            }
-
-            std::string tx_hex = dust_tx.dump();
-            auto signature = crypto::Ed25519Signer::sign_message(tx_hex, priv_key);
-            std::string signed_payload = tx_hex + crypto::Ed25519Signer::signature_to_hex(signature);
-
-            result.txid = rpc_->submit_transaction(signed_payload);
-            result.success = !result.txid.empty();
-
-            if (result.success)
-            {
-                result.result = {{"status", "registered"}, {"txid", result.txid}};
-                midnight::g_logger->info("DUST registration submitted: " + result.txid);
-            }
-        }
-        catch (const std::exception &e)
-        {
-            result.error = "DUST registration failed: " + std::string(e.what());
-            midnight::g_logger->error(result.error);
-        }
-
-        return result;
+        return submit_serialized_transaction(transaction_bytes);
     }
 
     // ════════════════════════════════════════════════
@@ -740,57 +485,6 @@ namespace midnight::contracts
         }
 
         return inputs;
-    }
-
-    std::string ContractInteractor::sign_and_submit(const zk::ProofEnabledTransaction &tx)
-    {
-        // Validate seed is available
-        if (seed_hex_.empty())
-        {
-            midnight::g_logger->error("Cannot sign: no seed available");
-            return "";
-        }
-
-        // Serialize transaction
-        std::string tx_hex = tx.to_json().dump();
-
-        // Normalize seed - remove 0x prefix if present
-        std::string normalized_seed = seed_hex_;
-        if (normalized_seed.rfind("0x", 0) == 0 || normalized_seed.rfind("0X", 0) == 0) {
-            normalized_seed = normalized_seed.substr(2);
-        }
-
-        // Sign with Ed25519
-        crypto::Ed25519Signer::PrivateKey priv_key{};
-        size_t key_bytes = std::min(normalized_seed.size() / 2, size_t(64));
-        
-        for (size_t i = 0; i < key_bytes; ++i)
-        {
-            if (i * 2 + 1 >= normalized_seed.size()) {
-                midnight::g_logger->error("Invalid seed hex in sign_and_submit");
-                return "";
-            }
-            
-            int hi = midnight::util::hex_nibble(normalized_seed[i * 2]);
-            int lo = midnight::util::hex_nibble(normalized_seed[i * 2 + 1]);
-            
-            // Validate hex values
-            if (hi < 0 || lo < 0) {
-                midnight::g_logger->error("Invalid hex character in seed during signing");
-                return "";
-            }
-            
-            priv_key[i] = static_cast<uint8_t>((hi << 4) | lo);
-        }
-
-        auto signature = crypto::Ed25519Signer::sign_message(tx_hex, priv_key);
-        std::string sig_hex = crypto::Ed25519Signer::signature_to_hex(signature);
-
-        // Build signed payload
-        std::string signed_payload = tx_hex + sig_hex;
-
-        // Submit via native JSON-RPC
-        return rpc_->submit_transaction(signed_payload);
     }
 
 } // namespace midnight::contracts

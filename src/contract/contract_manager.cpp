@@ -1,4 +1,5 @@
 #include "midnight/core/logger.hpp"
+#include "midnight/core/common_utils.hpp"
 #include "midnight/contract/contract_manager.hpp"
 #include "midnight/compact-contracts/compact_contracts.hpp"
 #include <sstream>
@@ -176,426 +177,66 @@ namespace midnight::contract
         midnight::g_logger->info("ContractManager initialized");
     }
 
-    // ─── Deployment ───────────────────────────────────────────
+    // ─── Transaction Submission ───────────────────────────────
 
-    tx::PalletCall ContractManager::build_deploy_call(const DeployParams &params)
+    namespace
     {
-        // Midnight uses a contracts pallet (or similar)
-        // Construct the call data:
-        //   pallet_index: contracts (typically 0x0A or 0x28 on Midnight)
-        //   call_index: instantiate_with_code (typically 0x06)
-        //
-        // Call structure:
-        //   value: Compact<Balance>
-        //   gas_limit: Compact<Weight>
-        //   storage_deposit_limit: Option<Compact<Balance>>
-        //   code: Vec<u8>
-        //   data: Vec<u8> (constructor args)
-        //   salt: Vec<u8> (optional)
-
-        codec::ScaleEncoder enc;
-
-        // value (Compact<u128>)
-        enc.encode_compact(params.value);
-
-        // gas_limit (Weight = {ref_time: Compact<u64>, proof_size: Compact<u64>})
-        enc.encode_compact(params.gas_limit);
-        enc.encode_compact(params.gas_limit / 4); // proof_size estimate
-
-        // storage_deposit_limit: Option<Compact<Balance>>
-        if (params.storage_deposit_limit > 0)
+        std::string submit_midnight_tx_bytes(
+            network::SubstrateRPC &rpc,
+            const std::vector<uint8_t> &transaction_bytes)
         {
-            enc.encode_option_some_prefix();
-            enc.encode_compact(params.storage_deposit_limit);
+            if (transaction_bytes.empty())
+            {
+                throw std::runtime_error("Midnight transaction bytes cannot be empty");
+            }
+
+            const auto call = tx::PalletCall::midnight_send_mn_transaction(transaction_bytes);
+            tx::ExtrinsicParams params{};
+            params.genesis_hash.assign(32, 0);
+            params.block_hash.assign(32, 0);
+            tx::ExtrinsicBuilder builder(params);
+            const auto extrinsic = builder.build_unsigned(call);
+            const auto submit = rpc.submit_extrinsic(
+                midnight::util::ensure_hex_prefix(tx::ExtrinsicBuilder::to_hex(extrinsic)));
+            if (!submit.success)
+            {
+                throw std::runtime_error(submit.error.empty()
+                    ? "author_submitExtrinsic failed"
+                    : submit.error);
+            }
+            return submit.tx_hash;
         }
-        else
-        {
-            enc.encode_option_none();
-        }
-
-        // code: Vec<u8>
-        enc.encode_bytes(params.artifact.bytecode);
-
-        // data: Vec<u8> (constructor args)
-        enc.encode_bytes(params.constructor_args);
-
-        // salt: Vec<u8> (random for unique address)
-        std::vector<uint8_t> salt(32);
-        randombytes_buf(salt.data(), salt.size());
-        enc.encode_bytes(salt);
-
-        // Contracts pallet is typically at index 0x28 (40) on Substrate
-        // instantiate_with_code is call 0x06
-        return tx::PalletCall::custom(0x28, 0x06, enc.data());
     }
 
-    DeployResult ContractManager::deploy(const DeployParams &params,
-                                          const wallet::KeyPair &signer,
-                                          bool wait_finalized)
+    DeployResult ContractManager::submit_deploy_transaction(
+        const std::vector<uint8_t> &transaction_bytes)
     {
         DeployResult result;
-        (void)params;
-        (void)signer;
-        (void)wait_finalized;
-
-        result.error =
-            "Native Compact deployment requires a ledger-built serialized transaction. "
-            "This Substrate contracts-pallet deploy path is not valid for Midnight Compact. "
-            "Use ProofServerClient raw payload methods and submit the ledger serialized transaction.";
-        midnight::g_logger->error(result.error);
-        return result;
-
         try
         {
-            midnight::g_logger->info("Deploying contract: " + params.artifact.name);
-
-            // 1. Build deployment call
-            auto call = build_deploy_call(params);
-
-            // 2. Sign and submit via SubstrateRPC
-            auto submit = rpc_->build_and_submit(call, signer, params.tip);
-
-            if (!submit.success)
-            {
-                result.error = submit.error;
-                midnight::g_logger->error("Deploy submission failed: " + result.error);
-                return result;
-            }
-
-            result.tx_hash = submit.tx_hash;
-            midnight::g_logger->info("Deploy TX submitted: " + result.tx_hash);
-
-            // 3. Wait for finalization if requested
-            if (wait_finalized)
-            {
-                bool finalized = rpc_->wait_for_finalization(result.tx_hash, 120);
-                if (!finalized)
-                {
-                    result.error = "Deployment transaction not finalized within timeout";
-                    return result;
-                }
-            }
-
-            // 4. Extract contract address
-            result.contract_address = extract_contract_address(result.tx_hash);
-            result.success = !result.contract_address.empty();
-
-            if (result.success)
-            {
-                midnight::g_logger->info("Contract deployed at: " + result.contract_address);
-            }
-            else
-            {
-                result.error = "Could not extract contract address from events";
-            }
+            result.tx_hash = submit_midnight_tx_bytes(*rpc_, transaction_bytes);
+            result.success = !result.tx_hash.empty();
         }
         catch (const std::exception &e)
         {
             result.error = e.what();
-            midnight::g_logger->error("Deploy failed: " + result.error);
         }
-
         return result;
     }
 
-    std::string ContractManager::extract_contract_address(const std::string &tx_hash)
-    {
-        // Extract contract address from deployment transaction events.
-        // On Substrate/Midnight, contract addresses are deterministic:
-        //   address = blake2b_256(code_hash ++ deployer ++ salt)[..20]
-        // The only reliable way to get the deployed address is from the ContractEmitted event.
-        // We query the indexer for the deployment transaction and extract the address.
-
-        if (tx_hash.empty())
-            return "";
-
-        try
-        {
-            midnight::g_logger->info("Querying indexer for contract address from tx: " +
-                                    tx_hash.substr(0, 16) + "...");
-
-            // Query the deployment transaction via the indexer
-            auto tx_data = indexer_->query_transaction(tx_hash);
-
-            if (!tx_data.is_null() && tx_data.is_object())
-            {
-                // Look for ContractEmitted event in contractActions
-                if (tx_data.contains("contractActions") &&
-                    tx_data["contractActions"].is_array() &&
-                    !tx_data["contractActions"].empty())
-                {
-                    for (const auto &action : tx_data["contractActions"])
-                    {
-                        std::string action_type;
-                        if (action.contains("__typename"))
-                        {
-                            try { action_type = action["__typename"].get<std::string>(); } catch (...) {}
-                        }
-
-                        if (action_type == "ContractDeploy" || action_type == "ContractInstantiated")
-                        {
-                            if (action.contains("address") && !action["address"].is_null())
-                            {
-                                std::string addr;
-                                try { addr = action["address"].get<std::string>(); } catch (...) {}
-                                if (!addr.empty() && addr != "0x")
-                                {
-                                    midnight::g_logger->info("Contract address from ContractEmitted event: " + addr);
-                                    return addr;
-                                }
-                            }
-                        }
-                    }
-
-                    // Fallback: return first contract action address
-                    std::string addr;
-                    try { addr = tx_data["contractActions"][0]["address"].get<std::string>(); } catch (...) {}
-                    if (!addr.empty() && addr != "0x")
-                    {
-                        midnight::g_logger->info("Contract address from first contractAction: " + addr);
-                        return addr;
-                    }
-                }
-
-                // Also check unshieldedCreatedOutputs for any contract-related outputs
-                if (tx_data.contains("block") && !tx_data["block"].is_null())
-                {
-                    midnight::g_logger->info(
-                        "Deployment tx found at block " +
-                        std::to_string(tx_data["block"].value("height", 0)) +
-                        " but no ContractEmitted event in results. "
-                        "The contract may not have emitted events, or this is not a deployment tx.");
-                }
-            }
-
-            // Fallback: query deployment status via ContractDeployer
-            compact_contracts::ContractDeployer deployer("");
-            auto status = deployer.get_deployment_status(tx_hash);
-            if (status && !status->contract_address.empty())
-            {
-                midnight::g_logger->info("Contract address from deployment status: " +
-                                        status->contract_address);
-                return status->contract_address;
-            }
-
-            midnight::g_logger->warn(
-                "Could not extract contract address from tx events. "
-                "The transaction may not be a deployment, or the indexer has not yet indexed it. "
-                "Wait for the indexer to process the block, then retry.");
-            return "";
-        }
-        catch (const std::exception &e)
-        {
-            midnight::g_logger->error("Failed to extract contract address: " + std::string(e.what()));
-            return "";
-        }
-    }
-
-    // ─── Contract Calls ───────────────────────────────────────
-
-    tx::PalletCall ContractManager::build_call_call(const CallParams &params)
-    {
-        codec::ScaleEncoder enc;
-
-        // dest: MultiAddress (contract address)
-        auto addr_bytes = codec::util::hex_to_bytes(params.contract_address);
-        enc.encode_multi_address_id(addr_bytes);
-
-        // value: Compact<Balance>
-        enc.encode_compact(params.value);
-
-        // gas_limit: Weight
-        enc.encode_compact(params.gas_limit);
-        enc.encode_compact(params.gas_limit / 4);
-
-        // storage_deposit_limit: Option<Compact<Balance>>
-        enc.encode_option_none();
-
-        // data: Vec<u8> (call data = circuit selector + args)
-        // Prepend circuit name hash as selector
-        codec::ScaleEncoder call_enc;
-
-        // Circuit selector: blake2b-128(circuit_name)
-        if (sodium_init() >= 0)
-        {
-            uint8_t selector[4];
-            auto name_bytes = reinterpret_cast<const uint8_t *>(
-                params.circuit_name.data());
-            crypto_generichash(selector, 4, name_bytes,
-                               params.circuit_name.size(), nullptr, 0);
-            call_enc.encode_raw({selector, selector + 4});
-        }
-
-        // Append encoded call arguments
-        call_enc.encode_raw(params.call_data);
-
-        // Append proof data if available
-        if (params.proof.has_value())
-        {
-            call_enc.encode_bytes(params.proof.value());
-        }
-
-        enc.encode_bytes(call_enc.data());
-
-        // contracts.call = pallet 0x28, call 0x06 (or 0x00 for simple call)
-        return tx::PalletCall::custom(0x28, 0x00, enc.data());
-    }
-
-    CallResult ContractManager::call(const CallParams &params,
-                                      const wallet::KeyPair &signer,
-                                      bool wait_finalized)
+    CallResult ContractManager::submit_call_transaction(
+        const std::vector<uint8_t> &transaction_bytes)
     {
         CallResult result;
-        (void)params;
-        (void)signer;
-        (void)wait_finalized;
-
-        result.error =
-            "Native Compact calls require a ledger-built serialized transaction. "
-            "This Substrate contracts-pallet call path is not valid for Midnight Compact. "
-            "Use ProofServerClient raw payload methods and submit the ledger serialized transaction.";
-        midnight::g_logger->error(result.error);
-        return result;
-
         try
         {
-            midnight::g_logger->info("Calling contract: " + params.contract_address +
-                                      " circuit: " + params.circuit_name);
-
-            // 1. Generate proof if not provided
-            CallParams call_params = params;
-            if (!call_params.proof.has_value() && !call_params.circuit_name.empty())
-            {
-                midnight::g_logger->info("Proof not provided, attempting direct call");
-                // For simple calls, proof may not be required
-                // For ZK calls, proof should be pre-generated
-            }
-
-            // 2. Build contract call
-            auto call = build_call_call(call_params);
-
-            // 3. Sign and submit
-            auto submit = rpc_->build_and_submit(call, signer, params.tip);
-
-            if (!submit.success)
-            {
-                result.error = submit.error;
-                midnight::g_logger->error("Call submission failed: " + result.error);
-                return result;
-            }
-
-            result.tx_hash = submit.tx_hash;
-            midnight::g_logger->info("Call TX submitted: " + result.tx_hash);
-
-            // 4. Wait for finalization
-            if (wait_finalized)
-            {
-                rpc_->wait_for_finalization(result.tx_hash, 120);
-            }
-
-            result.success = true;
+            result.tx_hash = submit_midnight_tx_bytes(*rpc_, transaction_bytes);
+            result.success = !result.tx_hash.empty();
         }
         catch (const std::exception &e)
         {
             result.error = e.what();
-            midnight::g_logger->error("Call failed: " + result.error);
         }
-
-        return result;
-    }
-
-    CallResult ContractManager::dry_run(const CallParams &params,
-                                     const wallet::KeyPair &signer)
-    {
-        CallResult result;
-
-        try
-        {
-            midnight::g_logger->info("Dry-running contract call: " + params.contract_address +
-                                    " circuit: " + params.circuit_name);
-
-            // Use contracts_call RPC for dry-run execution
-            // Build the call data with selector
-            codec::ScaleEncoder call_enc;
-
-            // Circuit selector: blake2b-128(circuit_name) — first 4 bytes
-            if (sodium_init() >= 0)
-            {
-                uint8_t selector[4];
-                auto name_bytes = reinterpret_cast<const uint8_t *>(
-                    params.circuit_name.data());
-                crypto_generichash(selector, 4, name_bytes,
-                                   params.circuit_name.size(), nullptr, 0);
-                call_enc.encode_raw({selector, selector + 4});
-            }
-
-            // Append encoded call arguments
-            call_enc.encode_raw(params.call_data);
-
-            const std::string call_data_hex = codec::util::bytes_to_hex(call_enc.data());
-
-            // Execute dry-run via SubstrateRPC
-            auto dry_run_result = rpc_->contracts_call(
-                params.contract_address,
-                signer.address,
-                params.value,
-                params.gas_limit,
-                call_data_hex);
-
-            // Parse result
-            if (!dry_run_result.is_null())
-            {
-                // contracts_call returns gas consumed and possibly debug/return data
-                result.success = true;
-
-                // Extract gas used from result if available
-                if (dry_run_result.is_object())
-                {
-                    if (dry_run_result.contains("gasConsumed"))
-                    {
-                        try {
-                            result.gas_used = dry_run_result["gasConsumed"].get<uint64_t>();
-                        } catch (...) {}
-                    }
-                    if (dry_run_result.contains("debugMessage"))
-                    {
-                        try {
-                            result.return_data = dry_run_result["debugMessage"];
-                        } catch (...) {}
-                    }
-                    if (dry_run_result.contains("result"))
-                    {
-                        result.return_data = dry_run_result["result"];
-                    }
-                }
-                else
-                {
-                    result.return_data = dry_run_result;
-                }
-
-                midnight::g_logger->info("Dry-run successful: gas_used=" +
-                                        std::to_string(result.gas_used));
-            }
-            else
-            {
-                result.success = false;
-                result.error = "Dry-run returned empty result";
-            }
-        }
-        catch (const std::exception &e)
-        {
-            result.success = false;
-            result.error = e.what();
-            midnight::g_logger->warn("Dry-run failed, falling back to simulation: " + result.error);
-
-            // Fallback: simulate success for testing purposes
-            midnight::g_logger->info(
-                "Dry-run simulation (contracts_call unavailable on this node): "
-                "for production, use a node with contracts pallet enabled.");
-            result.success = true;
-            result.return_data = {{"simulated", true}, {"reason", "contracts_call unavailable"}};
-        }
-
         return result;
     }
 
@@ -641,34 +282,7 @@ namespace midnight::contract
     {
         try
         {
-            // Build storage key for contracts pallet
-            // contracts.contractInfoOf(AccountId)
-            //   xxHash128("Contracts") ++ xxHash128("ContractInfoOf") ++ blake2_128_concat(address)
-
-            // Use SubstrateRPC to query raw storage
-            // Pre-computed: xxHash128("Contracts") = 2a5e0e7091025500a7b9999a90dd3000
-            //               xxHash128("ContractInfoOf") = 4e7b9012096b41c4eb3aaf947f6ea429
-
-            auto addr_bytes = codec::util::hex_to_bytes(contract_address);
-            uint8_t hash[16];
-            crypto_generichash(hash, 16, addr_bytes.data(), addr_bytes.size(),
-                               nullptr, 0);
-
-            std::ostringstream key;
-            key << "0x"
-                << "2a5e0e7091025500a7b9999a90dd3000"
-                << "4e7b9012096b41c4eb3aaf947f6ea429";
-
-            for (int i = 0; i < 16; i++)
-                key << std::hex << std::setfill('0') << std::setw(2)
-                    << static_cast<int>(hash[i]);
-
-            std::string clean_addr = contract_address;
-            if (clean_addr.substr(0, 2) == "0x")
-                clean_addr = clean_addr.substr(2);
-            key << clean_addr;
-
-            return rpc_->get_storage(key.str());
+            return rpc_->midnight_contract_state(contract_address);
         }
         catch (const std::exception &e)
         {
@@ -677,21 +291,21 @@ namespace midnight::contract
         }
     }
 
-    // ─── Proof Generation ─────────────────────────────────────
+    // ─── Proof Payloads ───────────────────────────────────────
 
-    std::vector<uint8_t> ContractManager::generate_proof(
-        const CallParams &params,
-        const ContractArtifact &artifact)
+    std::vector<uint8_t> ContractManager::check_payload(const std::vector<uint8_t> &payload)
     {
-        (void)params;
-        (void)artifact;
+        return proof_server_->post_check_payload(payload);
+    }
 
-        midnight::g_logger->error(
-            "ContractManager::generate_proof requires a ledger-built binary proving "
-            "payload. The Midnight proof server does not accept JSON circuit/prover-key "
-            "requests for Compact proofs; use ProofServerClient::post_proving_payload() "
-            "or post_prove_tx_payload() with bytes from midnight-ledger.");
-        return {};
+    std::vector<uint8_t> ContractManager::prove_payload(const std::vector<uint8_t> &payload)
+    {
+        return proof_server_->post_proving_payload(payload);
+    }
+
+    std::vector<uint8_t> ContractManager::prove_transaction_payload(const std::vector<uint8_t> &payload)
+    {
+        return proof_server_->post_prove_tx_payload(payload);
     }
 
     // ─── Utilities ────────────────────────────────────────────

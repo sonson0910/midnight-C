@@ -130,16 +130,9 @@ namespace midnight::contract
     /**
      * @brief Midnight contract lifecycle manager
      *
-     * Production note: Compact deploy/call transactions are ledger-built
-     * serialized payloads, not Substrate contracts-pallet extrinsics. The
-     * high-level deploy()/call() methods currently fail safely until the native
-     * Midnight ledger transaction builder is bound into the SDK.
-     *
-     * Provides a unified C++ API for the full contract lifecycle:
-     *   1. Deploy    — compile artifacts + construct deployment extrinsic
-     *   2. Call      — invoke circuit functions with ZK proof generation
-     *   3. Query     — read contract state from indexer or direct RPC
-     *   4. Monitor   — wait for finalization, poll events
+     * Compact deploy/call transactions must be built by midnight-ledger and
+     * passed here as serialized bytes. This class handles proof-server posts,
+     * node submission, and state reads without inventing JSON/CBOR payloads.
      *
      * Integrates:
      *   - SubstrateRPC for extrinsic submission
@@ -155,18 +148,8 @@ namespace midnight::contract
      *     "https://indexer.preprod.midnight.network/api/v4/graphql"
      * );
      *
-     * auto wallet = HDWallet::from_mnemonic("...");
-     * auto key = wallet.derive_night(0, 0);
-     *
-     * // Deploy
-     * auto artifact = ContractArtifact::load_from_dir("./dist/my-contract");
-     * DeployParams dp{.artifact = artifact, .constructor_args = {...}};
-     * auto deploy_result = mgr.deploy(dp, key);
-     *
-     * // Call
-     * CallParams cp{.contract_address = deploy_result.contract_address,
-     *               .circuit_name = "mint", .call_data = {...}};
-     * auto call_result = mgr.call(cp, key);
+     * auto deploy_result = mgr.submit_deploy_transaction(deploy_tx_bytes);
+     * auto call_result = mgr.submit_call_transaction(call_tx_bytes);
      *
      * // Query
      * auto state = mgr.query_state(deploy_result.contract_address);
@@ -185,61 +168,17 @@ namespace midnight::contract
                         const std::string &proof_url,
                         const std::string &indexer_url);
 
-        // ─── Deployment ───────────────────────────────────────
+        // ─── Transaction Submission ───────────────────────────
 
         /**
-         * @brief Fail-safe placeholder for Compact deployment
-         *
-         * Midnight Compact deployment requires ledger-built serialized transaction
-         * bytes. This method intentionally does not construct Substrate
-         * contracts.instantiateWithCode calls because that format is not valid for
-         * Midnight Compact.
-         *
-         * Workflow:
-         *   1. Build contracts.instantiateWithCode extrinsic
-         *   2. Auto-fetch runtime version + nonce
-         *   3. Sign with provided key pair
-         *   4. Submit via author_submitExtrinsic
-         *   5. Optionally wait for finalization
-         *
-         * @param params Deployment parameters (artifact + gas + args)
-         * @param signer Key pair for signing the deployment transaction
-         * @param wait_finalized If true, block until finalized
-         * @return DeployResult with tx_hash and contract_address
+         * @brief Submit a ledger-built Compact deployment transaction.
          */
-        DeployResult deploy(const DeployParams &params,
-                            const wallet::KeyPair &signer,
-                            bool wait_finalized = true);
-
-        // ─── Contract Calls ───────────────────────────────────
+        DeployResult submit_deploy_transaction(const std::vector<uint8_t> &transaction_bytes);
 
         /**
-         * @brief Fail-safe placeholder for Compact state-changing calls
-         *
-         * Midnight Compact calls require ledger-built serialized transaction bytes,
-         * not Substrate contracts.call extrinsics.
-         *
-         * Workflow:
-         *   1. Generate ZK proof via Proof Server (if not pre-provided)
-         *   2. Build contracts.call extrinsic
-         *   3. Sign and submit
-         *
-         * @param params Call parameters (address + circuit + data)
-         * @param signer Key pair for signing
-         * @param wait_finalized If true, block until finalized
-         * @return CallResult with tx_hash and decoded return data
+         * @brief Submit a ledger-built Compact state-changing call transaction.
          */
-        CallResult call(const CallParams &params,
-                        const wallet::KeyPair &signer,
-                        bool wait_finalized = true);
-
-        /**
-         * @brief Dry-run a contract call (estimate gas, no state change)
-         *
-         * Uses contracts_call RPC to simulate execution without submission.
-         */
-        CallResult dry_run(const CallParams &params,
-                           const wallet::KeyPair &signer);
+        CallResult submit_call_transaction(const std::vector<uint8_t> &transaction_bytes);
 
         // ─── State Queries ────────────────────────────────────
 
@@ -260,26 +199,17 @@ namespace midnight::contract
                           const std::vector<std::string> &fields);
 
         /**
-         * @brief Query contract state directly from RPC storage
+         * @brief Query contract state directly from Midnight RPC
          * @param contract_address Contract address
-         * @return Raw SCALE-encoded state bytes
+         * @return Raw state bytes/hex returned by midnight_contractState
          */
         std::string query_raw_state(const std::string &contract_address);
 
         // ─── Proof Generation ─────────────────────────────────
 
-        /**
-         * @brief Generate a ZK proof for a contract call
-         *
-         * Uses the Proof Server's /prove-tx endpoint.
-         *
-         * @param params Call parameters (contract + circuit + inputs)
-         * @param artifact Contract artifact with circuit definitions
-         * @return Proof bytes, or empty on failure
-         */
-        std::vector<uint8_t> generate_proof(
-            const CallParams &params,
-            const ContractArtifact &artifact);
+        std::vector<uint8_t> check_payload(const std::vector<uint8_t> &payload);
+        std::vector<uint8_t> prove_payload(const std::vector<uint8_t> &payload);
+        std::vector<uint8_t> prove_transaction_payload(const std::vector<uint8_t> &payload);
 
         // ─── Utilities ────────────────────────────────────────
 
@@ -330,14 +260,6 @@ namespace midnight::contract
         std::unique_ptr<zk::ProofServerClient> proof_server_;
         std::unique_ptr<network::IndexerClient> indexer_;
 
-        /// Build contracts pallet call for deployment
-        tx::PalletCall build_deploy_call(const DeployParams &params);
-
-        /// Build contracts pallet call for contract invocation
-        tx::PalletCall build_call_call(const CallParams &params);
-
-        /// Extract contract address from deployment events
-        std::string extract_contract_address(const std::string &tx_hash);
     };
 
 } // namespace midnight::contract

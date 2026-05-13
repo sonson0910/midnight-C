@@ -7,9 +7,24 @@
 #include <chrono>
 #include <thread>
 #include <cstring>
+#include <cctype>
 
 namespace midnight::network
 {
+    namespace
+    {
+        bool is_64_hex_chars(const std::string &value)
+        {
+            if (value.size() != 64)
+                return false;
+            for (unsigned char ch : value)
+            {
+                if (!std::isxdigit(ch))
+                    return false;
+            }
+            return true;
+        }
+    } // namespace
 
     // ─── Constructor ──────────────────────────────────────────
 
@@ -450,8 +465,19 @@ namespace midnight::network
     {
         try
         {
+            const auto lower = midnight::util::to_lower_copy(contract_address);
+            if (lower.rfind("mn_", 0) == 0 || lower.rfind("stake", 0) == 0)
+            {
+                throw std::runtime_error(
+                    "midnight_contractState accepts contract hex addresses only; use IndexerClient for wallet addresses");
+            }
+            const auto stripped = midnight::util::strip_hex_prefix(contract_address);
+            if (!is_64_hex_chars(stripped))
+            {
+                throw std::runtime_error("Invalid contract address: expected 32-byte hex string");
+            }
             return rpc_call("midnight_contractState",
-                            json::array({midnight::util::strip_hex_prefix(contract_address)}));
+                            json::array({stripped}));
         }
         catch (const std::exception &e)
         {
@@ -525,4 +551,3 @@ namespace midnight::network
     }
 
 } // namespace midnight::network
-

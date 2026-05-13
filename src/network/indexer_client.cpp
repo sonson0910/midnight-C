@@ -3,9 +3,11 @@
 #include "midnight/core/logger.hpp"
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <limits>
 #include <map>
 #include <set>
+#include <stdexcept>
 
 
 namespace midnight::network {
@@ -27,11 +29,9 @@ std::string strip_hex_prefix(std::string hex) {
   return hex;
 }
 
-std::string public_token_type(const std::string &token_type) {
-  if (token_type.empty() ||
-      to_lower_copy(strip_hex_prefix(token_type)) == kNightTokenType)
-    return "NIGHT";
-  return token_type;
+bool is_night_token_type(const std::string &token_type) {
+  return token_type.empty() ||
+         to_lower_copy(strip_hex_prefix(token_type)) == kNightTokenType;
 }
 
 uint64_t parse_u64_string(const json &value) {
@@ -44,9 +44,18 @@ uint64_t parse_u64_string(const json &value) {
     }
     if (value.is_string()) {
       const auto str = value.get<std::string>();
-      if (!str.empty())
-        return static_cast<uint64_t>(std::stoull(str));
+      if (!str.empty()) {
+        uint64_t parsed = 0;
+        const auto *begin = str.data();
+        const auto *end = str.data() + str.size();
+        auto result = std::from_chars(begin, end, parsed);
+        if (result.ec == std::errc() && result.ptr == end)
+          return parsed;
+        throw std::out_of_range("u128 value does not fit in uint64_t: " + str);
+      }
     }
+  } catch (const std::out_of_range &) {
+    throw;
   } catch (...) {
   }
   return 0;
@@ -101,6 +110,8 @@ IndexerClient::IndexerClient(const std::string &graphql_url,
   parse_url(graphql_url, scheme, host, port, path);
 
   std::string base_url = scheme + "://" + host + ":" + std::to_string(port);
+  while (path.size() > 1 && path.back() == '/')
+    path.pop_back();
   if (!path.empty()) {
     size_t last_slash = path.find_last_of('/');
     if (last_slash != 0) {
@@ -179,6 +190,8 @@ json IndexerClient::execute_graphql(const json &body) {
   parse_url(graphql_url_, scheme, host, port, path);
 
   try {
+    while (path.size() > 1 && path.back() == '/')
+      path.pop_back();
     size_t last_slash = path.find_last_of('/');
     std::string remaining_path =
         (last_slash != std::string::npos && last_slash < path.length() - 1)
@@ -270,12 +283,10 @@ WalletState IndexerClient::query_wallet_state(const std::string &address,
 
     for (const auto &utxo : utxos) {
       // Use the decrypted value from the UTXO
-      if (utxo.token_type == "NIGHT" || utxo.token_type.empty()) {
+      if (is_night_token_type(utxo.token_type) || utxo.token_type == "NIGHT") {
         total_night += utxo.value;
       } else if (utxo.token_type == "DUST") {
         total_dust += utxo.value;
-      } else {
-        total_night += utxo.value;
       }
       if (utxo.registered_for_dust_generation) {
         dust_registered_utxos++;
@@ -486,7 +497,7 @@ IndexerClient::scan_utxos_internal(const std::string &address,
           utxo.output_index = out.value("outputIndex", 0u);
           utxo.value = parse_u64_string(out.value("value", json("0")));
           utxo.address = out.value("owner", address);
-          utxo.token_type = public_token_type(out.value("tokenType", ""));
+          utxo.token_type = out.value("tokenType", "");
           utxo.amount_commitment = out.value("intentHash", "");
           utxo.block_height = h;
           utxo.ctime = parse_u64_string(out.value("ctime", json(0)));

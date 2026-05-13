@@ -1,11 +1,15 @@
 /**
- * Phase 4: ZK Proofs (Zero-Knowledge SNARKs)
- * Handles Midnight ZK proof payloads for transactions
+ * ZK Proofs
+ * Handles local proof metadata and guards legacy paths.
  *
  * Midnight uses zk-SNARKs for:
  * - Proving transaction correctness WITHOUT revealing amounts
  * - Privacy: Commitments provably correct without exposing values
- * - Compact binary PLONK proofs whose size depends on the circuit
+ * - Compact binary proofs whose size depends on the circuit
+ *
+ * Production proof creation/verification must use Midnight ledger/proof
+ * payloads. This module must not substitute JSON proof requests, Blake2b
+ * hashes, or format-only checks for ledger-compatible proofs.
  */
 
 #pragma once
@@ -155,12 +159,14 @@ namespace midnight::zk_proofs
         ProofGenResult request_proof(const ProofRequest &request);
 
         /**
-         * Get previous proof status
+         * Legacy async-status helper. The Midnight proof server endpoints used
+         * here are synchronous binary endpoints, so this returns empty.
          */
         std::optional<ProofGenResult> get_proof_status(const std::string &request_id);
 
         /**
-         * Cancel proof generation request
+         * Legacy async-cancel helper. The Midnight proof server endpoints used
+         * here are synchronous binary endpoints, so this returns false.
          */
         bool cancel_proof_request(const std::string &request_id);
 
@@ -188,9 +194,8 @@ namespace midnight::zk_proofs
         explicit ProofVerifier(const ZkCircuit &circuit);
 
         /**
-         * Verify proof
-         * @param proof: Proof to verify
-         * @return true if proof is valid
+         * Validate proof container format only, then fail closed because C++
+         * does not currently include the Midnight verifier/proof stack.
          */
         bool verify(const ZkProof &proof);
 
@@ -216,32 +221,33 @@ namespace midnight::zk_proofs
 
     /**
      * Commitment Generator
-     * Generates commitments for private data (Pedersen, Poseidon, etc.)
+     * Guard methods for commitment generation. Production commitments must come
+     * from the Midnight ledger/proof stack; these methods fail closed.
      */
     class CommitmentGenerator
     {
     public:
         /**
-         * Generate Pedersen commitment
-         * C = r*G + v*H (blinded commitment to value v)
+         * Fail closed; C++ does not currently implement Midnight-compatible
+         * ledger commitments.
          */
         static std::string pedersen_commit(const std::string &value, const std::string &randomness);
 
         /**
-         * Generate Poseidon hash commitment
-         * More efficient for circuits
+         * Fail closed; Blake2b or any other hash is not a compatible substitute
+         * for Midnight circuit commitments.
          */
         static std::string poseidon_commit(const std::string &value);
 
         /**
-         * Generate batch commitments
+         * Generate batch commitments; entries are empty when ledger support is
+         * unavailable.
          */
         static std::vector<std::string> batch_commit(
             const std::map<std::string, std::string> &values);
 
         /**
-         * Verify commitment opening
-         * Prove: C opens to value v with randomness r
+         * Fail closed; opening verification requires the ledger implementation.
          */
         static bool verify_opening(const std::string &commitment,
                                    const std::string &value,

@@ -78,22 +78,19 @@ namespace midnight::contracts
      * with pure C++ calls to the Midnight network:
      *
      *   1. Read contract state → Indexer (GraphQL, native HTTP)
-     *   2. Build circuit inputs → local C++
-     *   3. Generate ZK proof → Proof Server (native HTTP)
-     *   4. Build transaction → native UTXO builder
-     *   5. Sign → native Ed25519 (libsodium)
-     *   6. Submit → Node (JSON-RPC, native HTTP)
+     *   2. Send ledger-built proof payloads → Proof Server (native HTTP)
+     *   3. Submit ledger-built transactions → Node (author_submitExtrinsic)
      *
      * Architecture (following cardano-c pattern):
      * @code
      *   ContractInteractor interactor(NetworkConfig::preprod());
      *   interactor.set_seed_hex("deadbeef...");
      *
-     *   // Deploy
-     *   auto deploy = interactor.deploy("Vesting", constructor_args, zk_config_path);
+     *   // Deploy/call transaction bytes are produced by midnight-ledger/Compact.
+     *   auto deploy = interactor.submit_deploy_transaction(deploy_tx_bytes);
      *
      *   // Call
-     *   auto result = interactor.call_circuit(deploy.contract_address, "lock", {});
+     *   auto result = interactor.submit_call_transaction(call_tx_bytes);
      *
      *   // Query (read-only, no proof needed)
      *   auto state = interactor.read_state(deploy.contract_address);
@@ -115,53 +112,14 @@ namespace midnight::contracts
         void set_seed_hex(const std::string &seed_hex);
 
         /**
-         * @brief Deploy a Compact contract
-         *
-         * Production note: this high-level method is fail-safe until native ledger
-         * transaction building is implemented. Use submit_serialized_transaction()
-         * with bytes produced by the Midnight ledger/Compact toolchain.
-         *
-         * Full native flow:
-         *   1. Derive wallet address from seed
-         *   2. Load ZK circuit config from zk_config_path
-         *   3. Generate deployment proof via Proof Server
-         *   4. Build + sign deployment transaction
-         *   5. Submit to network
-         *   6. Wait for confirmation
-         *
-         * @param contract_name Name of the contract (e.g., "Vesting")
-         * @param constructor_args JSON array of constructor arguments
-         * @param zk_config_path Path to managed ZK config directory
-         * @return DeployResult with contract address or error
+         * @brief Submit a ledger-built Compact deployment transaction.
          */
-        DeployResult deploy(
-            const std::string &contract_name,
-            const json &constructor_args,
-            const std::string &zk_config_path);
+        DeployResult submit_deploy_transaction(const std::vector<uint8_t> &transaction_bytes);
 
         /**
-         * @brief Call a circuit on a deployed contract (state-changing)
-         *
-         * Production note: this high-level method is fail-safe until native ledger
-         * transaction building is implemented. Use prove_*_payload() and
-         * submit_serialized_transaction() with ledger-built bytes.
-         *
-         * Flow:
-         *   1. Read current contract state from indexer
-         *   2. Build circuit inputs
-         *   3. Generate ZK proof via Proof Server
-         *   4. Build + sign transaction
-         *   5. Submit to network
-         *
-         * @param contract_address Address of deployed contract
-         * @param circuit_name Name of circuit to call (e.g., "lock", "claim")
-         * @param args Circuit arguments as JSON
-         * @return CallResult with txid or error
+         * @brief Submit a ledger-built Compact state-changing call transaction.
          */
-        CallResult call_circuit(
-            const std::string &contract_address,
-            const std::string &circuit_name,
-            const json &args = json::array());
+        CallResult submit_call_transaction(const std::vector<uint8_t> &transaction_bytes);
 
         /**
          * @brief Read contract state (no proof, no transaction)
@@ -183,15 +141,9 @@ namespace midnight::contracts
                          const std::vector<std::string> &fields);
 
         /**
-         * @brief Native NIGHT transfer (no Node.js)
-         *
-         * @param to_address Recipient address
-         * @param amount Amount in base units
-         * @return CallResult with txid or error
+         * @brief Submit a ledger-built NIGHT transfer transaction.
          */
-        CallResult transfer_night(
-            const std::string &to_address,
-            const std::string &amount);
+        CallResult submit_transfer_transaction(const std::vector<uint8_t> &transaction_bytes);
 
         /**
          * @brief Submit a ledger-serialized transaction to the node.
@@ -218,11 +170,9 @@ namespace midnight::contracts
         std::vector<uint8_t> prove_transaction_payload(const std::vector<uint8_t> &prove_tx_payload);
 
         /**
-         * @brief Native DUST registration (no Node.js)
-         *
-         * @return CallResult with registration status
+         * @brief Submit a ledger-built DUST registration transaction.
          */
-        CallResult register_dust();
+        CallResult submit_dust_registration_transaction(const std::vector<uint8_t> &transaction_bytes);
 
         /**
          * @brief Query DUST status
@@ -277,10 +227,6 @@ namespace midnight::contracts
             const json &args,
             const json &current_state);
 
-        /**
-         * @brief Sign and submit a proof-enabled transaction
-         */
-        std::string sign_and_submit(const zk::ProofEnabledTransaction &tx);
     };
 
 } // namespace midnight::contracts

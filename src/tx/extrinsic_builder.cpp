@@ -18,6 +18,20 @@ namespace midnight::tx
         return PalletCall{0x00, 0x00, enc.data()};
     }
 
+    PalletCall PalletCall::midnight_send_mn_transaction(
+        const std::vector<uint8_t> &midnight_tx,
+        uint8_t pallet_index)
+    {
+        if (midnight_tx.empty())
+        {
+            throw std::runtime_error("Midnight transaction bytes cannot be empty");
+        }
+
+        codec::ScaleEncoder enc;
+        enc.encode_bytes(midnight_tx);
+        return PalletCall{pallet_index, 0x00, enc.data()};
+    }
+
     PalletCall PalletCall::custom(uint8_t pallet, uint8_t call,
                                   const std::vector<uint8_t> &data)
     {

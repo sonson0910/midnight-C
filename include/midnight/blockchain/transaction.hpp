@@ -9,12 +9,10 @@ namespace midnight::blockchain
 {
 
     /**
-     * @brief Represents a Midnight blockchain transaction
+     * @brief Legacy local transaction model
      *
-     * Midnight uses a UTXO model with ZK-SNARK proofs for privacy.
-     * Unlike Cardano, amounts are encrypted via Pedersen commitments.
-     *
-     * Reference: midnight-ledger/spec/transaction.md
+     * This class is kept for local inspection/debug data. It does not implement
+     * the production midnight-ledger Transaction serializer.
      */
     class Transaction
     {
@@ -109,9 +107,7 @@ namespace midnight::blockchain
         uint64_t get_nonce() const { return nonce_; }
 
         /**
-         * @brief Calculate transaction hash (Blake2b-256)
-         *
-         * Midnight uses Blake2b-256 for transaction hashing, NOT SHA256.
+         * @brief Disabled for production transaction ids.
          */
         std::string calculate_hash() const;
 
@@ -161,19 +157,17 @@ namespace midnight::blockchain
         uint32_t get_version() const { return version_; }
 
         /**
-         * @brief Serialize to CBOR-encoded bytes for blockchain submission
-         *
-         * Midnight uses CBOR encoding per UTXO protocol spec.
+         * @brief Disabled; production bytes must come from midnight-ledger.
          */
         std::vector<uint8_t> to_cbor_bytes() const;
 
         /**
-         * @brief Serialize to hex string
+         * @brief Disabled; production bytes must come from midnight-ledger.
          */
         std::string to_hex() const;
 
         /**
-         * @brief Deserialize from CBOR-encoded hex
+         * @brief Legacy parser for old local payloads only.
          */
         static Transaction from_cbor_hex(const std::string &cbor_hex);
 

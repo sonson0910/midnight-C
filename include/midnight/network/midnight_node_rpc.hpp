@@ -65,12 +65,23 @@ namespace midnight::network
         std::pair<uint64_t, std::string> get_chain_tip();
 
         /**
-         * @brief Submit signed transaction to mempool
-         * @param tx_hex CBOR hex-encoded signed transaction
-         * @return Transaction ID if successful
+         * @brief Submit ledger-serialized Midnight transaction bytes to mempool
+         *
+         * Builds the unsigned RuntimeCall::Midnight(send_mn_transaction) extrinsic
+         * expected by midnight-node, then submits it via author_submitExtrinsic.
+         *
+         * @param tx_hex Hex-encoded Midnight ledger transaction bytes, not an already encoded extrinsic
+         * @return Node-returned extrinsic hash if successful
          * @throws std::runtime_error on RPC error (e.g., validation failure)
          */
         std::string submit_transaction(const std::string &tx_hex);
+
+        /**
+         * @brief Submit an already SCALE-encoded extrinsic through author_submitExtrinsic
+         * @param extrinsic_hex Hex-encoded extrinsic bytes
+         * @return Node-returned extrinsic hash
+         */
+        std::string submit_extrinsic(const std::string &extrinsic_hex);
 
         /**
          * @brief Get transaction by ID
@@ -98,15 +109,15 @@ namespace midnight::network
         uint64_t get_balance(const std::string &address);
 
         /**
-         * @brief Query contract state (UTXOs and balance) for an address
-         * @param contract_address Bech32m-encoded address (unshielded/shielded/dust)
-         * @return JSON with contract state including UTXOs and unshielded_balances
+         * @brief Query Compact contract state by contract address hex
+         * @param contract_address 32-byte contract address hex, with or without 0x
+         * @return JSON with contract state from midnight_contractState
          */
         json get_contract_state(const std::string &contract_address);
 
         /**
-         * @brief Evaluate script (for smart contract validation)
-         * @param script Plutus/Compact script bytecode
+         * @brief Unsupported off-chain Compact script evaluation placeholder
+         * @param script Compact script bytecode
          * @param redeemer Redeemer data
          * @return Execution result
          */

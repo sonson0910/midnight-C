@@ -1,20 +1,13 @@
 /**
- * Midnight Transaction Serialization
+ * Midnight Transaction Model Guards
  *
- * Implements proper CBOR/SCALE serialization for Midnight transactions
- * that matches the official JS SDK and Rust implementation.
+ * This header preserves older C++ model types for local inspection and tests.
+ * It does not implement the production Midnight ledger transaction serializer.
+ * Production transaction bytes must come from midnight-ledger tagged binary
+ * serialization.
  *
  * Key differences from Cardano:
- * - Midnight uses CBOR for transaction body hashing
- * - Ed25519 signatures for unshielded transactions
- * - ZK proof bytes for shielded operations
- * - Commitment-based amounts (Pedersen commitments)
- *
- * Transaction Pipeline (matching ledger-v8):
- *   UnsignedTransaction -> SignedTransaction -> FinalizedTransaction
- *
- * Reference: rustnight/crates/midnight-blockchain/src/transaction.rs
- * Reference: rustnight/crates/midnight-blockchain/src/ledger_types.rs
+ * Do not submit bytes produced by this module to a Midnight node.
  */
 
 #pragma once
@@ -91,9 +84,9 @@ namespace midnight::tx
     };
 
     /**
-     * @brief CBOR deserializer for Midnight transactions
+     * @brief Legacy CBOR-like deserializer for local/debug payloads.
      *
-     * Provides efficient streaming deserialization matching the Rust CBOR format.
+     * This does not match midnight-ledger tagged binary transaction format.
      */
     class CborDeserializer
     {
@@ -546,9 +539,9 @@ namespace midnight::tx
     };
 
     /**
-     * @brief Transaction body (matches Rust TransactionBody)
+     * @brief Legacy local transaction body model.
      *
-     * This is the core data that gets hashed (CBOR-encoded) and signed.
+     * This is not the midnight-ledger Transaction type.
      */
     struct TransactionBody
     {
@@ -577,9 +570,9 @@ namespace midnight::tx
     };
 
     /**
-     * @brief Signed transaction (matches Rust SignedTransaction)
+     * @brief Legacy local signed transaction model.
      *
-     * Complete transaction ready for submission.
+     * Not ready for Midnight node submission.
      */
     struct SignedTransaction
     {
@@ -587,7 +580,7 @@ namespace midnight::tx
         std::vector<TransactionWitness> witnesses;
         std::optional<std::string> auxiliary_data;  // JSON metadata
 
-        /// Serialize to CBOR hex for submission
+        /// Throws: production Midnight serialization is not implemented here.
         std::string to_cbor_hex() const;
 
         /// Serialize to JSON for debugging
@@ -597,7 +590,8 @@ namespace midnight::tx
     /**
      * @brief Transaction builder for Midnight
      *
-     * Builds properly formatted transactions matching the official SDK.
+     * Legacy builder. build() fails closed because production Midnight
+     * transactions require midnight-ledger tagged binary serialization.
      *
      * Example:
      * @code
@@ -687,36 +681,36 @@ namespace midnight::tx
     /**
      * @brief UTXO Transaction Serialization
      *
-     * Provides CBOR serialization for Midnight UTXO transactions.
-     * Matches the Rust serde_cbor serialization format.
+     * Legacy local serializer. Does not match midnight-ledger tagged binary
+     * serialization.
      */
     class Utf8TransactionSerializer
     {
     public:
-        /// Serialize transaction body to CBOR bytes
+        /// Serialize legacy local transaction body bytes. Do not submit to Midnight.
         static std::vector<uint8_t> serialize_body(const TransactionBody &body);
 
-        /// Serialize signed transaction to CBOR bytes
+        /// Serialize legacy local signed transaction bytes. Do not submit to Midnight.
         static std::vector<uint8_t> serialize_signed(const SignedTransaction &tx);
 
-        /// Deserialize transaction body from CBOR bytes
+        /// Deserialize legacy local transaction body bytes.
         static std::optional<TransactionBody> deserialize_body(const std::vector<uint8_t> &data);
 
-        /// Deserialize signed transaction from CBOR bytes
+        /// Deserialize legacy local signed transaction bytes.
         static std::optional<SignedTransaction> deserialize_signed(const std::vector<uint8_t> &data);
 
-        /// Convert CBOR bytes to hex string
+        /// Convert bytes to hex string.
         static std::string bytes_to_hex(const std::vector<uint8_t> &data);
 
-        /// Convert hex string to CBOR bytes
+        /// Convert hex string to bytes.
         static std::vector<uint8_t> hex_to_bytes(const std::string &hex);
     };
 
     /**
      * @brief Transaction Hash Computation
      *
-     * Computes transaction hash as CBOR(body) -> SHA256
-     * Matches Rust: sha2::Sha256::digest(&serde_cbor::to_vec(&body)?)
+     * Computes a local debug hash of the legacy body. Do not use as a
+     * Midnight transaction id.
      */
     class TransactionHasher
     {

@@ -160,9 +160,9 @@ namespace midnight::blockchain
         std::string generate_address(uint32_t account = 0, uint32_t change = 0, uint32_t address_index = 0);
 
         /**
-         * @brief Sign transaction with private key
-         * @param tx_hex Transaction in CBOR hex format
-         * @return Signed transaction CBOR hex
+         * @brief Sign ledger-provided transaction payload with private key
+         * @param tx_hex Hex-encoded ledger signing payload
+         * @return Hex-encoded signed payload
          */
         std::string sign_transaction(const std::string &tx_hex);
 

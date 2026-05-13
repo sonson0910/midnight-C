@@ -163,6 +163,7 @@ if(ENABLE_BLOCKCHAIN)
         zk-proofs/zk_proofs.cpp
         monitoring-finality/monitoring_finality.cpp
         signing-submission/signing_submission.cpp
+        production/midnight_client.cpp
         contracts/contract_interactor.cpp
         contract/contract_manager.cpp
     )
@@ -381,4 +382,3 @@ endif()
 
 # Set C++ standard
 target_compile_features(midnight-core PUBLIC cxx_std_20)
-

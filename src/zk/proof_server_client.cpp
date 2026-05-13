@@ -81,134 +81,34 @@ namespace midnight::zk
                   "Use post_proving_payload() for createProvingPayload(...) bytes.");
         result.error_message = last_error_;
         return result;
-
-        try
-        {
-            // Validate inputs
-            if (circuit_name.empty())
-            {
-                throw std::runtime_error("Circuit name cannot be empty");
-            }
-
-            if (circuit_data.empty())
-            {
-                throw std::runtime_error("Circuit data cannot be empty");
-            }
-
-            if (!types_util::is_valid_public_inputs(inputs))
-            {
-                throw std::runtime_error("Invalid public inputs");
-            }
-
-            // Build request
-            ProofGenerationRequest request;
-            request.circuit_name = circuit_name;
-            request.circuit_data = circuit_data;
-            request.circuit_inputs = inputs.inputs;
-            request.witnesses = witnesses;
-
-            // Legacy JSON path is unreachable; the live proof-server requires
-            // binary payloads on /prove.
-            json response = network_client_->post_json(
-                "/prove",
-                request.to_json());
-
-            // Parse response — do NOT override parse_proof_response's success flag
-            ProofResult parsed = parse_proof_response(response);
-            result.success = parsed.success;
-            if (!result.success) {
-                result.error_message = parsed.error_message;
-                return result;
-            }
-
-            result.proof = std::move(parsed.proof);
-            // Flags reflect what parse_proof_response set: we received proof bytes
-            // from the server. Actual local verification must be done separately via
-            // verify_proof_local() or verify_proof(). We do NOT set
-            // proof_verified_locally = true here — that would be misleading.
-            result.public_inputs_valid = true;   // server validated them
-            result.witnesses_valid     = true;   // server validated them
-
-            // Record generation timestamp
-            result.proof.generated_at_timestamp =
-                std::chrono::system_clock::now().time_since_epoch().count() / 1000000;
-
-            result.proof.proof_server_endpoint = config_.base_url();
-            result.proof.metadata.circuit_name = circuit_name;
-
-            return result;
-        }
-        catch (const std::exception &e)
-        {
-            set_error(fmt::format("Proof generation failed: {}", e.what()));
-            result.error_message = last_error_;
-            return result;
-        }
     }
 
     bool ProofServerClient::verify_proof(const CircuitProof &proof)
     {
-        try
+        if (!types_util::is_valid_proof_size(proof.proof.size()))
         {
-            // Validate proof structure
-            if (types_util::is_valid_proof_size(proof.proof.size()))
-            {
-                // Basic size check passed
-            }
-            else
-            {
-                set_error("Invalid proof size");
-                return false;
-            }
-
-            if (!types_util::is_valid_public_inputs(proof.public_inputs))
-            {
-                set_error("Invalid public inputs in proof");
-                return false;
-            }
-
-            // Send verification request to Proof Server
-            json verify_request;
-            verify_request["circuit_name"] = proof.metadata.circuit_name;
-            verify_request["proof"] = proof.proof.to_json();
-            verify_request["public_inputs"] = proof.public_inputs.to_json();
-
-            json response = network_client_->post_json(
-                "/verify",
-                verify_request);
-
-            if (response.contains("valid"))
-            {
-                return response["valid"].get<bool>();
-            }
-
+            set_error("Invalid proof size");
             return false;
         }
-        catch (const std::exception &e)
+
+        if (!types_util::is_valid_public_inputs(proof.public_inputs))
         {
-            set_error(fmt::format("Proof verification failed: {}", e.what()));
+            set_error("Invalid public inputs in proof");
             return false;
         }
+
+        set_error("JSON /verify is not a Midnight proof-server endpoint. "
+                  "Verify via ledger/proof-server binary check payloads or node submission.");
+        return false;
     }
 
     CircuitProofMetadata ProofServerClient::get_circuit_metadata(const std::string &circuit_name)
     {
         CircuitProofMetadata metadata;
-
-        try
-        {
-            std::string endpoint = fmt::format("/circuits/{}", circuit_name);
-            json response = network_client_->get_json(endpoint);
-
-            metadata = CircuitProofMetadata::from_json(response);
-        }
-        catch (const std::exception &e)
-        {
-            set_error(fmt::format("Failed to get circuit metadata: {}", e.what()));
-            metadata.circuit_name = circuit_name;
-            metadata.num_constraints = 0;
-        }
-
+        metadata.circuit_name = circuit_name;
+        metadata.num_constraints = 0;
+        set_error("Circuit metadata is not exposed by the Midnight proof-server JSON API. "
+                  "Load circuit metadata from Compact/ledger artifacts.");
         return metadata;
     }
 
@@ -307,52 +207,6 @@ namespace midnight::zk
                   "Use post_proving_payload() for createProvingPayload(...) bytes.");
         result.error_message = last_error_;
         return result;
-
-        try
-        {
-            if (circuit_name.empty())
-                throw std::runtime_error("Circuit name cannot be empty");
-
-            if (prover_key_data.empty())
-                throw std::runtime_error("Prover key data cannot be empty");
-
-            // Build /prove request
-            // Format matches httpClientProofProvider's request format
-            json request;
-            request["circuitName"] = circuit_name;
-
-            // Encode prover key as base64 or hex
-            std::ostringstream hex_key;
-            for (auto b : prover_key_data)
-                hex_key << std::hex << std::setfill('0') << std::setw(2)
-                        << static_cast<int>(b);
-            request["proverKey"] = hex_key.str();
-
-            if (!witness_data.is_null())
-                request["witnesses"] = witness_data;
-
-            if (!public_inputs.is_null())
-                request["publicInputs"] = public_inputs;
-
-            // POST to /prove endpoint
-            json response = network_client_->post_json("/prove", request);
-
-            result = parse_proof_response(response);
-            if (result.success)
-            {
-                result.proof.metadata.circuit_name = circuit_name;
-                result.proof.generated_at_timestamp =
-                    std::chrono::system_clock::now().time_since_epoch().count() / 1000000;
-                result.proof.proof_server_endpoint = config_.base_url();
-            }
-        }
-        catch (const std::exception &e)
-        {
-            set_error(fmt::format("Prove failed: {}", e.what()));
-            result.error_message = last_error_;
-        }
-
-        return result;
     }
 
     ProofResult ProofServerClient::prove_tx(
@@ -388,37 +242,11 @@ namespace midnight::zk
         const std::string &circuit_name,
         const std::vector<uint8_t> &prover_key_data)
     {
-        try
-        {
-            json request;
-            request["circuitName"] = circuit_name;
-
-            // Encode prover key as hex
-            std::ostringstream hex_key;
-            for (auto b : prover_key_data)
-                hex_key << std::hex << std::setfill('0') << std::setw(2)
-                        << static_cast<int>(b);
-            request["proverKey"] = hex_key.str();
-
-            json response = network_client_->post_json("/check", request);
-
-            // /check returns {"capable": true/false} — require explicit confirmation
-            if (response.contains("capable"))
-                return response["capable"].get<bool>();
-
-            // Require explicit capable/available flag — do NOT assume capable
-            if (response.contains("available"))
-                return response["available"].get<bool>();
-
-            // No explicit field AND no error — still require the server to have
-            // explicitly said capable. Treat ambiguous responses as unavailable.
-            return false;
-        }
-        catch (const std::exception &e)
-        {
-            set_error(fmt::format("Check failed: {}", e.what()));
-            return false;
-        }
+        (void)circuit_name;
+        (void)prover_key_data;
+        set_error("Circuit checks require ledger createCheckPayload(...) binary bytes. "
+                  "Use post_check_payload() instead of JSON /check.");
+        return false;
     }
 
 

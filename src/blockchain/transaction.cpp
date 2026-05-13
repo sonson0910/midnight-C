@@ -152,9 +152,9 @@ namespace midnight::blockchain
 
     std::string Transaction::calculate_hash() const
     {
-        // Midnight uses Blake2b-256 for transaction hashing
-        auto tx_bytes = to_cbor_bytes();
-        return blake2b_256(tx_bytes);
+        throw std::runtime_error(
+            "blockchain::Transaction cannot calculate a production Midnight tx id; "
+            "use midnight-ledger serialized transaction bytes and node/indexer result hashes");
     }
 
     uint64_t Transaction::get_total_inputs() const
@@ -179,74 +179,18 @@ namespace midnight::blockchain
         return false;
     }
 
-    // ============================================================
-    // CBOR Serialization (per Midnight Protocol Spec)
-    // ============================================================
-
     std::vector<uint8_t> Transaction::to_cbor_bytes() const
     {
-        std::vector<uint8_t> out;
-
-        // Transaction body: [version, nonce, inputs, outputs, fees]
-        // Per spec: version (4 bytes BE u32), nonce (compact u64), inputs, outputs, fees (compact u64)
-        
-        // Step 1: Encode inputs array
-        encode_cbor_array_header(out, inputs_.size());
-        for (const auto& input : inputs_) {
-            // Input: [outpoint_hash (32 bytes), output_index (compact u32), amount_commitment (32 bytes)]
-            // We store outpoint as string "txhash:index", need to extract txhash
-            
-            std::string tx_hash = input.outpoint;
-            size_t colon_pos = input.outpoint.rfind(':');
-            if (colon_pos != std::string::npos) {
-                tx_hash = input.outpoint.substr(0, colon_pos);
-            }
-            
-            // Clean hex to bytes for outpoint_hash
-            encode_cbor_hex_bytes(out, tx_hash);
-            // output_index
-            encode_cbor_uint(out, 0);  // Default index
-            // amount_commitment (32 bytes)
-            encode_cbor_hex_bytes(out, input.amount_commitment);
-        }
-
-        // Step 2: Encode outputs array
-        encode_cbor_array_header(out, outputs_.size());
-        for (const auto& output : outputs_) {
-            // Output: [address (text string), amount_commitment (32 bytes), lock_height (compact u64)]
-            
-            // Address (Bech32m text string)
-            encode_cbor_text_string(out, output.address);
-            // amount_commitment (32 bytes)
-            encode_cbor_hex_bytes(out, output.amount_commitment);
-            // lock_height (compact u64)
-            encode_cbor_uint(out, output.lock_height);
-        }
-
-        // Step 3: Encode version (4 bytes big-endian u32)
-        out.push_back(static_cast<uint8_t>((version_ >> 24) & 0xFF));
-        out.push_back(static_cast<uint8_t>((version_ >> 16) & 0xFF));
-        out.push_back(static_cast<uint8_t>((version_ >> 8) & 0xFF));
-        out.push_back(static_cast<uint8_t>(version_ & 0xFF));
-
-        // Step 4: Encode nonce (compact u64)
-        encode_cbor_uint(out, nonce_);
-
-        // Step 5: Encode fees (compact u64)
-        encode_cbor_uint(out, fee_.paid_fees);
-
-        return out;
+        throw std::runtime_error(
+            "blockchain::Transaction::to_cbor_bytes is disabled: production "
+            "Midnight transactions require midnight-ledger tagged binary serialization");
     }
 
     std::string Transaction::to_hex() const
     {
-        auto bytes = to_cbor_bytes();
-        std::ostringstream hex;
-        hex << "0x";
-        for (uint8_t b : bytes) {
-            hex << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
-        }
-        return hex.str();
+        throw std::runtime_error(
+            "blockchain::Transaction::to_hex is disabled: production Midnight "
+            "transactions require midnight-ledger tagged binary serialization");
     }
 
     std::string Transaction::to_json() const
@@ -267,7 +211,8 @@ namespace midnight::blockchain
 
     size_t Transaction::get_size() const
     {
-        return to_cbor_bytes().size();
+        throw std::runtime_error(
+            "blockchain::Transaction::get_size is unavailable for legacy local models");
     }
 
     Transaction Transaction::from_cbor_hex(const std::string& cbor_hex)

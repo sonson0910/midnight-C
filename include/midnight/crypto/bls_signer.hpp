@@ -2,16 +2,12 @@
 
 /**
  * @file bls_signer.hpp
- * @brief BLS signature implementation for DUST transactions
+ * @brief BLS key helpers and guarded DUST signature API
  *
  * Midnight uses BLS signatures on the BLS12-381 curve for DUST transactions.
- * This implementation uses the blst library for high-performance BLS operations.
- *
- * Features:
- * - G1 and G2 point operations
- * - Aggregate signatures
- * - Proof of possession verification
- * - Key derivation compatible with Midnight DUST addresses
+ * This C++ module does not currently include a BLS12-381 backend; signing,
+ * verification, proof-of-possession, and aggregation fail closed rather than
+ * using incompatible fallback math.
  */
 
 #ifndef MIDNIGHT_CRYPTO_BLS_SIGNER_HPP

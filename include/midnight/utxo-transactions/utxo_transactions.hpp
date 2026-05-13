@@ -337,8 +337,11 @@ namespace midnight::utxo_transactions
     };
 
     /**
-     * Transaction Builder
-     * Creates well-formed transactions for submission
+     * Legacy transaction builder.
+     *
+     * This builder is useful for local selection/accounting state, but build()
+     * fails closed because production Midnight transaction bytes must be
+     * produced by midnight-ledger tagged binary serialization.
      */
     class TransactionBuilder
     {
@@ -407,7 +410,7 @@ namespace midnight::utxo_transactions
         void set_fees(uint64_t fee_amount);
 
         /**
-         * Finalize transaction (compute hash)
+         * Disabled for production transaction construction.
          */
         std::optional<Transaction> build();
 

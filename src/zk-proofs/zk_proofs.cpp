@@ -1,5 +1,5 @@
 /**
- * Phase 4: ZK Proofs Implementation
+ * ZK proof metadata and legacy guard implementation.
  */
 
 #include "midnight/zk-proofs/zk_proofs.hpp"
@@ -7,21 +7,10 @@
 #include "midnight/core/common_utils.hpp"
 #include "midnight/core/json_bridge_utils.hpp"
 #include "midnight/core/logger.hpp"
-#include <openssl/ec.h>
-#include <openssl/bn.h>
-#include <openssl/obj_mac.h>
-#include <openssl/sha.h>
-#include <sodium.h>
-#include <iostream>
-#include <algorithm>
-#include <thread>
 #include <chrono>
 #include <ctime>
-#include <sstream>
-#include <cctype>
 #include <stdexcept>
 #include <mutex>
-#include <cstring>
 
 namespace
 {
@@ -30,93 +19,6 @@ namespace
 
     using midnight::util::strip_hex_prefix;
     using midnight::util::is_hex_string;
-    using midnight::util::to_lower_copy;
-    using midnight::util::bytes_to_hex;
-
-    // Sanitize error messages to prevent internal information disclosure.
-    // Only allows printable ASCII, limits length, and strips sensitive patterns.
-    static std::string sanitize_error_message(const std::string &raw)
-    {
-        if (raw.empty())
-        {
-            return "An internal error occurred";
-        }
-
-        std::string sanitized;
-        sanitized.reserve(std::min(raw.size(), size_t(200)));
-
-        for (size_t i = 0; i < raw.size() && sanitized.size() < 200; ++i)
-        {
-            char c = raw[i];
-            if (c >= 32 && c <= 126)
-            {
-                sanitized += c;
-            }
-            else
-            {
-                sanitized += '?';
-            }
-        }
-
-        if (sanitized.size() > 200)
-        {
-            sanitized.resize(200);
-            sanitized += "...";
-        }
-
-        const std::string sensitive_patterns[] = {
-            "password", "token", "secret", "api_key", "apikey",
-            "authorization", "private_key", "credential"
-        };
-        for (const auto &pattern : sensitive_patterns)
-        {
-            for (size_t pos = sanitized.find(pattern); pos != std::string::npos; pos = sanitized.find(pattern, pos + 1))
-            {
-                size_t colon_pos = sanitized.find(':', pos);
-                size_t newline_pos = sanitized.find('\n', pos);
-                size_t end = std::min(colon_pos, newline_pos);
-                if (end != std::string::npos && end > pos)
-                {
-                    sanitized.replace(pos, end - pos + 1, pattern + ": <redacted>");
-                }
-                pos = sanitized.find(pattern, pos + pattern.size() + 12);
-            }
-        }
-
-        return sanitized;
-    }
-
-    std::vector<uint8_t> decode_hex_or_ascii(const std::string &value)
-    {
-        const std::string normalized = strip_hex_prefix(value);
-        if (is_hex_string(normalized) && (normalized.size() % 2 == 0))
-        {
-            std::vector<uint8_t> bytes;
-            bytes.reserve(normalized.size() / 2);
-            for (size_t i = 0; i < normalized.size(); i += 2)
-            {
-                const std::string byte_str = normalized.substr(i, 2);
-                bytes.push_back(static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16)));
-            }
-            return bytes;
-        }
-
-        return std::vector<uint8_t>(value.begin(), value.end());
-    }
-
-    std::string normalize_hex_bytes(std::string value)
-    {
-        value = strip_hex_prefix(value);
-        if (value.empty())
-        {
-            return "00";
-        }
-        if (!is_hex_string(value))
-        {
-            value = bytes_to_hex(std::vector<uint8_t>(value.begin(), value.end()));
-        }
-        return to_lower_copy(value);
-    }
 
     bool is_even_hex_payload(const std::string &value)
     {
@@ -127,44 +29,6 @@ namespace
     // Import shared JSON bridge from json_bridge_utils.hpp
     using midnight::util::nlohmann_to_jsoncpp;
     using midnight::util::jsoncpp_to_nlohmann;
-
-    std::optional<std::string> extract_proof_hex(const NJson &node)
-    {
-        if (node.is_string())
-        {
-            return node.get<std::string>();
-        }
-
-        if (node.is_object())
-        {
-            if (node.contains("proof_hex") && node["proof_hex"].is_string())
-            {
-                return node["proof_hex"].get<std::string>();
-            }
-            if (node.contains("proof") && node["proof"].is_string())
-            {
-                return node["proof"].get<std::string>();
-            }
-            if (node.contains("proof") && node["proof"].is_object())
-            {
-                const auto &proof_obj = node["proof"];
-                if (proof_obj.contains("proof_hex") && proof_obj["proof_hex"].is_string())
-                {
-                    return proof_obj["proof_hex"].get<std::string>();
-                }
-            }
-            if (node.contains("proof_data") && node["proof_data"].is_string())
-            {
-                return node["proof_data"].get<std::string>();
-            }
-            if (node.contains("hex") && node["hex"].is_string())
-            {
-                return node["hex"].get<std::string>();
-            }
-        }
-
-        return {};
-    }
 }
 
 namespace midnight::zk_proofs
@@ -272,114 +136,13 @@ namespace midnight::zk_proofs
 
     std::optional<ProofGenResult> ProofServerClient::get_proof_status(const std::string &request_id)
     {
-        if (request_id.empty())
-        {
-            return {};
-        }
-
-        const NJson payload = {
-            {"request_id", request_id},
-        };
-
-        const std::vector<std::string> endpoints = {
-            "/proofs/status",
-            "/proof/status",
-            "/status",
-        };
-
-        for (const auto &endpoint : endpoints)
-        {
-            try
-            {
-                midnight::network::NetworkClient client(proof_server_url_, kProofServerTimeoutMs);
-                NJson response = client.post_json(endpoint, payload);
-
-                ProofGenResult result;
-                if (response.contains("success") && response["success"].is_boolean())
-                {
-                    result.success = response["success"].get<bool>();
-                }
-                else if (response.contains("status") && response["status"].is_string())
-                {
-                    const std::string status = response["status"].get<std::string>();
-                    result.success = (status == "success" || status == "completed" || status == "ready");
-                    if (!result.success)
-                    {
-                        result.error_message = status;
-                    }
-                }
-
-                if (response.contains("error") && response["error"].is_string())
-                {
-                    result.success = false;
-                    result.error_message = sanitize_error_message(response["error"].get<std::string>());
-                }
-
-                const auto proof_hex = extract_proof_hex(response.contains("result") ? response["result"] : response);
-                if (proof_hex.has_value())
-                {
-                    result.proof.proof_data = *proof_hex;
-                    result.success = true;
-                }
-
-                return result;
-            }
-            catch (...)
-            {
-                // Try next known status endpoint.
-            }
-        }
-
+        (void)request_id;
         return {};
     }
 
     bool ProofServerClient::cancel_proof_request(const std::string &request_id)
     {
-        if (request_id.empty())
-        {
-            return false;
-        }
-
-        const NJson payload = {
-            {"request_id", request_id},
-        };
-
-        const std::vector<std::string> endpoints = {
-            "/proofs/cancel",
-            "/proof/cancel",
-            "/cancel",
-        };
-
-        for (const auto &endpoint : endpoints)
-        {
-            try
-            {
-                midnight::network::NetworkClient client(proof_server_url_, kProofServerTimeoutMs);
-                NJson response = client.post_json(endpoint, payload);
-
-                if (response.contains("cancelled") && response["cancelled"].is_boolean())
-                {
-                    return response["cancelled"].get<bool>();
-                }
-                if (response.contains("success") && response["success"].is_boolean())
-                {
-                    return response["success"].get<bool>();
-                }
-                if (response.contains("status") && response["status"].is_string())
-                {
-                    const std::string status = response["status"].get<std::string>();
-                    if (status == "success" || status == "cancelled" || status == "ok")
-                    {
-                        return true;
-                    }
-                }
-            }
-            catch (...)
-            {
-                // Try next known cancel endpoint.
-            }
-        }
-
+        (void)request_id;
         return false;
     }
 
@@ -551,160 +314,16 @@ namespace midnight::zk_proofs
             midnight::g_logger->warn("ZK proof verification: proof has public inputs but no circuit ID");
         }
         
-        /**
-         * Step 5: Full verification requires ZK library
-         * 
-         * For production verification, integrate one of:
-         * 
-         * Option A: libsnark (C++)
-         *   - Full Groth16/PLONK support
-         *   - Requires trusted setup
-         *   - Heavy dependency
-         * 
-         * Option B: bellman (Rust via Cbindgen)
-         *   - Groth16 + PLONK
-         *   - Used by zcash
-         * 
-         * Option C: snarkjs (JavaScript/WASM)
-         *   - Groth16 + PLONK + FFLONK
-         *   - Easy to integrate via WASM
-         *   - Slower verification
-         * 
-         * Option D: circom + proof server (current architecture)
-         *   - Proofs generated by proof server with ZK circuits
-         *   - Server performs verification before accepting proof
-         *   - This SDK just passes proof to Midnight node
-         * 
-         * For now, we return true if format is valid, with a warning.
-         * The Midnight node will perform full verification.
-         */
-        midnight::g_logger->debug("ZK proof format validated - node will perform full SNARK verification");
-        
-        return true;
+        midnight::g_logger->error(
+            "ZK proof verification requires the Midnight verifier/proof stack; "
+            "format-only validation is not a cryptographic verification result");
+        return false;
     }
 
     // ============================================================================
     // CommitmentGenerator Implementation
     // ============================================================================
 
-    namespace
-    {
-        // Helper to convert BIGNUM to bytes (for internal use)
-        void bn_to_bytes_fixed(const BIGNUM* bn, uint8_t* out, size_t len) {
-            int nbytes = BN_num_bytes(bn);
-            std::vector<uint8_t> tmp(nbytes);
-            BN_bn2bin(bn, tmp.data());
-            std::memset(out, 0, len - nbytes);
-            std::memcpy(out + len - nbytes, tmp.data(), nbytes);
-        }
-
-        // Get the generator point G for secp256k1
-        EC_POINT* get_secp256k1_generator() {
-            static EC_POINT* generator = nullptr;
-            if (!generator) {
-                EC_GROUP* group = EC_GROUP_new_by_curve_name(NID_secp256k1);
-                generator = EC_POINT_new(group);
-                EC_POINT_copy(generator, EC_GROUP_get0_generator(group));
-                EC_GROUP_free(group);
-            }
-            return generator;
-        }
-
-        // Derive H generator point from a hash
-        // H is computed as hash("PedersenH") * G, making it deterministic
-        EC_POINT* get_pedersen_h_generator() {
-            static EC_POINT* h_generator = nullptr;
-            static bool initialized = false;
-            
-            if (!initialized) {
-                EC_GROUP* group = EC_GROUP_new_by_curve_name(NID_secp256k1);
-                h_generator = EC_POINT_new(group);
-                
-                // Hash of "PedersenH" to get a scalar
-                uint8_t hash[32];
-                const char* h_label = "PedersenH";
-                SHA256(reinterpret_cast<const uint8_t*>(h_label), 9, hash);
-                
-                // Ensure valid scalar (mod curve order)
-                hash[0] &= 248;
-                hash[31] &= 127;
-                hash[31] |= 64;
-                
-                BIGNUM* scalar = BN_bin2bn(hash, 32, nullptr);
-                const EC_POINT* g = EC_GROUP_get0_generator(group);
-                
-                // H = hash * G
-                EC_POINT_mul(group, h_generator, scalar, nullptr, nullptr, nullptr);
-                
-                BN_free(scalar);
-                EC_GROUP_free(group);
-                initialized = true;
-            }
-            return h_generator;
-        }
-
-        // Convert a value to a 32-byte scalar (mod curve order)
-        bool value_to_scalar(const std::string& value_str, BIGNUM*& scalar_out) {
-            // Parse the value as a uint64_t first
-            uint64_t value = 0;
-            for (char c : value_str) {
-                if (c >= '0' && c <= '9') {
-                    value = value * 10 + (c - '0');
-                }
-            }
-            
-            // Convert to scalar
-            scalar_out = BN_new();
-            BN_set_word(scalar_out, value);
-            return true;
-        }
-
-        // Convert randomness to scalar
-        bool randomness_to_scalar(const std::string& randomness, BIGNUM*& scalar_out) {
-            // Hash the randomness to get a 32-byte value
-            uint8_t hash[32];
-            SHA256(reinterpret_cast<const uint8_t*>(randomness.data()), randomness.size(), hash);
-            
-            // Ensure valid scalar
-            hash[0] &= 248;
-            hash[31] &= 127;
-            hash[31] |= 64;
-            
-            scalar_out = BN_bin2bn(hash, 32, nullptr);
-            return true;
-        }
-
-        // Point to compressed hex string (0x02/0x03 + x coordinate)
-        std::string point_to_hex(EC_GROUP* group, EC_POINT* point) {
-            BIGNUM* x = BN_new();
-            BIGNUM* y = BN_new();
-            EC_POINT_get_affine_coordinates(group, point, x, y, nullptr);
-            
-            uint8_t x_bytes[32];
-            bn_to_bytes_fixed(x, x_bytes, 32);
-            
-            std::string result = "0x";
-            result += (BN_is_odd(y) ? "03" : "02");
-            for (int i = 0; i < 32; i++) {
-                char buf[3];
-                snprintf(buf, sizeof(buf), "%02x", x_bytes[i]);
-                result += buf;
-            }
-            
-            BN_free(x);
-            BN_free(y);
-            return result;
-        }
-    }
-
-    /**
-     * Compute Pedersen commitment: C = r*G + v*H
-     * 
-     * Pedersen commitments are additively homomorphic:
-     * - C(v1, r1) + C(v2, r2) = C(v1+v2, r1+r2)
-     * 
-     * This allows range proofs and other ZK protocols.
-     */
     std::string CommitmentGenerator::pedersen_commit(const std::string& value,
                                                  const std::string& randomness) {
         if (value.empty() || randomness.empty()) {
@@ -712,41 +331,10 @@ namespace midnight::zk_proofs
         }
 
         try {
-            EC_GROUP* group = EC_GROUP_new_by_curve_name(NID_secp256k1);
-            EC_POINT* result = EC_POINT_new(group);
-            EC_POINT* g = get_secp256k1_generator();
-            EC_POINT* h = get_pedersen_h_generator();
-            
-            // Convert value to scalar
-            BIGNUM* v_scalar = BN_new();
-            value_to_scalar(value, v_scalar);
-            
-            // Convert randomness to scalar
-            BIGNUM* r_scalar = BN_new();
-            randomness_to_scalar(randomness, r_scalar);
-            
-            // C = r*G + v*H
-            // Compute r*G and v*H separately, then add
-            EC_POINT* term1 = EC_POINT_new(group);
-            EC_POINT* term2 = EC_POINT_new(group);
-            
-            EC_POINT_mul(group, term1, r_scalar, nullptr, nullptr, nullptr);  // r*G
-            EC_POINT_mul(group, term2, nullptr, h, v_scalar, nullptr);  // v*H
-            
-            EC_POINT_add(group, result, term1, term2, nullptr);
-            
-            // Convert result to hex (compressed format)
-            std::string commitment = point_to_hex(group, result);
-            
-            // Cleanup
-            EC_POINT_free(term1);
-            EC_POINT_free(term2);
-            BN_free(v_scalar);
-            BN_free(r_scalar);
-            EC_POINT_free(result);
-            EC_GROUP_free(group);
-            
-            return commitment;
+            midnight::g_logger->error(
+                "Pedersen commitment generation is not implemented in C++ for Midnight ledger types; "
+                "use the ledger/proof stack instead");
+            return "";
         }
         catch (const std::exception& e) {
             midnight::g_logger->error("Pedersen commitment failed: " + std::string(e.what()));
@@ -754,39 +342,16 @@ namespace midnight::zk_proofs
         }
     }
 
-    /**
-     * Compute Poseidon hash commitment
-     * 
-     * Poseidon is a SNARK-friendly hash function designed for use in
-     * zero-knowledge circuits. It is more efficient than Pedersen
-     * for constraints in zk-SNARK circuits.
-     * 
-     * Since we don't have a native Poseidon implementation, we use
-     * a Blake2b hash as a placeholder. For production, integrate
-     * a Poseidon implementation.
-     */
     std::string CommitmentGenerator::poseidon_commit(const std::string& value) {
         if (value.empty()) {
             return "";
         }
 
         try {
-            uint8_t hash[32];
-            // Use Blake2b for hash (SNARK-friendly alternative to SHA)
-            crypto_generichash_blake2b(
-                hash, 32,
-                reinterpret_cast<const uint8_t*>(value.data()), value.size(),
-                nullptr, 0
-            );
-            
-            // Format as hex with 0x prefix
-            std::string result = "0x";
-            for (int i = 0; i < 32; i++) {
-                char buf[3];
-                snprintf(buf, sizeof(buf), "%02x", hash[i]);
-                result += buf;
-            }
-            return result;
+            midnight::g_logger->error(
+                "Poseidon commitment generation is not implemented; "
+                "Blake2b is not a compatible substitute for Midnight circuit commitments");
+            return "";
         }
         catch (const std::exception& e) {
             midnight::g_logger->error("Poseidon commitment failed: " + std::string(e.what()));
@@ -810,10 +375,12 @@ namespace midnight::zk_proofs
                                              const std::string &value,
                                              const std::string &randomness)
     {
-        // Verify: commitment = pedersen_commit(value, randomness)
-
-        auto recomputed = pedersen_commit(value, randomness);
-        return recomputed == commitment;
+        (void)commitment;
+        (void)value;
+        (void)randomness;
+        midnight::g_logger->error(
+            "Commitment opening verification requires the Midnight ledger commitment implementation");
+        return false;
     }
 
     // ============================================================================
@@ -842,7 +409,7 @@ namespace midnight::zk_proofs
             return {};
         }
 
-        // Generate commitments for private inputs
+        // Commitment generation must come from the Midnight ledger/proof stack.
         witness_.commitments = CommitmentGenerator::batch_commit(witness_.private_inputs);
 
         return witness_;

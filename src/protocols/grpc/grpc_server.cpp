@@ -613,7 +613,7 @@ namespace midnight::protocols::grpc
             }
             return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION,
                                "ContractManager not configured — cannot deploy contract via gRPC. "
-                               "Use ContractInteractor::deploy() directly for contract deployment.");
+                               "Use ContractInteractor::submit_deploy_transaction() with ledger-built bytes.");
         }
 
         try
@@ -639,7 +639,7 @@ namespace midnight::protocols::grpc
 
             return grpc::Status(grpc::StatusCode::UNIMPLEMENTED,
                                "Contract deployment via gRPC is not implemented. "
-                               "Use ContractInteractor::deploy() directly with a wallet seed set via set_seed_hex().");
+                               "Submit ledger-built deployment bytes through the production client.");
         }
         catch (const std::exception& e)
         {
@@ -694,7 +694,7 @@ namespace midnight::protocols::grpc
 
             return grpc::Status(grpc::StatusCode::UNIMPLEMENTED,
                                "Contract calls via gRPC are not implemented. "
-                               "Use ContractInteractor::call_circuit() directly with a wallet seed set.");
+                               "Submit ledger-built call bytes through the production client.");
         }
         catch (const std::exception& e)
         {
@@ -723,13 +723,15 @@ namespace midnight::protocols::grpc
             logger->debug("GetBalance: querying balance for " + address);
         }
 
-        if (!indexer_ && !node_rpc_)
+        if (!indexer_)
         {
             if (logger)
             {
-                logger->error("GetBalance: neither IndexerClient nor MidnightNodeRPC configured");
+                logger->error("GetBalance: IndexerClient not configured");
             }
-            return Status::OK;
+            return Status(
+                grpc::StatusCode::FAILED_PRECONDITION,
+                "Wallet balance requires IndexerClient; node RPC cannot query wallet NIGHT balance");
         }
 
         try
@@ -741,10 +743,6 @@ namespace midnight::protocols::grpc
                 auto state = indexer_->query_wallet_state(address);
                 balance = state.unshielded_balance.empty() ? 0 : std::stoull(state.unshielded_balance);
                 dust = state.dust_balance.empty() ? 0 : std::stoull(state.dust_balance);
-            }
-            else
-            {
-                balance = node_rpc_->get_balance(address);
             }
             response->set_unshielded(balance);
             response->set_dust(dust);

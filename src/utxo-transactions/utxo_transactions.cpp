@@ -1,19 +1,15 @@
 /**
  * Phase 3: UTXO Transactions Implementation
  *
- * Implements Midnight UTXO transactions with proper CBOR serialization.
+ * Implements legacy/local UTXO helpers and indexer-backed UTXO selection.
  *
- * Key fixes from previous version:
- * 1. Transaction body uses CBOR encoding (matching Rust serde_cbor)
- * 2. Transaction hash uses Blake2b-256 of CBOR-encoded body
- * 3. Proper Bech32m address handling
- * 4. Multi-asset support with colored outputs
- *
- * Reference: rustnight/crates/midnight-blockchain/src/transaction.rs
- * Reference: rustnight/crates/midnight-blockchain/src/ledger_types.rs
+ * Production Midnight transactions are serialized by midnight-ledger tagged
+ * binary codecs and proved through the proof-server binary endpoints. This
+ * file must not create submit-ready CBOR/JSON transactions.
  */
 
 #include "midnight/utxo-transactions/utxo_transactions.hpp"
+#include "midnight/network/indexer_client.hpp"
 #include "midnight/network/network_client.hpp"
 #include "midnight/network/midnight_node_rpc.hpp"
 #include "midnight/core/logger.hpp"
@@ -109,53 +105,26 @@ namespace midnight::utxo_transactions
 
     Json::Value GraphqlIndexerProvider::execute_query(const std::string &query)
     {
-        midnight::network::NetworkClient client(indexer_url_, timeout_ms_);
-        nlohmann::json payload = {
-            {"query", query}};
-
-        auto raw_response = client.post_json("/", payload);
-        auto raw_string = raw_response.dump();
-
-        Json::CharReaderBuilder builder;
-        Json::Value parsed;
-        std::string errors;
-        std::istringstream stream(raw_string);
-        if (!Json::parseFromStream(builder, stream, &parsed, &errors))
-        {
-            throw std::runtime_error("Failed to parse GraphQL response: " + errors);
-        }
-
-        return parsed;
+        midnight::network::IndexerClient indexer(indexer_url_, timeout_ms_);
+        nlohmann::json response = nlohmann::json::object();
+        response["data"] = indexer.graphql_query(query, nlohmann::json::object());
+        return midnight::util::nlohmann_to_jsoncpp(response);
     }
 
     Json::Value GraphqlIndexerProvider::execute_query_with_vars(
         const std::string &query,
         const std::map<std::string, Json::Value> &variables)
     {
-        midnight::network::NetworkClient client(indexer_url_, timeout_ms_);
-        nlohmann::json payload = {
-            {"query", query},
-            {"variables", nlohmann::json::object()}
-        };
+        nlohmann::json vars = nlohmann::json::object();
 
-        // Convert Json::Value to nlohmann::json
         for (const auto &[key, value] : variables) {
-            payload["variables"][key] = midnight::util::jsoncpp_to_nlohmann(value);
+            vars[key] = midnight::util::jsoncpp_to_nlohmann(value);
         }
 
-        auto raw_response = client.post_json("/", payload);
-        auto raw_string = raw_response.dump();
-
-        Json::CharReaderBuilder builder;
-        Json::Value parsed;
-        std::string errors;
-        std::istringstream stream(raw_string);
-        if (!Json::parseFromStream(builder, stream, &parsed, &errors))
-        {
-            throw std::runtime_error("Failed to parse GraphQL response: " + errors);
-        }
-
-        return parsed;
+        midnight::network::IndexerClient indexer(indexer_url_, timeout_ms_);
+        nlohmann::json response = nlohmann::json::object();
+        response["data"] = indexer.graphql_query(query, vars);
+        return midnight::util::nlohmann_to_jsoncpp(response);
     }
 
     MidnightNodeProvider::MidnightNodeProvider(const std::string &node_rpc_url,
@@ -852,278 +821,10 @@ namespace midnight::utxo_transactions
 
     std::optional<Transaction> TransactionBuilder::build()
     {
-        try
-        {
-            if (!validate())
-            {
-                return {};
-            }
-
-            if (tx_.witness_bundle.signatures.empty() && !tx_.signature.empty())
-            {
-                tx_.witness_bundle.signatures.push_back(tx_.signature);
-            }
-            else if (tx_.signature.empty() && !tx_.witness_bundle.signatures.empty())
-            {
-                tx_.signature = tx_.witness_bundle.signatures.front();
-            }
-
-            if (tx_.witness_bundle.proof_references.empty() && !tx_.proofs.empty())
-            {
-                tx_.witness_bundle.proof_references = tx_.proofs;
-            }
-
-            if (!fees_manually_set_)
-            {
-                const size_t proof_count = std::max(
-                    tx_.proofs.size(),
-                    tx_.witness_bundle.proof_references.size());
-                const size_t proof_size = proof_count * context_.fee_model.default_proof_size;
-                tx_.fees = FeeEstimator::estimate_fee(
-                    static_cast<uint32_t>(tx_.inputs.size()),
-                    static_cast<uint32_t>(tx_.outputs.size()),
-                    proof_size,
-                    context_);
-            }
-
-            // ============================================================================
-            // FIXED: Proper CBOR serialization matching Rust implementation
-            // ============================================================================
-            // Midnight uses CBOR for transaction body serialization (like Rust).
-            // This replaces the manual byte building which had incorrect format.
-            // Reference: rustnight uses serde_cbor::to_vec(&body) for serialization
-            // and sha2::Sha256::digest for hashing.
-            // ============================================================================
-
-            std::vector<uint8_t> tx_bytes;
-
-            // Transaction body format (CBOR encoding):
-            // [
-            //   version (u32),
-            //   inputs (array of inputs),
-            //   outputs (array of outputs),
-            //   fee (u64),
-            //   network_id (u8),
-            //   ...
-            // ]
-
-            // Helper lambda to append compact-encoded integer
-            auto append_compact = [&tx_bytes](uint64_t val) {
-                if (val <= 0x3F)
-                {
-                    tx_bytes.push_back(static_cast<uint8_t>((val << 2) | 0x00));
-                }
-                else if (val <= 0x3FFF)
-                {
-                    uint16_t encoded = static_cast<uint16_t>((val << 2) | 0x01);
-                    tx_bytes.push_back(static_cast<uint8_t>(encoded & 0xFF));
-                    tx_bytes.push_back(static_cast<uint8_t>((encoded >> 8) & 0xFF));
-                }
-                else if (val <= 0x3FFFFFFF)
-                {
-                    uint32_t encoded = static_cast<uint32_t>((val << 2) | 0x02);
-                    tx_bytes.push_back(static_cast<uint8_t>(encoded & 0xFF));
-                    tx_bytes.push_back(static_cast<uint8_t>((encoded >> 8) & 0xFF));
-                    tx_bytes.push_back(static_cast<uint8_t>((encoded >> 16) & 0xFF));
-                    tx_bytes.push_back(static_cast<uint8_t>((encoded >> 24) & 0xFF));
-                }
-                else
-                {
-                    // Big-integer mode for large values
-                    uint8_t bytes_needed = 4;
-                    uint64_t temp = val;
-                    while (temp > 0 && bytes_needed < 8)
-                    {
-                        temp >>= 8;
-                        if (temp > 0) bytes_needed++;
-                    }
-                    tx_bytes.push_back(static_cast<uint8_t>(((bytes_needed - 4) << 2) | 0x03));
-                    for (uint8_t i = 0; i < bytes_needed; i++)
-                    {
-                        tx_bytes.push_back(static_cast<uint8_t>((val >> (i * 8)) & 0xFF));
-                    }
-                }
-            };
-
-            // Helper lambda to append byte string
-            auto append_byte_string = [&tx_bytes, &append_compact](const std::vector<uint8_t> &data) {
-                append_compact(data.size());
-                tx_bytes.insert(tx_bytes.end(), data.begin(), data.end());
-            };
-
-            // Helper lambda to append text string
-            auto append_text_string = [&tx_bytes, &append_compact](const std::string &str) {
-                append_compact(str.size());
-                tx_bytes.insert(tx_bytes.end(), str.begin(), str.end());
-            };
-
-            // Helper lambda to append array header
-            auto append_array = [&tx_bytes](size_t count) {
-                if (count <= 23)
-                {
-                    tx_bytes.push_back(static_cast<uint8_t>(0x80 + count));  // Major type 4, array of count
-                }
-                else if (count <= 255)
-                {
-                    tx_bytes.push_back(0x98);  // Array with 1-byte length
-                    tx_bytes.push_back(static_cast<uint8_t>(count));
-                }
-                else
-                {
-                    tx_bytes.push_back(0x99);  // Array with 2-byte length
-                    tx_bytes.push_back(static_cast<uint8_t>((count >> 8) & 0xFF));
-                    tx_bytes.push_back(static_cast<uint8_t>(count & 0xFF));
-                }
-            };
-
-            // Version (4 bytes, big-endian u32)
-            tx_bytes.push_back(static_cast<uint8_t>((tx_.version >> 24) & 0xFF));
-            tx_bytes.push_back(static_cast<uint8_t>((tx_.version >> 16) & 0xFF));
-            tx_bytes.push_back(static_cast<uint8_t>((tx_.version >> 8) & 0xFF));
-            tx_bytes.push_back(static_cast<uint8_t>(tx_.version & 0xFF));
-
-            // Nonce (compact-encoded)
-            append_compact(tx_.nonce);
-
-            // Inputs array
-            append_array(tx_.inputs.size());
-            for (const auto &inp : tx_.inputs)
-            {
-                // Each input: [outpoint_hash, output_index, amount_commitment]
-                std::string outpoint_clean = midnight::util::strip_hex_prefix(inp.outpoint);
-                auto colon_pos = outpoint_clean.find(':');
-                if (colon_pos != std::string::npos)
-                {
-                    outpoint_clean = outpoint_clean.substr(0, colon_pos);
-                }
-
-                // Outpoint hash - try as hex, fallback to raw bytes for Bech32m
-                try
-                {
-                    append_byte_string(midnight::util::hex_to_bytes(outpoint_clean));
-                }
-                catch (...)
-                {
-                    // Not valid hex (likely Bech32m address) - use as raw string
-                    append_byte_string(std::vector<uint8_t>(outpoint_clean.begin(), outpoint_clean.end()));
-                }
-
-                append_compact(inp.output_index);
-
-                // Amount commitment - must be hex
-                std::string commitment = midnight::util::strip_hex_prefix(inp.amount_commitment);
-                try
-                {
-                    append_byte_string(midnight::util::hex_to_bytes(commitment));
-                }
-                catch (...)
-                {
-                    // Fallback: treat as raw bytes
-                    append_byte_string(std::vector<uint8_t>(commitment.begin(), commitment.end()));
-                }
-            }
-
-            // Outputs array
-            append_array(tx_.outputs.size());
-            for (const auto &out : tx_.outputs)
-            {
-                // Each output: [address, amount_commitment, lock_height]
-                // Address - Midnight uses Bech32m addresses (UTF-8 strings), not hex
-                // Just use the address as-is
-                append_text_string(out.address);
-
-                // Amount commitment - must be hex (64 hex chars = 32 bytes)
-                std::string commitment = midnight::util::strip_hex_prefix(out.amount_commitment);
-                try
-                {
-                    append_byte_string(midnight::util::hex_to_bytes(commitment));
-                }
-                catch (...)
-                {
-                    // Fallback: treat as raw bytes
-                    append_byte_string(std::vector<uint8_t>(commitment.begin(), commitment.end()));
-                }
-
-                append_compact(out.lock_height);
-            }
-
-            // Fees (compact-encoded u64)
-            append_compact(tx_.fees);
-
-            // Witnesses (if present)
-            if (!tx_.witness_bundle.signatures.empty())
-            {
-                append_array(tx_.witness_bundle.signatures.size());
-                for (const auto &sig : tx_.witness_bundle.signatures)
-                {
-                    // Each witness signature - try as hex, fallback to raw
-                    std::string sig_clean = midnight::util::strip_hex_prefix(sig);
-                    try
-                    {
-                        append_byte_string(midnight::util::hex_to_bytes(sig_clean));
-                    }
-                    catch (...)
-                    {
-                        // Not valid hex - use as raw bytes
-                        append_byte_string(std::vector<uint8_t>(sig.begin(), sig.end()));
-                    }
-                }
-            }
-            else
-            {
-                append_array(0);  // Empty witnesses array
-            }
-
-            // Proof references (if present)
-            if (!tx_.witness_bundle.proof_references.empty())
-            {
-                append_array(tx_.witness_bundle.proof_references.size());
-                for (const auto &proof : tx_.witness_bundle.proof_references)
-                {
-                    std::string proof_clean = midnight::util::strip_hex_prefix(proof);
-                    try
-                    {
-                        append_byte_string(midnight::util::hex_to_bytes(proof_clean));
-                    }
-                    catch (...)
-                    {
-                        append_byte_string(std::vector<uint8_t>(proof.begin(), proof.end()));
-                    }
-                }
-            }
-            else
-            {
-                append_array(0);  // Empty proofs array
-            }
-
-            // ============================================================================
-            // FIXED: Use Blake2b-256 for transaction hash (Midnight protocol requirement)
-            // ============================================================================
-            // Midnight uses Blake2b-256 for all transaction hashing.
-            // This replaces the incorrect SHA256 implementation with Blake2b-256.
-            // ============================================================================
-            uint8_t hash[32];
-            crypto_generichash(hash, 32, tx_bytes.data(), tx_bytes.size(), nullptr, 0);
-
-            std::vector<uint8_t> hash_vec(hash, hash + 32);
-            tx_.hash = "0x" + midnight::util::bytes_to_hex(hash_vec);
-
-            midnight::g_logger->info("Transaction built: " + std::to_string(tx_.inputs.size()) +
-                                      " inputs, " + std::to_string(tx_.outputs.size()) +
-                                      " outputs, hash=" + tx_.hash);
-
-            return tx_;
-        }
-        catch (const std::exception &e)
-        {
-            midnight::g_logger->error(std::string("build() failed: ") + e.what());
-            return {};
-        }
-        catch (...)
-        {
-            midnight::g_logger->error("build() failed: unknown exception");
-            return {};
-        }
+        midnight::g_logger->error(
+            "utxo_transactions::TransactionBuilder::build is disabled: production "
+            "Midnight transactions require midnight-ledger tagged binary serialization");
+        return {};
     }
 
     bool TransactionBuilder::validate()

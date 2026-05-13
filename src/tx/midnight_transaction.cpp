@@ -1,8 +1,8 @@
 /**
- * Midnight Transaction Serialization Implementation
+ * Midnight Transaction Model Guard Implementation
  *
- * Implements CBOR/SCALE serialization for Midnight transactions
- * matching the official JS SDK and Rust implementation.
+ * Production Midnight transaction serialization is provided by midnight-ledger
+ * tagged binary serializers, not by this legacy CBOR-like model.
  */
 
 #include "midnight/tx/midnight_transaction.hpp"
@@ -216,40 +216,10 @@ namespace midnight::tx
 
     std::optional<SignedTransaction> TransactionBuilder::build() const
     {
-        try
-        {
-            // Validate structure
-            if (!validate_inputs() || !validate_outputs())
-            {
-                midnight::g_logger->error("Transaction validation failed: invalid inputs or outputs");
-                return std::nullopt;
-            }
-
-            // Calculate fee if not set
-            uint64_t fee = explicit_fee_.value_or(200000);  // Default 0.2 ADA
-
-            // Build the transaction
-            SignedTransaction tx;
-            tx.body = body_;
-            tx.body.fee = fee;
-            tx.witnesses = witnesses_;
-
-            if (auxiliary_data_.has_value())
-            {
-                tx.auxiliary_data = auxiliary_data_;
-            }
-
-            midnight::g_logger->info(
-                "Transaction built: " + std::to_string(tx.body.inputs.size()) + " inputs, " +
-                std::to_string(tx.body.outputs.size()) + " outputs, fee=" + std::to_string(fee));
-
-            return tx;
-        }
-        catch (const std::exception &e)
-        {
-            midnight::g_logger->error(std::string("Transaction build failed: ") + e.what());
-            return std::nullopt;
-        }
+        midnight::g_logger->error(
+            "TransactionBuilder cannot build production Midnight transactions. "
+            "Use midnight-ledger tagged binary serialization and proof payloads.");
+        return std::nullopt;
     }
 
     // ============================================================================
@@ -1068,8 +1038,9 @@ namespace midnight::tx
 
     std::string SignedTransaction::to_cbor_hex() const
     {
-        auto bytes = Utf8TransactionSerializer::serialize_signed(*this);
-        return "0x" + Utf8TransactionSerializer::bytes_to_hex(bytes);
+        throw std::runtime_error(
+            "SignedTransaction::to_cbor_hex is disabled: production Midnight "
+            "transactions require midnight-ledger tagged binary serialization");
     }
 
     std::string SignedTransaction::to_json() const

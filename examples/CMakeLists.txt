@@ -54,6 +54,10 @@ add_executable(balance_checker balance_checker.cpp)
 target_link_libraries(balance_checker PRIVATE midnight-core)
 target_include_directories(balance_checker PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
+add_executable(preprod_midnight_format_check preprod_midnight_format_check.cpp)
+target_link_libraries(preprod_midnight_format_check PRIVATE midnight-core)
+target_include_directories(preprod_midnight_format_check PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
 add_executable(decode_address decode_address.cpp)
 target_link_libraries(decode_address PRIVATE midnight-core)
 target_include_directories(decode_address PRIVATE ${CMAKE_SOURCE_DIR}/include)

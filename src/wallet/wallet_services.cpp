@@ -79,65 +79,23 @@ static std::vector<uint8_t> hex_to_bytes(const std::string& hex) {
 // ─── SerializedTransaction ────────────────────────────────────
 
 SerializedTransaction SerializedTransaction::from_json(const json& tx_json) {
-    SerializedTransaction st;
-    std::string s = tx_json.dump();
-    st.data.assign(s.begin(), s.end());
-    st.tx_hash = sha256_hex(st.data);
-    return st;
+    (void)tx_json;
+    throw std::runtime_error(
+        "SerializedTransaction::from_json is disabled: Midnight nodes require "
+        "ledger serialized transaction bytes, not JSON payloads");
 }
 
 SerializedTransaction SerializedTransaction::from_bytes(const std::vector<uint8_t>& data) {
     SerializedTransaction st;
     st.data = data;
-    st.tx_hash = sha256_hex(st.data);
     return st;
 }
 
 SerializedTransaction SerializedTransaction::make_midnight_extrinsic(const std::string& midnight_tx_hex) {
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Build a proper SCALE-encoded Substrate extrinsic for Midnight pallet
-    //
-    // Extrinsic format (for unsigned call):
-    //   [ compact encoded length ] [ call ]
-    //
-    // Call format for midnight.sendMnTransaction(bytes):
-    //   [ pallet_index (1 byte) ] [ call_index (1 byte) ] [ args... ]
-    //
-    // Midnight pallet index: 0x58 (88) — from Substrate metadata
-    // sendMnTransaction call index: 0x00 (first call in pallet)
-    //
-    // The node accepts raw midnight_tx bytes — we encode them in the call args.
-    // ═══════════════════════════════════════════════════════════════════════════
-    
-    SerializedTransaction st;
-    
-    // Parse the midnight TX hex
-    std::vector<uint8_t> midnight_bytes = hex_to_bytes(midnight_tx_hex);
-    
-    // Build the call structure:
-    // Call = pallet_idx(1) + call_idx(1) + args
-    std::vector<uint8_t> call_data;
-    call_data.push_back(0x58);  // Midnight pallet index
-    call_data.push_back(0x00);  // send_mn_transaction call index
-    
-    // Add the bytes argument (Compact encoding of bytes length + bytes)
-    scale_encode_compact_u32(static_cast<uint32_t>(midnight_bytes.size()), call_data);
-    call_data.insert(call_data.end(), midnight_bytes.begin(), midnight_bytes.end());
-    
-    // Wrap in extrinsic with length prefix
-    std::vector<uint8_t> extrinsic;
-    scale_encode_compact_u32(static_cast<uint32_t>(call_data.size()), extrinsic);
-    extrinsic.insert(extrinsic.end(), call_data.begin(), call_data.end());
-    
-    st.data = extrinsic;
-    st.tx_hash = sha256_hex(midnight_bytes);  // TX hash = hash of midnight tx bytes
-    
-    if (midnight::g_logger) {
-        midnight::g_logger->info("Built SCALE extrinsic: " + std::to_string(extrinsic.size()) +
-                                  " bytes, midnight_tx=" + std::to_string(midnight_bytes.size()) + " bytes");
-    }
-    
-    return st;
+    (void)midnight_tx_hex;
+    throw std::runtime_error(
+        "SerializedTransaction::make_midnight_extrinsic is disabled: submit "
+        "ledger serialized Midnight transaction bytes through the correct node API/path");
 }
 
 // ─── SubmissionService ───────────────────────────────────────
@@ -224,7 +182,10 @@ SubmissionEvent SubmissionService::submit_via_http(const SerializedTransaction& 
             return event;
         }
 
-        // TX submitted successfully
+        if (response.contains("result") && response["result"].is_string()) {
+            event.tx_hash = response["result"].get<std::string>();
+        }
+
         event.tag = SubmissionEventTag::Submitted;
         connected_ = true;
 
@@ -326,9 +287,12 @@ ProvedTransaction ProvingService::prove(const std::vector<uint8_t>& unproven_tx)
 }
 
 ProvedTransaction ProvingService::prove_json(const json& tx_json) {
-    std::string s = tx_json.dump();
-    std::vector<uint8_t> data(s.begin(), s.end());
-    return prove(data);
+    (void)tx_json;
+    ProvedTransaction result;
+    result.error =
+        "ProvingService::prove_json is disabled: proof-server /prove expects "
+        "ledger createProvingPayload(...) bytes, not JSON";
+    return result;
 }
 
 bool ProvingService::is_available() const {

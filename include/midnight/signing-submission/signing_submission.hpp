@@ -178,8 +178,8 @@ namespace midnight::signing_submission
      * Transaction Signer
      * Signs transactions with BIP-340 Schnorr signatures
      *
-     * Signing payload format: network_id || era || nonce || tip || transaction_body
-     * This ensures transactions are tied to a specific network, era, and account nonce
+     * The Midnight ledger stack must provide the exact signing payload bytes.
+     * This class signs those bytes; it does not serialize or wrap transactions.
      */
     class TransactionSigner
     {
@@ -191,16 +191,16 @@ namespace midnight::signing_submission
         explicit TransactionSigner(const Keypair &signer_keypair);
 
         /**
-         * Sign transaction with configured signing context
-         * Builds proper signing payload: network_id || era || nonce || tip || tx_body
-         * @param tx_body: CBOR-encoded transaction body
+         * Sign transaction with configured signing context.
+         * @param tx_body Ledger-provided signing payload bytes. Do not pass a
+         * locally invented CBOR/JSON transaction body.
          * @return Signature or empty
          */
         std::string sign_transaction(const std::vector<uint8_t> &tx_body);
 
         /**
-         * Verify signature against the same payload format
-         * @param tx_body: Original transaction body
+         * Verify signature against the same ledger-provided payload bytes
+         * @param tx_body Original ledger-provided signing payload bytes
          * @param signature: Signature to verify
          * @return true if valid
          */
@@ -218,26 +218,27 @@ namespace midnight::signing_submission
         bool is_signer_of(const std::string &signature) const;
 
         /**
-         * Set network ID for signing payload
-         * @param network_id: 0=testnet, 1=mainnet
+         * Set legacy metadata retained for compatibility. This value is not
+         * mixed into the ledger-provided signing payload.
+         * @param network_id 0=testnet, 1=mainnet
          */
         void set_network_id(uint8_t network_id);
 
         /**
-         * Set transaction era
-         * @param era: 0=immortal, otherwise mortal with phase/period
+         * Set legacy metadata retained for compatibility.
+         * @param era 0=immortal, otherwise mortal with phase/period
          */
         void set_era(uint8_t era);
 
         /**
-         * Set account nonce for signing payload
-         * @param nonce: Account nonce (auto-incremented)
+         * Set legacy metadata retained for compatibility.
+         * @param nonce Account nonce
          */
         void set_nonce(uint64_t nonce);
 
         /**
-         * Set tip for transaction priority
-         * @param tip: Tip amount in smallest unit
+         * Set legacy metadata retained for compatibility.
+         * @param tip Tip amount in smallest unit
          */
         void set_tip(uint64_t tip);
 
@@ -250,19 +251,18 @@ namespace midnight::signing_submission
         uint64_t get_tip() const;
 
         /**
-         * Get the last signed payload (for verification with original context)
-         * Fix: Store original signing context so verification can use it
+         * Get the last ledger-provided payload signed by this signer
          */
         const std::vector<uint8_t>& get_last_signed_payload() const { return last_signed_payload_; }
 
     private:
         Keypair keypair_;
         std::string signer_address_;
-        uint8_t network_id_ = 0;    // Default to testnet
-        uint8_t era_ = 0;           // Default to immortal
-        uint64_t nonce_ = 0;       // Default nonce
-        uint64_t tip_ = 0;          // Default tip (no extra priority)
-        mutable std::vector<uint8_t> last_signed_payload_;  // Fix #6: Preserve original payload for verification
+        uint8_t network_id_ = 0;    // Legacy metadata only
+        uint8_t era_ = 0;           // Legacy metadata only
+        uint64_t nonce_ = 0;        // Legacy metadata only
+        uint64_t tip_ = 0;          // Legacy metadata only
+        mutable std::vector<uint8_t> last_signed_payload_;
 
         /**
          * BIP-340 sign operation (Midnight unshielded transactions)
@@ -272,8 +272,7 @@ namespace midnight::signing_submission
 
         /**
          * BIP-340 verify operation (Midnight unshielded transactions)
-         * Fix #4: Remove redundant catch blocks that defeat verification
-         * Fix #6: Use original signing context for verification
+         * Uses original ledger-provided signing payload for verification
          */
         bool bip340_verify(const std::vector<uint8_t> &message,
                           const std::string &signature,

@@ -252,10 +252,11 @@ namespace midnight::network
             const std::string &account_id_hex);
 
         /**
-         * @brief Dry-run a contract call (off-chain execution without state changes)
+         * @brief Generic Substrate contracts pallet dry-run helper
          *
-         * Uses the Substrate contracts_call RPC to simulate contract execution.
-         * Returns gas used and any return data without making any state changes.
+         * This is not the Midnight Compact contract execution path. Midnight
+         * Compact transactions must be built with the ledger/proof stack and
+         * submitted as serialized transaction bytes.
          *
          * @param contract_address Target contract address (hex)
          * @param origin_address Caller address (hex, defaults to zero)

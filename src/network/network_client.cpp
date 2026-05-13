@@ -110,6 +110,28 @@ namespace midnight::network
         return result;
     }
 
+    static std::string join_request_path(const std::string &prefix, const std::string &path)
+    {
+        std::string normalized_prefix = prefix;
+        while (normalized_prefix.size() > 1 && normalized_prefix.back() == '/') {
+            normalized_prefix.pop_back();
+        }
+
+        if (normalized_prefix.empty()) {
+            return path.empty() ? "/" : path;
+        }
+        if (path.empty() || path == "/") {
+            return normalized_prefix;
+        }
+        if (normalized_prefix.back() == '/' && path.front() == '/') {
+            return normalized_prefix + path.substr(1);
+        }
+        if (normalized_prefix.back() != '/' && path.front() != '/') {
+            return normalized_prefix + "/" + path;
+        }
+        return normalized_prefix + path;
+    }
+
     template<typename ClientT>
     std::string NetworkClient::do_post(ClientT &cli, const std::string &path,
                                       const std::string &body, const std::string &content_type)
@@ -187,9 +209,7 @@ namespace midnight::network
                                   " (" + std::to_string(body.length()) + " bytes)");
 
         ParsedEndpoint ep = parse_url(base_url_);
-        std::string request_path = ep.path_prefix.empty() ? "/" :
-                                  (ep.path_prefix.back() == '/' ? ep.path_prefix + path :
-                                   ep.path_prefix + path);
+        std::string request_path = join_request_path(ep.path_prefix, path);
 
         try {
             std::string response_body;
@@ -226,9 +246,7 @@ namespace midnight::network
                                   " (" + std::to_string(body.length()) + " raw bytes)");
 
         ParsedEndpoint ep = parse_url(base_url_);
-        std::string request_path = ep.path_prefix.empty() ? "/" :
-                                  (ep.path_prefix.back() == '/' ? ep.path_prefix + path :
-                                   ep.path_prefix + path);
+        std::string request_path = join_request_path(ep.path_prefix, path);
 
         std::string response_body;
         if (ep.use_tls) {
@@ -253,9 +271,7 @@ namespace midnight::network
         midnight::g_logger->debug("HTTP GET " + base_url_ + path);
 
         ParsedEndpoint ep = parse_url(base_url_);
-        std::string request_path = ep.path_prefix.empty() ? path :
-                                  (ep.path_prefix.back() == '/' ? ep.path_prefix + path :
-                                   ep.path_prefix + path);
+        std::string request_path = join_request_path(ep.path_prefix, path);
 
         try {
             std::string response_body;

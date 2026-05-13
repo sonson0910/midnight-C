@@ -517,7 +517,8 @@ namespace midnight::zk
         {
             CircuitProof proof;
 
-            // Create dummy proof data
+            // Dummy local fixture data only. It is intentionally not a
+            // Midnight ledger/proof-server compatible proof.
             ProofData pd;
             pd.proof_bytes.resize(128, 0xAA);
             proof.proof = pd;

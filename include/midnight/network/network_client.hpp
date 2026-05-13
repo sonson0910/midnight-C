@@ -25,8 +25,8 @@ namespace midnight::network
      *   NetworkClient client("http://localhost:5678", 5000);
      *   auto response = client.post_json("/rpc", json::object({
      *       {"jsonrpc", "2.0"},
-     *       {"method", "submitTransaction"},
-     *       {"params", {{"tx", tx_hex}}},
+     *       {"method", "author_submitExtrinsic"},
+     *       {"params", json::array({extrinsic_hex})},
      *       {"id", 1}
      *   }));
      * @endcode

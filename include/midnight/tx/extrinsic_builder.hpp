@@ -36,6 +36,11 @@ namespace midnight::tx
         /// system.remark(data) — pallet 0, call 0
         static PalletCall system_remark(const std::vector<uint8_t> &remark);
 
+        /// Midnight.send_mn_transaction(midnight_tx) — pallet 5, call 0 in current Midnight runtime
+        static PalletCall midnight_send_mn_transaction(
+            const std::vector<uint8_t> &midnight_tx,
+            uint8_t pallet_index = 5);
+
         /// Custom call with raw data
         static PalletCall custom(uint8_t pallet, uint8_t call,
                                  const std::vector<uint8_t> &data = {});
