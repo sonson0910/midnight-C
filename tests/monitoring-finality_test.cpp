@@ -14,9 +14,27 @@
 #include <gtest/gtest.h>
 #include "midnight/monitoring-finality/monitoring_finality.hpp"
 #include <chrono>
+#include <cstdlib>
 #include <thread>
 
 using namespace midnight::monitoring_finality;
+
+namespace
+{
+    bool run_live_monitoring_tests()
+    {
+        return std::getenv("MIDNIGHT_RUN_LIVE_MONITORING_TESTS") != nullptr;
+    }
+
+#define SKIP_WITHOUT_LIVE_MONITORING()                                      \
+    do                                                                      \
+    {                                                                       \
+        if (!run_live_monitoring_tests())                                   \
+        {                                                                   \
+            GTEST_SKIP() << "Set MIDNIGHT_RUN_LIVE_MONITORING_TESTS=1 to run live monitoring/finality checks"; \
+        }                                                                   \
+    } while (false)
+}
 
 // ============================================================================
 // BlockMonitor Tests
@@ -27,6 +45,8 @@ class BlockMonitorTest : public ::testing::Test
 protected:
     BlockMonitor monitor_{"wss://rpc.preprod.midnight.network",
                           "https://indexer.preprod.midnight.network/api/v4/graphql"};
+
+    void SetUp() override { SKIP_WITHOUT_LIVE_MONITORING(); }
 };
 
 TEST_F(BlockMonitorTest, SubscribeNewBlocks_ValidCallback_CallsBack)
@@ -82,6 +102,8 @@ class StateMonitorTest : public ::testing::Test
 {
 protected:
     StateMonitor monitor_{"https://indexer.preprod.midnight.network/api/v4/graphql"};
+
+    void SetUp() override { SKIP_WITHOUT_LIVE_MONITORING(); }
 };
 
 TEST_F(StateMonitorTest, SubscribeStateChanges_ValidCallback_CallsBack)
@@ -142,6 +164,8 @@ class FinalizationMonitorTest : public ::testing::Test
 {
 protected:
     FinalizationMonitor monitor_{"wss://rpc.preprod.midnight.network"};
+
+    void SetUp() override { SKIP_WITHOUT_LIVE_MONITORING(); }
 };
 
 TEST_F(FinalizationMonitorTest, MonitorFinalization_ValidCallback_CallsBack)
@@ -197,6 +221,8 @@ class TransactionMonitorTest : public ::testing::Test
 protected:
     TransactionMonitor monitor_{"wss://rpc.preprod.midnight.network",
                                 "https://indexer.preprod.midnight.network/api/v4/graphql"};
+
+    void SetUp() override { SKIP_WITHOUT_LIVE_MONITORING(); }
 };
 
 TEST_F(TransactionMonitorTest, MonitorTransaction_ValidTxHash_CallsCallback)
@@ -254,6 +280,8 @@ class ReorgHandlerTest : public ::testing::Test
 protected:
     ReorgHandler handler_;
     std::string rpc_url_ = "wss://rpc.preprod.midnight.network";
+
+    void SetUp() override { SKIP_WITHOUT_LIVE_MONITORING(); }
 };
 
 TEST_F(ReorgHandlerTest, DetectReorg_NormalChain_ReturnsEmpty)
@@ -286,6 +314,8 @@ class FinalityAwaiterTest : public ::testing::Test
 {
 protected:
     FinalityAwaiter awaiter_{"wss://rpc.preprod.midnight.network"};
+
+    void SetUp() override { SKIP_WITHOUT_LIVE_MONITORING(); }
 };
 
 TEST_F(FinalityAwaiterTest, WaitForTxFinality_ValidTx_CompletesWhenFinalized)
@@ -322,6 +352,8 @@ class MonitoringIntegrationTest : public ::testing::Test
 protected:
     MonitoringManager manager_{"wss://rpc.preprod.midnight.network",
                                "https://indexer.preprod.midnight.network/api/v4/graphql"};
+
+    void SetUp() override { SKIP_WITHOUT_LIVE_MONITORING(); }
 };
 
 TEST_F(MonitoringIntegrationTest, FullMonitoringLifecycle_StartStop_CompletesSuccessfully)
@@ -367,6 +399,8 @@ TEST_F(MonitoringIntegrationTest, MonitoringWithEventHandlers_RegisterHandlers_R
 
 TEST(BlockMonitorEdgeCases, GetBlockHistory_ZeroRange_ReturnsAllToFinalized)
 {
+    SKIP_WITHOUT_LIVE_MONITORING();
+
     BlockMonitor monitor{"wss://rpc.preprod.midnight.network",
                          "https://indexer.preprod.midnight.network/api/v4/graphql"};
 
@@ -382,6 +416,8 @@ TEST(BlockMonitorEdgeCases, GetBlockHistory_ZeroRange_ReturnsAllToFinalized)
 
 TEST(TransactionMonitorEdgeCases, MonitorTransaction_EmptyHash_HandlesGracefully)
 {
+    SKIP_WITHOUT_LIVE_MONITORING();
+
     TransactionMonitor monitor{"wss://rpc.preprod.midnight.network",
                                "https://indexer.preprod.midnight.network/api/v4/graphql"};
 
@@ -399,6 +435,8 @@ TEST(TransactionMonitorEdgeCases, MonitorTransaction_EmptyHash_HandlesGracefully
 
 TEST(FinalityAwaiterEdgeCases, WaitForFinality_TimeoutZero_WaitsIndefinitely)
 {
+    SKIP_WITHOUT_LIVE_MONITORING();
+
     FinalityAwaiter awaiter{"wss://rpc.preprod.midnight.network"};
 
     // Use a finite timeout to avoid detached background threads in tests.
@@ -429,6 +467,8 @@ TEST(MonitoringManagerEdgeCases, GetStatistics_NoActivity_ReturnsZeroStats)
 
 TEST(FinalizationMonitorPerformance, MultipleFinalityChecks_CompletesInReasonableTime)
 {
+    SKIP_WITHOUT_LIVE_MONITORING();
+
     FinalizationMonitor monitor{"wss://rpc.preprod.midnight.network"};
     const uint32_t base_finalized = monitor.get_finalized_block_height();
 

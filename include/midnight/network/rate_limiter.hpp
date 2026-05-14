@@ -13,6 +13,7 @@
 #include <optional>
 #include <thread>
 #include <random>
+#include <algorithm>
 
 namespace midnight::network {
 

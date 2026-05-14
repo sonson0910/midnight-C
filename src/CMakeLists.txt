@@ -155,7 +155,7 @@ if(ENABLE_BLOCKCHAIN)
         blockchain/wallet_manager.cpp
         blockchain/midnight_adapter.cpp
         utxo-transactions/utxo_transactions.cpp
-        ledger/transaction_builder.cpp
+        ledger/ledger_backend.cpp
         monitoring-finality/monitoring_finality.cpp
         signing-submission/signing_submission.cpp
         production/midnight_client.cpp
@@ -327,12 +327,19 @@ if(NOT Sodium_FOUND AND DEFINED ENV{CONDA_PREFIX})
     endif()
 endif()
 
+if(ENABLE_BLOCKCHAIN AND MIDNIGHT_REQUIRE_OPENSSL_FOR_BLOCKCHAIN AND NOT OPENSSL_FOUND)
+    message(FATAL_ERROR "OpenSSL is required for production Midnight HTTPS endpoints. Install OpenSSL or configure with -DMIDNIGHT_REQUIRE_OPENSSL_FOR_BLOCKCHAIN=OFF for local HTTP-only builds.")
+endif()
+
 target_link_libraries(midnight-core
     PUBLIC
         nlohmann_json::nlohmann_json
         fmt::fmt
+        $<$<TARGET_EXISTS:jsoncpp_static>:jsoncpp_static>
+        $<$<TARGET_EXISTS:jsoncpp_lib>:jsoncpp_lib>
         $<$<TARGET_EXISTS:${JSONCPP_LIBRARY}>:${JSONCPP_LIBRARY}>
         $<$<TARGET_EXISTS:JsonCpp::JsonCpp>:JsonCpp::JsonCpp>
+        $<$<TARGET_EXISTS:httplib::httplib>:httplib::httplib>
         $<$<BOOL:${OPENSSL_FOUND}>:OpenSSL::SSL>
         $<$<BOOL:${OPENSSL_FOUND}>:OpenSSL::Crypto>
         $<$<BOOL:${Sodium_FOUND}>:Sodium::Sodium>
@@ -341,6 +348,7 @@ target_link_libraries(midnight-core
         $<$<PLATFORM_ID:Windows>:secur32>
         $<$<PLATFORM_ID:Windows>:bcrypt>
         $<$<PLATFORM_ID:Windows>:iphlpapi>
+        $<$<AND:$<NOT:$<PLATFORM_ID:Windows>>,$<NOT:$<PLATFORM_ID:Darwin>>>:dl>
     PRIVATE
         $<$<BOOL:${ENABLE_GRPC}>:grpc++_unsecure>
         $<$<BOOL:${ENABLE_GRPC}>:grpc Reflection>

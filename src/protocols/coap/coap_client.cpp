@@ -34,6 +34,7 @@ namespace midnight::protocols::coap
         constexpr uint8_t COAP_HEADER_SIZE = 4;
         constexpr uint8_t PAYLOAD_MARKER = 0xFF;
         constexpr uint16_t DEFAULT_COAP_PORT = 5683;
+        constexpr uint16_t DEFAULT_COAPS_PORT = 5684;
         constexpr size_t MAX_UDP_PACKET_SIZE = 1152;
 
         uint16_t generate_message_id()
@@ -239,8 +240,9 @@ namespace midnight::protocols::coap
         if (working_uri.rfind("coap://", 0) == 0) {
             working_uri = working_uri.substr(7);
         } else if (working_uri.rfind("coaps://", 0) == 0) {
-            // CoAPS (DTLS) not implemented yet
-            last_error_ = "CoAPS (DTLS) not supported";
+            port = DEFAULT_COAPS_PORT;
+            last_error_ =
+                "CoAPS (DTLS) requires a DTLS transport backend; this build supports plain CoAP/UDP only";
             midnight::g_logger->error(last_error_);
             return false;
         } else {

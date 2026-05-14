@@ -1,5 +1,6 @@
 #include "midnight/wallet/wallet_facade.hpp"
 #include "midnight/wallet/transaction_balancer.hpp"
+#include "midnight/ledger/ledger_backend.hpp"
 #include "midnight/crypto/state_encryption.hpp"
 #include "midnight/core/logger.hpp"
 #include "midnight/network/graphql_subscription.hpp"
@@ -14,6 +15,7 @@
 #include <atomic>
 #include <future>
 #include <functional>
+#include <cstdlib>
 
 namespace midnight::wallet {
 
@@ -26,22 +28,58 @@ static std::string to_hex(const std::vector<uint8_t>& data) {
     return oss.str();
 }
 
-static size_t random_lt(size_t upper_bound) {
-    // Returns a uniform random integer in [0, upper_bound).
-    // Uses libsodium's secure random for cryptographic safety.
-    uint32_t random_u32 = 0;
-    const size_t kMaxValid = static_cast<size_t>(UINT32_MAX) -
-                                 (static_cast<size_t>(UINT32_MAX) % upper_bound);
-    do {
-        random_u32 = randombytes_random();
-    } while (random_u32 >= kMaxValid);
-    return static_cast<size_t>(random_u32 % upper_bound);
+static bool env_flag_enabled(const char* name) {
+    const char* value = std::getenv(name);
+    if (value == nullptr || *value == '\0')
+        return false;
+    std::string normalized(value);
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on";
 }
 
-static std::string sha256_hex_internal(const std::vector<uint8_t>& data) {
-    uint8_t hash[crypto_hash_sha256_BYTES];
-    crypto_hash_sha256(hash, data.data(), data.size());
-    return to_hex(std::vector<uint8_t>(hash, hash + 32));
+bool WalletFacade::apply_official_addresses(
+    const std::vector<uint8_t>& seed,
+    const std::string& ledger_ffi_library,
+    bool required)
+{
+    std::string library = ledger_ffi_library;
+    if (library.empty()) {
+        if (const char* env = std::getenv("MIDNIGHT_LEDGER_FFI_LIBRARY")) {
+            library = env;
+        }
+    }
+    if (library.empty()) {
+        if (required) {
+            throw std::runtime_error(
+                "Canonical Midnight wallet derivation requires libmidnight_ledger_ffi. "
+                "Set WalletFacadeConfig::ledger_ffi_library or MIDNIGHT_LEDGER_FFI_LIBRARY.");
+        }
+        return false;
+    }
+
+    auto backend = midnight::ledger::make_ffi_ledger_backend(library);
+    auto* ffi_backend = dynamic_cast<midnight::ledger::FfiLedgerBackend*>(backend.get());
+    if (ffi_backend == nullptr || !ffi_backend->can_derive_wallet_addresses()) {
+        throw std::runtime_error(
+            "Configured libmidnight_ledger_ffi cannot derive canonical wallet addresses");
+    }
+
+    const auto addresses = ffi_backend->derive_wallet_addresses(
+        to_hex(seed),
+        address::network_to_string(network_));
+    if (!addresses.success) {
+        throw std::runtime_error("Canonical Midnight wallet derivation failed: " + addresses.error);
+    }
+
+    night_addr_ = addresses.unshielded;
+    dust_addr_ = addresses.dust;
+    shielded_addr_ = addresses.shielded;
+    state_.unshielded.address = night_addr_;
+    state_.dust.address = dust_addr_;
+    state_.shielded.address = shielded_addr_;
+    return true;
 }
 
 // ─── Factory Methods ─────────────────────────────────────────
@@ -52,7 +90,9 @@ WalletFacade WalletFacade::from_mnemonic(
     address::Network network)
 {
     auto hd = HDWallet::from_mnemonic(mnemonic);
-    return from_wallet(hd, indexer_url, network);
+    auto facade = from_wallet(hd, indexer_url, network);
+    facade.apply_official_addresses(hd.master_seed(), {}, true);
+    return facade;
 }
 
 WalletFacade WalletFacade::from_wallet(
@@ -108,8 +148,13 @@ WalletFacade WalletFacade::from_mnemonic_with_config(
     const std::string& mnemonic,
     const WalletFacadeConfig& config)
 {
-    auto facade = from_mnemonic(mnemonic, config.indexer_http_url, config.network);
+    auto hd = HDWallet::from_mnemonic(mnemonic);
+    auto facade = from_wallet(hd, config.indexer_http_url, config.network);
     facade.coin_strategy_ = config.coin_selection;
+    facade.apply_official_addresses(
+        hd.master_seed(),
+        config.ledger_ffi_library,
+        config.require_canonical_wallet_derivation);
 
     // Initialize services if URLs provided
     if (!config.relay_url.empty()) {
@@ -259,10 +304,11 @@ std::vector<UtxoWithMeta> WalletFacade::select_coins(
             // Fisher-Yates shuffle for random selection using crypto-secure random
             // Fix: was using std::rand() which is not cryptographically secure
             std::vector<UtxoWithMeta> shuffled = candidates;
-            for (size_t i = shuffled.size() - 1; i > 0; --i) {
+            for (size_t i = shuffled.size(); i > 1; --i) {
                 // Use libsodium's crypto-secure randombytes_uniform for unbiased random index
-                size_t j = randombytes_uniform(i + 1);
-                if (j != i) std::swap(shuffled[i], shuffled[j]);
+                const size_t current = i - 1;
+                size_t j = randombytes_uniform(i);
+                if (j != current) std::swap(shuffled[current], shuffled[j]);
             }
             // Accumulate random UTXOs until target is reached
             std::vector<UtxoWithMeta> selected;
@@ -415,82 +461,6 @@ TermsAndConditions WalletFacade::fetch_terms_and_conditions(const std::string& i
     }
 
     return tc;
-}
-
-// ─── Transaction Balancing (SDK #8) ──────────────────────────
-
-// Helper: create a balancing transaction JSON for the given inputs
-static json create_balancing_tx(
-    const json& original_tx,
-    const std::string& sender_addr,
-    uint64_t fee,
-    std::chrono::system_clock::time_point ttl)
-{
-    json bal_tx;
-    bal_tx["type"] = "balancing_transaction";
-    bal_tx["original_tx_hash"] = original_tx.value("tx_hash", "");
-    bal_tx["sender"] = sender_addr;
-    bal_tx["fee"] = fee;
-
-    auto ttl_sec = std::chrono::duration_cast<std::chrono::seconds>(
-                       ttl.time_since_epoch()).count();
-    bal_tx["ttl"] = ttl_sec;
-
-    // Hash the balancing TX
-    std::string tx_str = bal_tx.dump();
-    std::vector<uint8_t> tx_bytes(tx_str.begin(), tx_str.end());
-    uint8_t hash[crypto_hash_sha256_BYTES];
-    crypto_hash_sha256(hash, tx_bytes.data(), tx_bytes.size());
-
-    std::ostringstream oss;
-    for (size_t i = 0; i < crypto_hash_sha256_BYTES; ++i)
-        oss << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(hash[i]);
-    bal_tx["tx_hash"] = oss.str();
-
-    return bal_tx;
-}
-
-// Helper: merge two JSON transactions (SDK: mergeUnprovenTransactions)
-static json merge_transactions(const json& a, const json& b) {
-    if (a.is_null()) return b;
-    if (b.is_null()) return a;
-
-    json merged = a;
-    merged["merged_with"] = b.value("tx_hash", "");
-
-    // Combine inputs/outputs if present, handling both array and object types
-    auto merge_field = [&](const std::string& field) {
-        if (a.contains(field) && b.contains(field)) {
-            auto& target = merged[field];
-            const auto& source = b[field];
-            if (target.is_array() && source.is_array()) {
-                // Array: append items
-                for (const auto& item : source) {
-                    target.push_back(item);
-                }
-            } else if (target.is_object() && source.is_object()) {
-                // Object: merge key-value pairs (sum values for numeric)
-                for (auto& [key, val] : source.items()) {
-                    if (target.contains(key) && target[key].is_number() && val.is_number()) {
-                        target[key] = target[key].get<uint64_t>() + val.get<uint64_t>();
-                    } else {
-                        target[key] = val;
-                    }
-                }
-            }
-            // Mixed types: keep the first, skip merge
-        }
-    };
-
-    merge_field("inputs");
-    merge_field("outputs");
-
-    // Sum fees
-    uint64_t fee_a = a.value("fee", uint64_t(0));
-    uint64_t fee_b = b.value("fee", uint64_t(0));
-    merged["fee"] = fee_a + fee_b;
-
-    return merged;
 }
 
 // ─── Shielded Address ─────────────────────────────────────────
@@ -887,7 +857,14 @@ void WalletFacade::sync() {
         } // rtc destroyed here
 
         // ── Attempt 2: HTTP concurrent block scan ─────────────────────────────────
-        if (!sync_ok) {
+        if (!sync_ok && !env_flag_enabled("MIDNIGHT_ENABLE_FULL_WALLET_SYNC_SCAN")) {
+            midnight::g_logger->warn(
+                "WalletFacade::sync HTTP full-chain scan is disabled by default. "
+                "Use IndexerClient::query_wallet_state_from_transaction(), bounded block queries, "
+                "or set MIDNIGHT_ENABLE_FULL_WALLET_SYNC_SCAN=1 to opt in explicitly.");
+        }
+
+        if (!sync_ok && env_flag_enabled("MIDNIGHT_ENABLE_FULL_WALLET_SYNC_SCAN")) {
             midnight::g_logger->info("Sync attempt 2: HTTP concurrent block scan...");
 
             constexpr uint32_t kMaxConcurrency = 16;   // parallel HTTP workers

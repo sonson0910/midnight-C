@@ -91,6 +91,23 @@ namespace midnight::utxo_transactions
                    context.fee_model.commitment_bytes_per_output *
                    scaled_utxo_cost;
         }
+
+        Utxo to_utxo_transactions_utxo(const midnight::blockchain::UTXO &source)
+        {
+            Utxo utxo;
+            utxo.tx_hash = source.tx_hash;
+            utxo.output_index = source.output_index;
+            utxo.address = source.address;
+            utxo.token_type = source.token_type;
+            utxo.value = std::to_string(source.value);
+            utxo.intent_hash = source.amount_commitment;
+            utxo.amount_commitment = source.amount_commitment;
+            utxo.ctime = source.ctime;
+            utxo.registered_for_dust = source.registered_for_dust_generation;
+            utxo.confirmed_height = source.block_height;
+            utxo.is_spent = false;
+            return utxo;
+        }
     } // namespace
 
     // ============================================================================
@@ -184,150 +201,43 @@ namespace midnight::utxo_transactions
     {
         try
         {
-            if (!indexer_provider_)
-            {
-                throw std::runtime_error("Indexer provider is not configured");
-            }
-            constexpr uint32_t kFirstIndexedBlock = 609178u;
-            uint32_t tip_height = kFirstIndexedBlock;
-
-            const std::string tip_query = R"QUERY(
-            query TipHeight {
-                block { height }
-            }
-            )QUERY";
-
-            auto tip_result = indexer_provider_->execute_query(tip_query);
-            if (tip_result.isMember("data") && tip_result["data"].isMember("block") &&
-                !tip_result["data"]["block"].isNull())
-            {
-                const auto &block = tip_result["data"]["block"];
-                if (block.isMember("height"))
-                {
-                    try
-                    {
-                        if (block["height"].isUInt())
-                        {
-                            tip_height = block["height"].asUInt();
-                        }
-                        else if (block["height"].isString())
-                        {
-                            tip_height = static_cast<uint32_t>(
-                                std::stoul(block["height"].asString()));
-                        }
-                    }
-                    catch (...)
-                    {
-                    }
-                }
-            }
-
-            if (tip_height == 0)
-            {
-                return std::vector<Utxo>{};
-            }
-
-            const uint32_t from_block = tip_height < kFirstIndexedBlock ? 1u : kFirstIndexedBlock;
-
-            const std::string block_query = R"QUERY(
-            query BlockByHeight($height: Int!) {
-                block(offset: { height: $height }) {
-                    height
-                    transactions {
-                        hash
-                        unshieldedCreatedOutputs {
-                            owner
-                            tokenType
-                            value
-                            outputIndex
-                            intentHash
-                            ctime
-                            registeredForDustGeneration
-                            spentAtTransaction {
-                                hash
-                            }
-                        }
-                    }
-                }
-            }
-            )QUERY";
-
+            midnight::network::IndexerClient indexer(indexer_url_, kIndexerRpcTimeoutMs);
+            const auto source_utxos = indexer.query_utxos(address, false);
             std::vector<Utxo> utxos;
-            const std::string normalized_address = midnight::util::to_lower_copy(address);
-
-            for (uint32_t h = from_block; h <= tip_height; ++h)
+            utxos.reserve(source_utxos.size());
+            for (const auto &source : source_utxos)
             {
-                auto result = indexer_provider_->execute_query_with_vars(
-                    block_query, {{"height", static_cast<int>(h)}});
-
-                if (!result.isMember("data") || !result["data"].isMember("block") ||
-                    result["data"]["block"].isNull())
-                {
-                    continue;
-                }
-
-                const auto &block = result["data"]["block"];
-                if (!block.isMember("transactions"))
-                {
-                    continue;
-                }
-
-                const auto &txs = block["transactions"];
-                auto handle_tx = [&](const Json::Value &tx) {
-                    const std::string tx_hash = tx.get("hash", "").asString();
-                    if (!tx.isMember("unshieldedCreatedOutputs"))
-                    {
-                        return;
-                    }
-                    for (const auto &out : tx["unshieldedCreatedOutputs"])
-                    {
-                        const std::string owner = out.get("owner", "").asString();
-                        if (midnight::util::to_lower_copy(owner) != normalized_address)
-                        {
-                            continue;
-                        }
-
-                        if (out.isMember("spentAtTransaction") &&
-                            !out["spentAtTransaction"].isNull())
-                        {
-                            continue;
-                        }
-
-                        Utxo utxo;
-                        utxo.tx_hash = tx_hash;
-                        utxo.address = owner;
-                        utxo.token_type = out.get("tokenType", "").asString();
-                        utxo.value = out.get("value", "0").asString();
-                        utxo.output_index = out.get("outputIndex", 0).asUInt();
-                        utxo.intent_hash = out.get("intentHash", "").asString();
-                        utxo.amount_commitment = utxo.intent_hash;
-                        utxo.ctime = out.get("ctime", 0).asUInt64();
-                        utxo.registered_for_dust =
-                            out.get("registeredForDustGeneration", false).asBool();
-                        utxo.confirmed_height = block.get("height", h).asUInt();
-                        utxo.is_spent = false;
-                        utxos.push_back(utxo);
-                    }
-                };
-
-                if (txs.isArray())
-                {
-                    for (const auto &tx : txs)
-                    {
-                        handle_tx(tx);
-                    }
-                }
-                else if (txs.isObject())
-                {
-                    handle_tx(txs);
-                }
+                utxos.push_back(to_utxo_transactions_utxo(source));
             }
-
             return utxos;
         }
         catch (const std::exception &e)
         {
             midnight::g_logger->error(std::string("Error querying UTXOs: ") + e.what());
+            return {};
+        }
+    }
+
+    std::optional<std::vector<Utxo>> UtxoSetManager::query_unspent_utxos(
+        const std::string &address,
+        uint32_t from_block,
+        uint32_t to_block)
+    {
+        try
+        {
+            midnight::network::IndexerClient indexer(indexer_url_, kIndexerRpcTimeoutMs);
+            const auto source_utxos = indexer.query_utxos(address, from_block, to_block);
+            std::vector<Utxo> utxos;
+            utxos.reserve(source_utxos.size());
+            for (const auto &source : source_utxos)
+            {
+                utxos.push_back(to_utxo_transactions_utxo(source));
+            }
+            return utxos;
+        }
+        catch (const std::exception &e)
+        {
+            midnight::g_logger->error(std::string("Error querying bounded UTXOs: ") + e.what());
             return {};
         }
     }

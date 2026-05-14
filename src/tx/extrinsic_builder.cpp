@@ -108,7 +108,7 @@ namespace midnight::tx
         return {enc.data().begin(), enc.data().end()};
     }
 
-    std::vector<uint8_t> ExtrinsicBuilder::build_signing_payload(const PalletCall &call)
+    std::vector<uint8_t> ExtrinsicBuilder::build_signing_payload(const PalletCall &call) const
     {
         auto call_data = encode_call(call);
         auto extra = encode_extra();
@@ -135,7 +135,7 @@ namespace midnight::tx
     std::vector<uint8_t> ExtrinsicBuilder::build_signed(
         const PalletCall &call,
         const std::vector<uint8_t> &secret_key_64,
-        const std::vector<uint8_t> &public_key_32)
+        const std::vector<uint8_t> &public_key_32) const
     {
         if (secret_key_64.size() != 64)
             throw std::runtime_error("Secret key must be 64 bytes");
@@ -183,7 +183,7 @@ namespace midnight::tx
         return body.finalize_with_length();
     }
 
-    std::vector<uint8_t> ExtrinsicBuilder::build_unsigned(const PalletCall &call)
+    std::vector<uint8_t> ExtrinsicBuilder::build_unsigned(const PalletCall &call) const
     {
         codec::ScaleEncoder body;
 

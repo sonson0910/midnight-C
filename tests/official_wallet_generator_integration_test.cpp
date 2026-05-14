@@ -3,57 +3,92 @@
  *
  * Tests that the wallet generator produces correct output format
  * with all required address types (unshield, shielded, dust).
- * Uses native HDWallet directly instead of requiring external scripts.
+ * Uses native ledger FFI so generated addresses match midnight-research.
  */
 
 #include <gtest/gtest.h>
 #include "midnight/wallet/hd_wallet.hpp"
+#include "midnight/ledger/ledger_backend.hpp"
 #include <nlohmann/json.hpp>
+#include <cstdlib>
+#include <filesystem>
 #include <string>
 
 using namespace midnight::wallet;
 
+namespace
+{
+std::string configured_ledger_ffi_library()
+{
+    if (const char *value = std::getenv("MIDNIGHT_LEDGER_FFI_LIBRARY"))
+    {
+        return value;
+    }
+#ifdef MIDNIGHT_TEST_LEDGER_FFI_LIBRARY
+    return MIDNIGHT_TEST_LEDGER_FFI_LIBRARY;
+#else
+    return {};
+#endif
+}
+
+midnight::ledger::WalletAddressDerivationResult derive_test_addresses()
+{
+    const auto library = configured_ledger_ffi_library();
+    if (library.empty() || !std::filesystem::exists(library))
+    {
+        midnight::ledger::WalletAddressDerivationResult result;
+        result.error = "missing FFI library";
+        return result;
+    }
+    auto backend = midnight::ledger::make_ffi_ledger_backend(library);
+    auto *ffi_backend = dynamic_cast<midnight::ledger::FfiLedgerBackend *>(backend.get());
+    if (ffi_backend == nullptr || !ffi_backend->can_derive_wallet_addresses())
+    {
+        midnight::ledger::WalletAddressDerivationResult result;
+        result.error = "FFI wallet derivation symbol unavailable";
+        return result;
+    }
+    return ffi_backend->derive_wallet_addresses(
+        "0000000000000000000000000000000000000000000000000000000000000001",
+        "testnet");
+}
+}
+
 TEST(WalletGeneratorOutputTest, GeneratedWallet_ContainsAllKeyTypes)
 {
-    // Generate wallet from a deterministic seed
-    std::string mnemonic = bip39::generate_mnemonic(24);
-    ASSERT_FALSE(mnemonic.empty());
-
-    auto hd = HDWallet::from_mnemonic(mnemonic);
-
-    auto night_key = hd.derive_night(0, 0);
-    auto dust_key = hd.derive_dust(0, 0);
-    auto zswap_key = hd.derive_zswap(0, 0);
+    const auto addresses = derive_test_addresses();
+    if (!addresses.success)
+    {
+        GTEST_SKIP() << addresses.error;
+    }
 
     // All keys should be non-empty
-    EXPECT_FALSE(night_key.address.empty());
-    EXPECT_FALSE(dust_key.address.empty());
-    EXPECT_FALSE(zswap_key.address.empty());
+    EXPECT_FALSE(addresses.unshielded.empty());
+    EXPECT_FALSE(addresses.dust.empty());
+    EXPECT_FALSE(addresses.shielded.empty());
 
     // Keys should be different from each other
-    EXPECT_NE(night_key.address, dust_key.address);
-    EXPECT_NE(night_key.address, zswap_key.address);
-    EXPECT_NE(dust_key.address, zswap_key.address);
+    EXPECT_NE(addresses.unshielded, addresses.dust);
+    EXPECT_NE(addresses.unshielded, addresses.shielded);
+    EXPECT_NE(addresses.dust, addresses.shielded);
 }
 
 TEST(WalletGeneratorOutputTest, OutputJson_ContainsAddressAndDustFields)
 {
-    // Simulate wallet-generator --official-sdk JSON output format
-    std::string mnemonic = bip39::generate_mnemonic(24);
-    auto hd = HDWallet::from_mnemonic(mnemonic);
-
-    auto night_key = hd.derive_night(0, 0);
-    auto dust_key = hd.derive_dust(0, 0);
-    auto zswap_key = hd.derive_zswap(0, 0);
+    const auto addresses = derive_test_addresses();
+    if (!addresses.success)
+    {
+        GTEST_SKIP() << addresses.error;
+    }
 
     // Build the JSON that wallet-generator would produce
     nlohmann::json output;
-    output["unshield"] = night_key.address;
-    output["shielded"] = zswap_key.address;
-    output["dust"] = dust_key.address;
+    output["unshield"] = addresses.unshielded;
+    output["shielded"] = addresses.shielded;
+    output["dust"] = addresses.dust;
     output["dust_registration"] = nlohmann::json{
         {"requested", true},
-        {"address", dust_key.address}};
+        {"address", addresses.dust}};
 
     std::string json_str = output.dump();
 
@@ -69,14 +104,14 @@ TEST(WalletGeneratorOutputTest, OutputJson_ContainsAddressAndDustFields)
 
 TEST(WalletGeneratorOutputTest, DeterministicMnemonic_ProducesSameKeys)
 {
-    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    const auto addresses1 = derive_test_addresses();
+    const auto addresses2 = derive_test_addresses();
+    if (!addresses1.success || !addresses2.success)
+    {
+        GTEST_SKIP() << addresses1.error << addresses2.error;
+    }
 
-    auto hd1 = HDWallet::from_mnemonic(mnemonic);
-    auto hd2 = HDWallet::from_mnemonic(mnemonic);
-
-    auto key1 = hd1.derive_night(0, 0);
-    auto key2 = hd2.derive_night(0, 0);
-
-    EXPECT_EQ(key1.address, key2.address);
-    EXPECT_EQ(key1.public_key, key2.public_key);
+    EXPECT_EQ(addresses1.unshielded, addresses2.unshielded);
+    EXPECT_EQ(addresses1.user_address, addresses2.user_address);
+    EXPECT_EQ(addresses1.verifying_key, addresses2.verifying_key);
 }

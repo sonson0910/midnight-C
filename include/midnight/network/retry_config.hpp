@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <chrono>
+#include <cmath>
 
 namespace midnight::network
 {

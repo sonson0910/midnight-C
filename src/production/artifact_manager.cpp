@@ -70,6 +70,22 @@ namespace midnight::production
             }
             out << content;
         }
+
+        void copy_if_exists(const std::filesystem::path &from,
+                            const std::filesystem::path &dir,
+                            std::vector<std::filesystem::path> &files)
+        {
+            if (from.empty() || !std::filesystem::exists(from))
+            {
+                return;
+            }
+            const auto copied = dir / from.filename();
+            std::filesystem::copy_file(
+                from,
+                copied,
+                std::filesystem::copy_options::overwrite_existing);
+            files.push_back(copied);
+        }
     }
 
     ArtifactManager::ArtifactManager(ArtifactConfig config)
@@ -113,7 +129,13 @@ namespace midnight::production
                 {"operation", operation},
                 {"success", build.success},
                 {"transaction_hash", build.transaction_hash},
+                {"contract_address", build.contract_address},
                 {"output_file", build.output_file},
+                {"intent_path", build.intent_path},
+                {"private_state_path", build.private_state_path},
+                {"zswap_state_path", build.zswap_state_path},
+                {"onchain_state_path", build.onchain_state_path},
+                {"result_path", build.result_path},
                 {"command", build.command},
                 {"error", build.error}};
             write_text_file(result.directory / "metadata.json", metadata.dump(2));
@@ -131,8 +153,13 @@ namespace midnight::production
             }
             if (!build.log.empty())
             {
-                write_text_file(result.directory / "toolkit.log", build.log);
-                result.files.push_back(result.directory / "toolkit.log");
+                write_text_file(result.directory / "ledger.log", build.log);
+                result.files.push_back(result.directory / "ledger.log");
+            }
+            if (!build.raw_output.empty())
+            {
+                write_text_file(result.directory / "ledger-output.json", build.raw_output);
+                result.files.push_back(result.directory / "ledger-output.json");
             }
             if (!build.output_file.empty() && std::filesystem::exists(build.output_file))
             {
@@ -143,6 +170,11 @@ namespace midnight::production
                     std::filesystem::copy_options::overwrite_existing);
                 result.files.push_back(copied);
             }
+            copy_if_exists(build.intent_path, result.directory, result.files);
+            copy_if_exists(build.private_state_path, result.directory, result.files);
+            copy_if_exists(build.zswap_state_path, result.directory, result.files);
+            copy_if_exists(build.onchain_state_path, result.directory, result.files);
+            copy_if_exists(build.result_path, result.directory, result.files);
 
             result.success = true;
         }
@@ -186,8 +218,19 @@ namespace midnight::production
             result.files.push_back(result.directory / "metadata.json");
             if (!intent.log.empty())
             {
-                write_text_file(result.directory / "toolkit.log", intent.log);
-                result.files.push_back(result.directory / "toolkit.log");
+                write_text_file(result.directory / "ledger.log", intent.log);
+                result.files.push_back(result.directory / "ledger.log");
+            }
+            copy_if_exists(intent.output_intent, result.directory, result.files);
+            copy_if_exists(intent.output_private_state, result.directory, result.files);
+            copy_if_exists(intent.output_zswap_state, result.directory, result.files);
+            if (intent.output_onchain_state)
+            {
+                copy_if_exists(*intent.output_onchain_state, result.directory, result.files);
+            }
+            if (intent.output_result)
+            {
+                copy_if_exists(*intent.output_result, result.directory, result.files);
             }
             result.success = true;
         }
@@ -226,6 +269,59 @@ namespace midnight::production
             result.error = {
                 .code = ErrorCode::ArtifactError,
                 .message = "Could not write artifact",
+                .detail = e.what()};
+        }
+        return result;
+    }
+
+    ArtifactSaveResult ArtifactManager::cleanup_nonessential() const
+    {
+        ArtifactSaveResult result;
+        result.success = true;
+        if (!config_.enabled || config_.cleanup_after_days == 0)
+        {
+            return result;
+        }
+
+        try
+        {
+            const auto base =
+                config_.root_dir /
+                sanitize_path_component(config_.network) /
+                sanitize_path_component(config_.wallet_id);
+            if (!std::filesystem::exists(base))
+            {
+                return result;
+            }
+
+            const auto cutoff = std::filesystem::file_time_type::clock::now() -
+                                std::chrono::hours(24 * config_.cleanup_after_days);
+            for (const auto &entry : std::filesystem::recursive_directory_iterator(base))
+            {
+                if (!entry.is_directory())
+                {
+                    continue;
+                }
+                const auto path = entry.path();
+                if (std::filesystem::exists(path / "transaction.mn") ||
+                    std::filesystem::exists(path / "transaction.hex") ||
+                    std::filesystem::exists(path / "metadata.json"))
+                {
+                    continue;
+                }
+                if (std::filesystem::is_empty(path) &&
+                    std::filesystem::last_write_time(path) < cutoff)
+                {
+                    std::filesystem::remove(path);
+                }
+            }
+        }
+        catch (const std::exception &e)
+        {
+            result.success = false;
+            result.error = {
+                .code = ErrorCode::ArtifactError,
+                .message = "Artifact cleanup failed",
                 .detail = e.what()};
         }
         return result;

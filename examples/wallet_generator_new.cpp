@@ -4,11 +4,14 @@
 #include "midnight/wallet/hd_wallet.hpp"
 #include "midnight/wallet/bech32m.hpp"
 #include "midnight/wallet/shielded_address.hpp"
+#include "midnight/ledger/ledger_backend.hpp"
 #include "midnight/core/logger.hpp"
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <cstdlib>
+#include <algorithm>
 
 using namespace midnight;
 using namespace midnight::wallet;
@@ -22,23 +25,49 @@ std::string bytes_to_hex(const std::vector<uint8_t>& bytes) {
     return oss.str();
 }
 
+std::string env_or(const char* name, const std::string& fallback) {
+    if (const char* value = std::getenv(name)) {
+        if (*value) {
+            return value;
+        }
+    }
+    return fallback;
+}
+
+std::string upper_copy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+    return value;
+}
+
 int main() {
     std::cout << "\n";
-    std::string network_name = "PREPROD";
-    std::string network_id = "preprod";
-    std::string indexer_http = "https://indexer.preprod.midnight.network";
-    std::string indexer_ws = "wss://indexer.preprod.midnight.network";
-    std::string node_http = "https://node.preprod.midnight.network";
-    std::string faucet_url = "https://faucet.preprod.midnight.network";
-    auto network_enum = address::Network::PreProd;
+    std::string network_id = env_or("MIDNIGHT_NETWORK", "preview");
+    std::transform(network_id.begin(), network_id.end(), network_id.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    std::string network_name = upper_copy(network_id);
+    std::string indexer_http = env_or(
+        "MIDNIGHT_INDEXER_BASE_URL",
+        "https://indexer." + network_id + ".midnight.network");
+    std::string indexer_ws = env_or(
+        "MIDNIGHT_INDEXER_WS_BASE_URL",
+        "wss://indexer." + network_id + ".midnight.network");
+    std::string node_http = env_or(
+        "MIDNIGHT_NODE_URL",
+        "https://rpc." + network_id + ".midnight.network");
+    std::string faucet_url = env_or(
+        "MIDNIGHT_FAUCET_URL",
+        "https://faucet." + network_id + ".midnight.network");
 
     std::cout << "╔════════════════════════════════════════════════════════════════╗\n";
     std::cout << "║                                                                ║\n";
-    std::cout << "║          MIDNIGHT WALLET GENERATOR - PREPROD NETWORK         ║\n";
+    std::cout << "║              MIDNIGHT WALLET GENERATOR                       ║\n";
     std::cout << "║                                                                ║\n";
     std::cout << "╚════════════════════════════════════════════════════════════════╝\n";
     std::cout << "\n";
-    std::cout << "Network:     PREPROD\n";
+    std::cout << "Network:     " << network_name << "\n";
     std::cout << "Indexer:    " << indexer_http << "\n";
     std::cout << "Faucet:     " << faucet_url << "\n";
     std::cout << "\n";
@@ -55,58 +84,56 @@ int main() {
         }
         std::cout << "✓ Mnemonic generated and validated\n\n";
 
-        // ─── Step 2: Create HDWallet from mnemonic ──────────────────────────────
-        std::cout << "[2/5] Creating HD wallet from mnemonic...\n";
+        // ─── Step 2: Create BIP39 seed ────────────────────────────────────────
+        std::cout << "[2/5] Creating BIP39 seed...\n";
         auto wallet = HDWallet::from_mnemonic(mnemonic, "");
-        std::cout << "✓ HD wallet created (seed: " << wallet.master_seed().size() << " bytes)\n\n";
+        const std::string seed_hex = bytes_to_hex(wallet.master_seed());
+        std::cout << "✓ Seed created (" << wallet.master_seed().size() << " bytes)\n\n";
 
-        // ─── Step 3: Derive NIGHT address ──────────────────────────────────────
-        std::cout << "[3/5] Deriving NIGHT address (path: m/44'/2400'/0'/0/0)...\n";
-        auto night_key = wallet.derive_night(0, 0);
+        std::cout << "[3/5] Loading native Midnight ledger FFI...\n";
+        std::string ffi_library;
+        if (const char* env = std::getenv("MIDNIGHT_LEDGER_FFI_LIBRARY")) {
+            ffi_library = env;
+        }
+#ifdef MIDNIGHT_EXAMPLE_LEDGER_FFI_LIBRARY
+        if (ffi_library.empty()) {
+            ffi_library = MIDNIGHT_EXAMPLE_LEDGER_FFI_LIBRARY;
+        }
+#endif
+        auto backend = midnight::ledger::make_ffi_ledger_backend(ffi_library);
+        auto* ffi_backend = dynamic_cast<midnight::ledger::FfiLedgerBackend*>(backend.get());
+        if (ffi_backend == nullptr || !ffi_backend->is_available() || !ffi_backend->can_derive_wallet_addresses()) {
+            std::cerr << "✗ Error: libmidnight_ledger_ffi is required for production-canonical wallet addresses.\n";
+            if (ffi_backend != nullptr && !ffi_backend->last_error().empty()) {
+                std::cerr << "  " << ffi_backend->last_error() << "\n";
+            }
+            std::cerr << "  Set MIDNIGHT_LEDGER_FFI_LIBRARY or build with MIDNIGHT_BUILD_LEDGER_FFI=ON.\n";
+            return 1;
+        }
+        std::cout << "✓ Native ledger FFI loaded\n\n";
 
-        // Create Bech32m address for Night
-        std::string night_address = address::encode_unshielded(
-            night_key.public_key,
-            network_enum
-        );
+        // ─── Step 4: Derive canonical Midnight addresses ──────────────────────
+        std::cout << "[4/5] Deriving canonical wallet addresses from ledger helpers...\n";
+        const auto addresses = ffi_backend->derive_wallet_addresses(seed_hex, network_id);
+        if (!addresses.success) {
+            std::cerr << "✗ Error: " << addresses.error << "\n";
+            return 1;
+        }
+
+        std::string night_address = addresses.unshielded;
+        std::string dust_address = addresses.dust;
+        std::string shielded_address = addresses.shielded;
 
         std::cout << "✓ NIGHT Address: " << night_address << "\n";
-        std::cout << "  Public Key:   " << bytes_to_hex(night_key.public_key) << "\n";
-        std::cout << "  Private Key:   [64 bytes - DO NOT SHARE]\n\n";
-
-        // ─── Step 4: Derive DUST address ────────────────────────────────────────
-        std::cout << "[4/5] Deriving DUST address (path: m/44'/2400'/0'/2/0)...\n";
-        auto dust_key = wallet.derive_dust(0, 0);
-
-        // Create Bech32m address for Dust
-        std::string dust_address = address::encode_dust(
-            dust_key.public_key,
-            network_enum
-        );
-
+        std::cout << "  User Address: " << addresses.user_address << "\n";
+        std::cout << "  Verifying Key: " << addresses.verifying_key << "\n\n";
         std::cout << "✓ DUST Address: " << dust_address << "\n";
-        std::cout << "  Public Key:  " << bytes_to_hex(dust_key.public_key) << "\n";
-        std::cout << "  Private Key:  [64 bytes - DO NOT SHARE]\n\n";
-
-        // ─── Step 5: Derive Shielded address ────────────────────────────────────
-        std::cout << "[5/5] Deriving Shielded address (path: m/44'/2400'/0'/3/0)...\n";
-        auto shielded_key = wallet.derive_zswap(0, 0);
-
-        // Derive encryption key for shielded
-        std::vector<uint8_t> enc_pub_key = wallet.derive_shielded_encryption_key(shielded_key.secret_key);
-
-        // Create shielded address
-        std::string shielded_address = address::encode_shielded(
-            shielded_key.public_key,
-            enc_pub_key,
-            network_enum
-        );
-
+        std::cout << "  Dust Public: " << addresses.dust_public << "\n\n";
         std::cout << "✓ Shielded Address: " << shielded_address << "\n";
-        std::cout << "  Coin Public Key:       " << bytes_to_hex(shielded_key.public_key) << "\n";
-        std::cout << "  Encryption Public Key:  " << bytes_to_hex(enc_pub_key) << "\n\n";
+        std::cout << "  Coin Public Key: " << addresses.coin_public << "\n\n";
 
-        // ─── Save to JSON file ──────────────────────────────────────────────────
+        // ─── Step 5: Save to JSON file ─────────────────────────────────────────
+        std::cout << "[5/5] Saving wallet file...\n";
         std::ostringstream json;
         json << "{\n";
         json << "  \"config\": {\n";
@@ -120,20 +147,20 @@ int main() {
         json << "    \"dust\": \"m/44'/2400'/0'/2/0\",\n";
         json << "    \"shielded\": \"m/44'/2400'/0'/3/0\"\n";
         json << "  },\n";
-        json << "  \"network\": \"preprod\",\n";
+        json << "  \"network\": \"" << network_id << "\",\n";
         json << "  \"mnemonic\": \"" << mnemonic << "\",\n";
+        json << "  \"seed_hex\": \"" << seed_hex << "\",\n";
         json << "  \"night_address\": \"" << night_address << "\",\n";
-        json << "  \"night_sk\": \"" << bytes_to_hex(night_key.secret_key) << "\",\n";
-        json << "  \"night_pk\": \"" << bytes_to_hex(night_key.public_key) << "\",\n";
+        json << "  \"night_user_address\": \"" << addresses.user_address << "\",\n";
+        json << "  \"night_verifying_key\": \"" << addresses.verifying_key << "\",\n";
         json << "  \"dust_address\": \"" << dust_address << "\",\n";
-        json << "  \"dust_sk\": \"" << bytes_to_hex(dust_key.secret_key) << "\",\n";
-        json << "  \"dust_pk\": \"" << bytes_to_hex(dust_key.public_key) << "\",\n";
+        json << "  \"dust_public\": \"" << addresses.dust_public << "\",\n";
         json << "  \"shielded_address\": \"" << shielded_address << "\",\n";
-        json << "  \"shielded_coin_public_key\": \"" << bytes_to_hex(shielded_key.public_key) << "\",\n";
-        json << "  \"shielded_encryption_public_key\": \"" << bytes_to_hex(enc_pub_key) << "\"\n";
+        json << "  \"shielded_coin_public_key\": \"" << addresses.coin_public << "\",\n";
+        json << "  \"shielded_coin_public_key_tagged\": \"" << addresses.coin_public_tagged << "\"\n";
         json << "}\n";
 
-        std::string filename = "wallet_preprod.json";
+        std::string filename = "wallet_" + network_id + ".json";
         std::ofstream out(filename);
         if (out.is_open()) {
             out << json.str();
@@ -158,7 +185,7 @@ int main() {
         std::cout << "═══════════════════════════════════════════════════════════════════\n";
         std::cout << "                    WALLET SUMMARY                               \n";
         std::cout << "═══════════════════════════════════════════════════════════════════\n";
-        std::cout << "  Network:     PREPROD\n";
+        std::cout << "  Network:     " << network_name << "\n";
         std::cout << "  NIGHT:       " << night_address << "\n";
         std::cout << "  DUST:         " << dust_address << "\n";
         std::cout << "  SHIELDED:     " << shielded_address << "\n\n";

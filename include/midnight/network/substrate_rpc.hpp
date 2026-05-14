@@ -5,10 +5,12 @@
 #include "midnight/tx/extrinsic_builder.hpp"
 #include "midnight/wallet/hd_wallet.hpp"
 #include "midnight/network/rate_limiter.hpp"
+#include "midnight/network/retry_config.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 #include <optional>
+#include <memory>
 
 namespace midnight::network
 {
@@ -280,10 +282,9 @@ namespace midnight::network
         std::optional<RuntimeVersion> cached_runtime_version_;
         std::optional<std::string> cached_genesis_hash_;
 
-        /// Rate limiting and resilience
-        /// TODO: Wire resilience primitives into rpc_call()
-        /// Currently declared but not active - needs integration with retry logic
+        /// Rate limiting and resilience for JSON-RPC calls.
         std::shared_ptr<RateLimiter> rate_limiter_;
+        RetryConfig retry_config_;
         std::shared_ptr<ExponentialBackoff> backoff_;
         std::shared_ptr<CircuitBreaker> circuit_breaker_;
 

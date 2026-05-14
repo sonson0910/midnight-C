@@ -14,9 +14,9 @@
 ### 2. **Midnight Blockchain Support**
 
 - Midnight chain management
-- Cryptocurrency wallet management with HD key derivation
-- Transaction building and signing
-- UTXO and multi-asset management
+- Production-canonical wallet address derivation through native `libmidnight_ledger_ffi`
+- Transaction build/prove/serialize through the Midnight ledger backend
+- UTXO, block, transaction, contract-state, inclusion, and finality queries
 - Distributed integration and on-chain operations
 
 ### 3. **Session & Configuration Management**
@@ -58,29 +58,26 @@ cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_BLOCKCHAIN=ON ..
 cmake --build . --config Release
 ```
 
-### Create a Wallet
+### Production Midnight Setup
 
-```cpp
-#include "midnight/blockchain/wallet.hpp"
-#include <iostream>
+Production wallet and transaction flows require the native ledger FFI built from
+`midnight-research` so address derivation, proof payloads, transaction bytes,
+and hashes stay canonical.
 
-int main() {
-    // Create a wallet from mnemonic
-    midnight::blockchain::Wallet wallet;
-    wallet.create_from_mnemonic("your mnemonic words here...", "");
+```bash
+export MIDNIGHT_NETWORK=preview
+export MIDNIGHT_LEDGER_FFI_LIBRARY="$PWD/build/lib/libmidnight_ledger_ffi.dylib"
+export MIDNIGHT_NODE_URL="https://rpc.preview.midnight.network"
+export MIDNIGHT_SOURCE_URL="wss://rpc.preview.midnight.network"
+export MIDNIGHT_INDEXER_URL="https://indexer.preview.midnight.network/api/v4/graphql"
+export MIDNIGHT_PROOF_SERVER_URL="http://127.0.0.1:6300"
 
-    // Get wallet address
-    std::string address = wallet.get_address();
-    std::cout << "Address: " << address << std::endl;
-
-    // Connect to Midnight network and query balance
-    midnight::blockchain::MidnightBlockchain blockchain;
-    blockchain.initialize("preprod", {});
-    blockchain.connect("https://rpc.preprod.midnight.network");
-
-    return 0;
-}
+./build/bin/wallet-generator-new
 ```
+
+`midnight::blockchain::Wallet` is retained for encrypted seed storage and legacy
+compatibility. It must not be used to produce production Midnight transactions.
+Use `midnight::production::MidnightClient` for build, submit, and confirmation.
 
 ## Module Quick Start (2–6)
 
@@ -92,9 +89,9 @@ Switch between networks, query the chain, submit and confirm transactions.
 #include "midnight/network/midnight_node_rpc.hpp"
 #include "midnight/network/network_config.hpp"
 
-// Pick a network: DEVNET | TESTNET | MAINNET
+// Pick a network: DEVNET | PREVIEW | PREPROD | MAINNET
 auto endpoint = midnight::network::NetworkConfig::get_rpc_endpoint(
-    midnight::network::NetworkConfig::Network::TESTNET);
+    midnight::network::NetworkConfig::Network::PREVIEW);
 
 midnight::network::MidnightNodeRPC rpc(endpoint, /*timeout_ms=*/5000);
 
@@ -102,8 +99,9 @@ if (rpc.is_ready()) {
     auto [height, hash] = rpc.get_chain_tip();
     std::cout << "tip: " << height << " " << hash << "\n";
 
-    // Broadcast a signed tx (CBOR hex)
-    std::string tx_id = rpc.submit_transaction(tx_hex);
+    // Broadcast ledger-serialized Midnight transaction bytes as
+    // Midnight::send_mn_transaction.
+    std::string tx_id = rpc.submit_transaction(transaction_hex);
 
     // Block until confirmed (max 10 blocks, ~60 s)
     bool ok = rpc.wait_for_confirmation(tx_id, 10);
@@ -192,25 +190,19 @@ auto state = client.query_contract_state(contract_hex);
 
 ### 6 — Production Transaction Building
 
-The C++ library builds production transactions by delegating to the official
-`midnight-node-toolkit` from `midnight-research/midnight-node/util/toolkit`.
-The returned `.mn` file is parsed as `SerializedTx`, the raw tagged
-`tx.Midnight` bytes are wrapped as `Midnight::send_mn_transaction`, then
-submitted via `author_submitExtrinsic`. The production pipeline can also save
-artifacts and wait until the indexer sees the ledger transaction hash.
+The C++ production path uses a native Midnight ledger backend loaded through a
+small C ABI (`libmidnight_ledger_ffi`). The backend returns canonical serialized
+Midnight ledger transaction bytes; C++ then wraps them as
+`Midnight::send_mn_transaction`, submits through `author_submitExtrinsic`, saves
+artifacts, and waits until the indexer sees the ledger transaction hash.
 
 ```cpp
 #include "midnight/production/midnight_client.hpp"
 
-midnight::production::ClientConfig config;
-config.node_url = "https://rpc.preprod.midnight.network";
-config.indexer_url = "https://indexer.preprod.midnight.network/api/v4/graphql";
-config.proof_server_url = "http://127.0.0.1:6300";
+auto config = midnight::production::ClientConfig::for_network(
+    midnight::network::NetworkConfig::Network::PREPROD);
+config.ledger_ffi_library = "/absolute/path/to/libmidnight_ledger_ffi.dylib";
 midnight::production::MidnightClient client(config);
-
-midnight::ledger::ToolkitConfig toolkit;
-toolkit.toolkit_binary = "midnight-node-toolkit";
-toolkit.proof_server_url = "http://127.0.0.1:6300";
 
 midnight::ledger::TransferNightParams tx;
 tx.source.src_url = "wss://rpc.preprod.midnight.network";
@@ -219,7 +211,6 @@ tx.destination_addresses = {"mn_addr_preprod1..."};
 tx.amount = "1000000000"; // u128 decimal string
 
 midnight::production::PipelineOptions options;
-options.toolkit = toolkit;
 options.artifacts.root_dir = "midnight-artifacts";
 options.artifacts.network = "preprod";
 options.artifacts.wallet_id = "wallet-a";
@@ -228,7 +219,64 @@ auto result = client.transfer_night(options, tx);
 if (!result.success) {
     throw std::runtime_error(result.error.message + ": " + result.error.detail);
 }
+
+auto included = client.wait_for_inclusion(result.transaction.build.transaction_hash);
+auto finalized = client.wait_for_finality(result.transaction.build.transaction_hash);
 ```
+
+For applications, prefer `ClientConfig::from_environment()` when endpoints need
+to be customized without recompiling. It reads `MIDNIGHT_NETWORK`,
+`MIDNIGHT_NODE_URL`, `MIDNIGHT_INDEXER_URL`, `MIDNIGHT_PROOF_SERVER_URL`,
+`MIDNIGHT_LEDGER_FFI_LIBRARY`, and timeout overrides.
+
+The required native backend ABI is documented in
+`include/midnight/ledger/ledger_ffi.h`. This repository now includes a native
+Rust `cdylib` implementation at
+`midnight-research/midnight-node/util/ledger-ffi`; it links directly against the
+Midnight ledger/toolkit crates and does not shell out to `midnight-node-toolkit`.
+When Rust/Cargo is installed, CMake builds it automatically with
+`MIDNIGHT_BUILD_LEDGER_FFI=ON`, or you can build only the backend:
+
+```bash
+cargo build \
+  --manifest-path midnight-research/midnight-node/Cargo.toml \
+  --package midnight-ledger-ffi \
+  --release
+```
+
+Use the resulting `libmidnight_ledger_ffi.dylib`/`.so`/`.dll` as
+`ClientConfig::ledger_ffi_library`.
+
+Live submit verification is intentionally gated and never runs by default:
+
+```bash
+export MIDNIGHT_RUN_LIVE_SUBMIT_TESTS=1
+export MIDNIGHT_LEDGER_FFI_LIBRARY="$PWD/build_codex_verify_full/midnight-ledger-ffi/release/libmidnight_ledger_ffi.dylib"
+export MIDNIGHT_LIVE_NODE_URL="https://rpc.preprod.midnight.network"
+export MIDNIGHT_LIVE_SOURCE_URL="wss://rpc.preprod.midnight.network"
+export MIDNIGHT_LIVE_SOURCE_SEED="<wallet-seed-hex>"
+export MIDNIGHT_LIVE_DESTINATION_ADDRESS="mn_addr_preprod1..."
+export MIDNIGHT_LIVE_AMOUNT="1000000000"
+ctest --test-dir build_codex_verify_full --output-on-failure
+```
+
+Optional live-test overrides: `MIDNIGHT_LIVE_INDEXER_URL`,
+`MIDNIGHT_LIVE_PROOF_SERVER_URL`, `MIDNIGHT_LIVE_FETCH_CACHE`,
+`MIDNIGHT_LIVE_LEDGER_STATE_DB`, `MIDNIGHT_LIVE_ARTIFACT_DIR`,
+`MIDNIGHT_LIVE_WALLET_ID`, and `MIDNIGHT_LIVE_CONFIRMATION_TIMEOUT_MS`.
+
+For an interactive preprod flow, use the helper script:
+
+```bash
+tools/midnight-preprod-live.sh generate-wallet
+# Paste the printed NIGHT address into https://faucet.preprod.midnight.network/
+# Start your proof server, then:
+tools/midnight-preprod-live.sh register-dust
+tools/midnight-preprod-live.sh transfer-night
+```
+
+Wallet secrets are written under `.secrets/midnight-preprod/`, which is ignored
+by git.
 
 ---
 
@@ -304,6 +352,12 @@ cmake --build . --config Release
 
 # Install (optional)
 cmake --install .
+
+# Consumer projects can use either:
+#   find_package(midnight CONFIG REQUIRED)
+#   target_link_libraries(app PRIVATE midnight::midnight-core)
+# or pkg-config:
+#   pkg-config --cflags --libs midnight
 ```
 
 ## Run Examples
@@ -326,7 +380,7 @@ cmake --build . --target midnight-examples
 ./bin/http_connectivity_test
 
 # Production ledger transaction pipeline
-# Requires midnight-node-toolkit built from midnight-research/midnight-node/util/toolkit.
+# Requires a native libmidnight_ledger_ffi backend.
 ./bin/production_transactions_example
 ```
 
@@ -347,7 +401,7 @@ ctest --output-on-failure
 - ✅ Protocol clients (MQTT, CoAP, HTTP, WebSocket)
 - ✅ Indexer v4 wallet, UTXO, transaction, and block queries
 - ✅ Node JSON-RPC submission for ledger-built Midnight transactions
-- ✅ Production transaction builder bridge through `midnight-node-toolkit`
+- ✅ Production transaction builder abstraction through native ledger FFI
 - ✅ DUST registration, NIGHT transfer, Compact deploy/call, custom intent submission
 - ✅ Artifact saving and indexer confirmation pipeline
 - ⏳ Optional protocol integrations such as CoAPS/DTLS

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <cstdlib>
 #include <limits>
 #include <map>
 #include <set>
@@ -34,6 +35,15 @@ bool is_night_token_type(const std::string &token_type) {
          to_lower_copy(strip_hex_prefix(token_type)) == kNightTokenType;
 }
 
+bool env_flag_enabled(const char *name) {
+  const char *value = std::getenv(name);
+  if (value == nullptr || *value == '\0')
+    return false;
+  const std::string normalized = to_lower_copy(value);
+  return normalized == "1" || normalized == "true" || normalized == "yes" ||
+         normalized == "on";
+}
+
 uint64_t parse_u64_string(const json &value) {
   try {
     if (value.is_number_unsigned())
@@ -59,6 +69,74 @@ uint64_t parse_u64_string(const json &value) {
   } catch (...) {
   }
   return 0;
+}
+
+void append_utxos_from_transaction_json(std::vector<blockchain::UTXO> &utxos,
+                                        const std::string &address,
+                                        const json &tx,
+                                        uint32_t fallback_block_height = 0) {
+  if (!tx.is_object() || !tx.contains("unshieldedCreatedOutputs") ||
+      tx["unshieldedCreatedOutputs"].is_null())
+    return;
+
+  uint32_t block_height = fallback_block_height;
+  if (tx.contains("block") && tx["block"].is_object() &&
+      !tx["block"].is_null()) {
+    block_height = static_cast<uint32_t>(tx["block"].value("height", 0ULL));
+  }
+
+  const std::string normalized_address = to_lower_copy(address);
+  const std::string tx_hash = tx.value("hash", "");
+
+  for (const auto &out : tx["unshieldedCreatedOutputs"]) {
+    if (to_lower_copy(out.value("owner", "")) != normalized_address)
+      continue;
+    if (out.contains("spentAtTransaction") &&
+        !out["spentAtTransaction"].is_null())
+      continue;
+
+    blockchain::UTXO utxo;
+    utxo.tx_hash = tx_hash;
+    utxo.output_index = out.value("outputIndex", 0u);
+    utxo.value = parse_u64_string(out.value("value", json("0")));
+    utxo.address = out.value("owner", address);
+    utxo.token_type = out.value("tokenType", "");
+    utxo.amount_commitment = out.value("intentHash", "");
+    utxo.block_height = block_height;
+    utxo.ctime = parse_u64_string(out.value("ctime", json(0)));
+    utxo.initial_nonce = out.value("initialNonce", "");
+    utxo.registered_for_dust_generation =
+        out.value("registeredForDustGeneration", false);
+    utxos.push_back(std::move(utxo));
+  }
+}
+
+WalletState wallet_state_from_utxos(const std::string &address,
+                                    const std::vector<blockchain::UTXO> &utxos) {
+  WalletState state;
+  state.address = address;
+
+  uint64_t total_night = 0;
+  uint64_t total_dust = 0;
+  uint64_t dust_registered_utxos = 0;
+
+  for (const auto &utxo : utxos) {
+    if (is_night_token_type(utxo.token_type) || utxo.token_type == "NIGHT") {
+      total_night += utxo.value;
+    } else if (utxo.token_type == "DUST") {
+      total_dust += utxo.value;
+    }
+    if (utxo.registered_for_dust_generation) {
+      dust_registered_utxos++;
+    }
+  }
+
+  state.unshielded_balance = std::to_string(total_night);
+  state.dust_balance = std::to_string(total_dust);
+  state.available_utxo_count = static_cast<uint32_t>(utxos.size());
+  state.dust_registered_utxo_count = dust_registered_utxos;
+  state.synced = true;
+  return state;
 }
 } // namespace
 
@@ -276,38 +354,17 @@ WalletState IndexerClient::query_wallet_state(const std::string &address,
 
   try {
     auto utxos = query_utxos(address, use_cache);
-
-    uint64_t total_night = 0;
-    uint64_t total_dust = 0;
-    uint64_t dust_registered_utxos = 0;
-
-    for (const auto &utxo : utxos) {
-      // Use the decrypted value from the UTXO
-      if (is_night_token_type(utxo.token_type) || utxo.token_type == "NIGHT") {
-        total_night += utxo.value;
-      } else if (utxo.token_type == "DUST") {
-        total_dust += utxo.value;
-      }
-      if (utxo.registered_for_dust_generation) {
-        dust_registered_utxos++;
-      }
-    }
-
-    state.unshielded_balance = std::to_string(total_night);
-    state.dust_balance = std::to_string(total_dust);
-    state.available_utxo_count = static_cast<uint32_t>(utxos.size());
-    state.dust_registered_utxo_count = dust_registered_utxos;
-    state.synced = true;
+    state = wallet_state_from_utxos(address, utxos);
 
     midnight::g_logger->info("Wallet state for " + address.substr(0, 20) +
-                             "...: " + std::to_string(total_night) +
-                             " NIGHT, " + std::to_string(total_dust) +
+                             "...: " + state.unshielded_balance +
+                             " NIGHT, " + state.dust_balance +
                              " DUST, " + std::to_string(utxos.size()) +
                              " UTXOs");
 
-    if (dust_registered_utxos > 0) {
+    if (state.dust_registered_utxo_count > 0) {
       midnight::g_logger->info("Dust generation UTXOs registered: " +
-                               std::to_string(dust_registered_utxos));
+                               std::to_string(state.dust_registered_utxo_count));
     }
 
     if (use_cache && cache_enabled_) {
@@ -330,6 +387,20 @@ WalletState IndexerClient::query_wallet_state(const std::string &address,
   }
 
   return state;
+}
+
+WalletState
+IndexerClient::query_wallet_state_from_transaction(const std::string &address,
+                                                   const std::string &tx_hash) {
+  return wallet_state_from_utxos(address,
+                                 query_utxos_from_transaction(address, tx_hash));
+}
+
+WalletState IndexerClient::query_wallet_state(const std::string &address,
+                                              uint32_t from_block,
+                                              uint32_t to_block) {
+  return wallet_state_from_utxos(address,
+                                 query_utxos(address, from_block, to_block));
 }
 
 // ────────────────────────────────────────────────
@@ -366,6 +437,15 @@ IndexerClient::query_utxos(const std::string &address, bool use_cache) {
       }
       return result;
     }
+  }
+
+  if (!env_flag_enabled("MIDNIGHT_ENABLE_FULL_UTXO_SCAN")) {
+    throw std::runtime_error(
+        "IndexerClient::query_utxos(address) would require a historical block "
+        "scan. Use query_utxos(address, from_block, to_block), "
+        "query_utxos_from_transaction(address, tx_hash), a persisted wallet "
+        "sync cache, or set MIDNIGHT_ENABLE_FULL_UTXO_SCAN=1 for explicit "
+        "debug-only scanning.");
   }
 
   uint32_t tip_height = FIRST_INDEXED_BLOCK;
@@ -406,6 +486,19 @@ IndexerClient::query_utxos(const std::string &address, bool use_cache) {
     utxo_cache_[address] = {cache_data, std::chrono::steady_clock::now()};
   }
 
+  return utxos;
+}
+
+std::vector<blockchain::UTXO>
+IndexerClient::query_utxos_from_transaction(const std::string &address,
+                                            const std::string &tx_hash) {
+  std::vector<blockchain::UTXO> utxos;
+  const auto tx = query_transaction(tx_hash);
+  if (!tx.is_object() || tx.empty()) {
+    throw std::runtime_error("transaction not found or indexer query failed: " +
+                             tx_hash);
+  }
+  append_utxos_from_transaction_json(utxos, address, tx);
   return utxos;
 }
 
@@ -475,8 +568,6 @@ IndexerClient::scan_utxos_internal(const std::string &address,
                           : std::vector<json>{txns};
 
       for (const auto &tx : tx_list) {
-        const std::string tx_hash = tx.value("hash", "");
-
         if (!tx.contains("unshieldedCreatedOutputs") ||
             tx["unshieldedCreatedOutputs"].is_null())
           continue;
@@ -491,21 +582,8 @@ IndexerClient::scan_utxos_internal(const std::string &address,
             spent_for_address++;
             continue;
           }
-
-          blockchain::UTXO utxo;
-          utxo.tx_hash = tx_hash;
-          utxo.output_index = out.value("outputIndex", 0u);
-          utxo.value = parse_u64_string(out.value("value", json("0")));
-          utxo.address = out.value("owner", address);
-          utxo.token_type = out.value("tokenType", "");
-          utxo.amount_commitment = out.value("intentHash", "");
-          utxo.block_height = h;
-          utxo.ctime = parse_u64_string(out.value("ctime", json(0)));
-          utxo.initial_nonce = out.value("initialNonce", "");
-          utxo.registered_for_dust_generation =
-              out.value("registeredForDustGeneration", false);
-          utxos.push_back(std::move(utxo));
         }
+        append_utxos_from_transaction_json(utxos, address, tx, h);
       }
 
       if (blocks_scanned % 500 == 0) {

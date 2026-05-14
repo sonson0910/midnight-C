@@ -747,6 +747,10 @@ namespace midnight::protocols::grpc
             if (indexer_)
             {
                 auto state = indexer_->query_wallet_state(address);
+                if (!state.error.empty())
+                {
+                    return Status(grpc::StatusCode::FAILED_PRECONDITION, state.error);
+                }
                 balance = state.unshielded_balance.empty() ? 0 : std::stoull(state.unshielded_balance);
                 dust = state.dust_balance.empty() ? 0 : std::stoull(state.dust_balance);
             }
@@ -765,6 +769,7 @@ namespace midnight::protocols::grpc
             {
                 logger->error(std::string("GetBalance error: ") + e.what());
             }
+            return Status(grpc::StatusCode::FAILED_PRECONDITION, e.what());
         }
 
         return Status::OK;

@@ -2,9 +2,9 @@
 
 #include "midnight/network/indexer_client.hpp"
 #include "midnight/network/midnight_node_rpc.hpp"
+#include "midnight/ledger/ledger_backend.hpp"
 #include "midnight/zk/proof_server_client.hpp"
 #include "midnight/zk/proof_types.hpp"
-#include "midnight/crypto/ed25519_signer.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
 #include <memory>
@@ -24,6 +24,7 @@ namespace midnight::contracts
         std::string indexer_url;        ///< Indexer GraphQL URL
         std::string proof_server_url;   ///< Proof Server URL (localhost:6300)
         std::string network_name;       ///< "preprod", "preview", "mainnet"
+        std::string ledger_ffi_library; ///< Native libmidnight_ledger_ffi for canonical wallet derivation
 
         /// Default configurations for known networks
         static NetworkConfig preprod();
@@ -186,6 +187,14 @@ namespace midnight::contracts
         network::WalletState get_wallet_state();
 
         /**
+         * @brief Get wallet state from a known funding/transaction hash.
+         *
+         * This is the fast production path for faucet or recently observed
+         * wallet activity. It avoids historical full-chain UTXO scans.
+         */
+        network::WalletState get_wallet_state_from_transaction(const std::string &tx_hash);
+
+        /**
          * @brief Get wallet address derived from current seed
          */
         std::string get_wallet_address() const;
@@ -205,6 +214,7 @@ namespace midnight::contracts
         std::unique_ptr<network::IndexerClient> indexer_;
         std::unique_ptr<network::MidnightNodeRPC> rpc_;
         std::unique_ptr<zk::ProofServerClient> proof_server_;
+        std::shared_ptr<ledger::ILedgerBackend> ledger_backend_;
 
         /**
          * @brief Derive keypair from seed

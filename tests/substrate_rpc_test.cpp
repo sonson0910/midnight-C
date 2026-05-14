@@ -3,6 +3,7 @@
 #include "midnight/codec/scale_codec.hpp"
 #include "midnight/tx/extrinsic_builder.hpp"
 #include <sodium.h>
+#include <cstdlib>
 #include <vector>
 #include <string>
 #include <cstring>
@@ -183,6 +184,11 @@ TEST(AccountInfoTest, DefaultValues)
 
 static const char *PREVIEW_RPC = "https://rpc.preprod.midnight.network";
 
+static bool run_live_rpc_tests()
+{
+    return std::getenv("MIDNIGHT_RUN_LIVE_RPC_TESTS") != nullptr;
+}
+
 class SubstrateRPCIntegrationTest : public ::testing::Test
 {
 protected:
@@ -190,6 +196,11 @@ protected:
 
     void SetUp() override
     {
+        if (!run_live_rpc_tests())
+        {
+            GTEST_SKIP() << "Set MIDNIGHT_RUN_LIVE_RPC_TESTS=1 to run live Substrate RPC checks";
+        }
+
         // Use env var if set, otherwise default to Preview network
         const char *url = std::getenv("MIDNIGHT_RPC_URL");
         rpc_ = std::make_unique<SubstrateRPC>(url ? url : PREVIEW_RPC, 15000);
@@ -325,6 +336,11 @@ protected:
 
     void SetUp() override
     {
+        if (!run_live_rpc_tests())
+        {
+            GTEST_SKIP() << "Set MIDNIGHT_RUN_LIVE_RPC_TESTS=1 to run live extrinsic submission checks";
+        }
+
         const char *url = std::getenv("MIDNIGHT_RPC_URL");
         rpc_url_ = url ? std::string(url) : rpc_url_;
         rpc_ = std::make_unique<SubstrateRPC>(rpc_url_, 15000);

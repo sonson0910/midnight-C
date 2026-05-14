@@ -2,7 +2,8 @@
 
 #include "midnight/network/indexer_client.hpp"
 #include "midnight/network/midnight_node_rpc.hpp"
-#include "midnight/ledger/transaction_builder.hpp"
+#include "midnight/network/network_config.hpp"
+#include "midnight/ledger/ledger_backend.hpp"
 #include "midnight/production/artifact_manager.hpp"
 #include "midnight/production/errors.hpp"
 #include "midnight/zk/proof_server_client.hpp"
@@ -18,11 +19,29 @@ namespace midnight::production
 
     struct ClientConfig
     {
+        std::string network_name = "preview";
         std::string node_url;
         std::string indexer_url;
         std::string proof_server_url;
+        std::string ledger_ffi_library;
         uint32_t node_timeout_ms = 10000;
         uint32_t proof_timeout_ms = 120000;
+
+        /**
+         * @brief Build canonical service URLs for a named Midnight network.
+         */
+        static ClientConfig for_network(
+            network::NetworkConfig::Network network =
+                network::NetworkConfig::Network::PREVIEW);
+
+        /**
+         * @brief Build config from MIDNIGHT_* environment variables.
+         *
+         * Reads MIDNIGHT_NETWORK, MIDNIGHT_NODE_URL, MIDNIGHT_INDEXER_URL,
+         * MIDNIGHT_PROOF_SERVER_URL, MIDNIGHT_LEDGER_FFI_LIBRARY,
+         * MIDNIGHT_NODE_TIMEOUT_MS, and MIDNIGHT_PROOF_TIMEOUT_MS.
+         */
+        static ClientConfig from_environment();
     };
 
     struct SubmitResult
@@ -62,7 +81,6 @@ namespace midnight::production
 
     struct PipelineOptions
     {
-        ledger::ToolkitConfig toolkit;
         ConfirmationConfig confirmation;
         ArtifactConfig artifacts;
         bool save_artifacts = true;
@@ -82,13 +100,36 @@ namespace midnight::production
      * @brief Production-safe Midnight network client.
      *
      * This class intentionally accepts only canonical bytes produced by the
-     * Midnight ledger/Compact toolchain. It does not construct ledger
-     * transactions, proofs, or Compact deploy/call payloads locally.
+     * Midnight ledger/Compact backend. The C++ layer owns transport,
+     * validation, artifact persistence, submission, and confirmation; ledger
+     * transaction construction is delegated to an explicit ILedgerBackend so
+     * production code does not depend on CLI/toolkit process execution.
      */
     class MidnightClient
     {
     public:
         explicit MidnightClient(const ClientConfig &config);
+        MidnightClient(
+            const ClientConfig &config,
+            std::shared_ptr<ledger::ILedgerBackend> ledger_backend);
+
+        const ClientConfig &config() const { return config_; }
+        void set_ledger_backend(std::shared_ptr<ledger::ILedgerBackend> ledger_backend);
+
+        /**
+         * @brief Check node, indexer, proof-server, and ledger backend readiness.
+         *
+         * Returns structured status for SDK boot diagnostics. Network checks are
+         * best-effort and do not throw.
+         */
+        json health_check();
+
+        /**
+         * @brief Derive canonical Midnight wallet addresses through ledger FFI.
+         */
+        ledger::WalletAddressDerivationResult derive_wallet_addresses(
+            const std::string &seed_hex_or_mnemonic,
+            const std::string &network = {});
 
         /**
          * @brief Submit midnight-ledger serialized transaction bytes.
@@ -105,43 +146,37 @@ namespace midnight::production
         SubmitResult submit_extrinsic_hex(const std::string &extrinsic_hex);
 
         /**
-         * @brief Build and submit a NIGHT transfer using official ledger tooling.
+         * @brief Build/prove canonical Midnight transactions without submitting.
+         *
+         * These methods call the configured native ledger backend and return
+         * ledger-serialized Midnight transaction bytes plus metadata. Use
+         * submit_build_result() to submit a successful BuildResult later.
          */
-        BuildSubmitResult transfer_night(
-            const ledger::ToolkitConfig &toolkit,
-            const ledger::TransferNightParams &params);
+        ledger::BuildResult build_transfer_night(const ledger::TransferNightParams &params);
+        ledger::BuildResult build_register_dust(const ledger::RegisterDustParams &params);
+        ledger::BuildResult build_deregister_dust(const ledger::DeregisterDustParams &params);
+        ledger::BuildResult build_simple_contract_deploy(const ledger::SimpleContractDeployParams &params);
+        ledger::BuildResult build_simple_contract_call(const ledger::SimpleContractCallParams &params);
+        ledger::BuildResult build_custom_contract_transaction(const ledger::CustomContractIntentParams &params);
+        ledger::BuildResult sync_ledger_state(const ledger::SyncLedgerStateParams &params);
+
+        BuildSubmitResult submit_build_result(ledger::BuildResult build);
 
         /**
-         * @brief Build and submit DUST address registration.
+         * @brief Build and submit a NIGHT transfer using configured native ledger backend.
          */
-        BuildSubmitResult register_dust(
-            const ledger::ToolkitConfig &toolkit,
-            const ledger::RegisterDustParams &params);
-
-        BuildSubmitResult deregister_dust(
-            const ledger::ToolkitConfig &toolkit,
-            const ledger::DeregisterDustParams &params);
+        BuildSubmitResult transfer_night(const ledger::TransferNightParams &params);
 
         /**
-         * @brief Build and submit toolkit built-in Compact contract deployment.
+         * @brief Build and submit DUST address registration using configured native ledger backend.
          */
-        BuildSubmitResult deploy_simple_contract(
-            const ledger::ToolkitConfig &toolkit,
-            const ledger::SimpleContractDeployParams &params);
+        BuildSubmitResult register_dust(const ledger::RegisterDustParams &params);
 
-        /**
-         * @brief Build and submit toolkit built-in Compact contract call.
-         */
-        BuildSubmitResult call_simple_contract(
-            const ledger::ToolkitConfig &toolkit,
-            const ledger::SimpleContractCallParams &params);
+        BuildSubmitResult deregister_dust(const ledger::DeregisterDustParams &params);
 
-        /**
-         * @brief Build and submit a custom Compact transaction from intent files.
-         */
-        BuildSubmitResult submit_custom_contract_intents(
-            const ledger::ToolkitConfig &toolkit,
-            const ledger::CustomContractIntentParams &params);
+        BuildSubmitResult deploy_simple_contract(const ledger::SimpleContractDeployParams &params);
+        BuildSubmitResult call_simple_contract(const ledger::SimpleContractCallParams &params);
+        BuildSubmitResult submit_custom_contract_intents(const ledger::CustomContractIntentParams &params);
 
         PipelineResult transfer_night(
             const PipelineOptions &options,
@@ -170,6 +205,12 @@ namespace midnight::production
         ConfirmationResult wait_for_transaction(
             const std::string &transaction_hash,
             const ConfirmationConfig &confirmation = {});
+        ConfirmationResult wait_for_inclusion(
+            const std::string &transaction_hash,
+            const ConfirmationConfig &confirmation = {});
+        ConfirmationResult wait_for_finality(
+            const std::string &transaction_hash,
+            const ConfirmationConfig &confirmation = {});
 
         std::vector<uint8_t> check_payload(const std::vector<uint8_t> &check_payload);
         std::vector<uint8_t> prove_payload(const std::vector<uint8_t> &proving_payload);
@@ -179,6 +220,13 @@ namespace midnight::production
         json query_block(uint64_t height);
         json query_block(const std::string &block_hash);
         network::WalletState query_wallet_state(const std::string &address);
+        network::WalletState query_wallet_state(
+            const std::string &address,
+            uint32_t from_block,
+            uint32_t to_block);
+        network::WalletState query_wallet_state_from_transaction(
+            const std::string &address,
+            const std::string &tx_hash);
         json query_contract_state(const std::string &contract_address_hex);
 
     private:
@@ -186,6 +234,7 @@ namespace midnight::production
         std::unique_ptr<network::MidnightNodeRPC> node_;
         std::unique_ptr<network::IndexerClient> indexer_;
         std::unique_ptr<zk::ProofServerClient> proof_server_;
+        std::shared_ptr<ledger::ILedgerBackend> ledger_backend_;
     };
 
 } // namespace midnight::production

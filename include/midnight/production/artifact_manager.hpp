@@ -1,6 +1,6 @@
 #pragma once
 
-#include "midnight/ledger/transaction_builder.hpp"
+#include "midnight/ledger/transaction_types.hpp"
 #include "midnight/production/errors.hpp"
 #include <filesystem>
 #include <string>
@@ -11,9 +11,10 @@ namespace midnight::production
     struct ArtifactConfig
     {
         std::filesystem::path root_dir = "midnight-artifacts";
-        std::string network = "preprod";
+        std::string network = "preview";
         std::string wallet_id = "default";
         bool enabled = true;
+        uint32_t cleanup_after_days = 0; ///< 0 disables cleanup
     };
 
     struct ArtifactSaveResult
@@ -41,6 +42,14 @@ namespace midnight::production
             const std::string &operation,
             const std::string &name,
             const std::string &content) const;
+
+        /**
+         * Remove empty/temporary artifact directories older than policy.
+         *
+         * Important transaction files are never removed automatically. The
+         * default policy is disabled.
+         */
+        ArtifactSaveResult cleanup_nonessential() const;
 
     private:
         ArtifactConfig config_;

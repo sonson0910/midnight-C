@@ -2,10 +2,8 @@
 #include "midnight/blockchain/midnight_adapter.hpp"
 #include "midnight/core/logger.hpp"
 #include "midnight/core/common_utils.hpp"
-#include "midnight/crypto/ed25519_signer.hpp"
 #include "midnight/crypto/state_encryption.hpp"
 #include <array>
-#include <vector>
 #include <vector>
 #include <sstream>
 #include <iomanip>
@@ -247,22 +245,12 @@ namespace midnight::blockchain
             }
         }
 
-        std::vector<uint8_t> decode_seed_hex_or_throw(const std::string &seed_hex)
-        {
-            auto seed = hex_decode(seed_hex);
-            if (seed.size() != 64)
-            {
-                throw std::runtime_error("Wallet seed must be 64 bytes");
-            }
-            return seed;
-        }
     } // namespace
 
     void Wallet::create_from_mnemonic(const std::string &mnemonic, const std::string &passphrase)
     {
         wallet_type_ = WalletType::MNEMONIC;
 
-        const size_t word_count = std::count(mnemonic.begin(), mnemonic.end(), ' ') + 1;
         if (midnight::g_logger)
         {
             midnight::g_logger->info("Creating wallet from mnemonic");
@@ -476,70 +464,14 @@ namespace midnight::blockchain
 
     std::string Wallet::sign_transaction(const std::string &tx_hex)
     {
-        if (midnight::g_logger)
-        {
-            midnight::g_logger->debug("Signing transaction");
-        }
-
+        (void)tx_hex;
         if (extended_private_key_.empty())
         {
             throw std::runtime_error("Cannot sign: wallet seed is not initialized");
         }
-
-        // Validate tx_hex format before attempting to sign
-        std::string tx_normalized = tx_hex;
-        if (tx_normalized.rfind("0x", 0) == 0 || tx_normalized.rfind("0X", 0) == 0)
-        {
-            tx_normalized = tx_normalized.substr(2);
-        }
-        if (tx_normalized.empty() || (tx_normalized.size() % 2) != 0)
-        {
-            throw std::invalid_argument("Invalid tx_hex: must be a non-empty hex string (optionally prefixed with 0x)");
-        }
-        for (char c : tx_normalized)
-        {
-            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
-            {
-                throw std::invalid_argument("Invalid tx_hex: contains non-hex character");
-            }
-        }
-
-#if defined(MIDNIGHT_ENABLE_SODIUM) && MIDNIGHT_ENABLE_SODIUM
-        // Use Ed25519 signing via the wallet's derived private key
-        try
-        {
-            const auto &seed = extended_private_key_.bytes();
-            if (seed.size() != 64)
-            {
-                throw std::runtime_error("Wallet seed must be 64 bytes");
-            }
-            // Derive signing key from m/0/0/0 (primary spending key)
-            const auto key_payload = derive_role_payload(seed, 0, 0, 0);
-
-            // Convert 32-byte derived key to Ed25519 seed and generate keypair
-            std::array<uint8_t, 32> ed_seed{};
-            std::copy(key_payload.begin(), key_payload.end(), ed_seed.begin());
-            auto [pub_key, priv_key] = crypto::Ed25519Signer::keypair_from_seed(ed_seed);
-
-            // Sign the transaction hex payload
-            auto signature = crypto::Ed25519Signer::sign_message(tx_hex, priv_key);
-            return "0x" + crypto::Ed25519Signer::signature_to_hex(signature);
-        }
-        catch (const std::exception &e)
-        {
-            if (midnight::g_logger)
-            {
-                midnight::g_logger->error("Ed25519 transaction signing failed: " + std::string(e.what()));
-            }
-            throw;
-        }
-#else
-        if (midnight::g_logger)
-        {
-            midnight::g_logger->warn("Wallet::sign_transaction: libsodium unavailable");
-        }
-        throw std::runtime_error("Cannot sign transaction: libsodium crypto is unavailable");
-#endif
+        throw std::runtime_error(
+            "Wallet::sign_transaction is disabled for production Midnight flows. "
+            "Use MidnightClient with libmidnight_ledger_ffi so build/prove/sign/serialize stays canonical.");
     }
 
     uint64_t Wallet::get_balance(const std::string &address, MidnightBlockchain *adapter) const

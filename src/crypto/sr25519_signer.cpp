@@ -266,7 +266,7 @@ namespace midnight::crypto
             uint8_t child_chain[32];
 
             // Prepare derivation data
-            uint8_t derivation_data[36];
+            uint8_t derivation_data[37];
             derivation_data[0] = 0x00;  // hard derivation
             std::memcpy(derivation_data + 1, current_seed, 32);
             derivation_data[33] = (path_elem >> 24) & 0xFF;

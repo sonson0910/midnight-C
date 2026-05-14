@@ -1,0 +1,45 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(nlohmann_json 3.2.0)
+find_dependency(fmt 7.1.0)
+find_dependency(OpenSSL)
+
+if(NOT TARGET Sodium::Sodium)
+    find_package(Sodium QUIET)
+endif()
+
+if(NOT TARGET Sodium::Sodium)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(SODIUM_PKG QUIET libsodium)
+        if(SODIUM_PKG_FOUND)
+            add_library(Sodium::Sodium INTERFACE IMPORTED)
+            set_target_properties(Sodium::Sodium PROPERTIES
+                INTERFACE_INCLUDE_DIRECTORIES "${SODIUM_PKG_INCLUDE_DIRS}"
+                INTERFACE_LINK_LIBRARIES "${SODIUM_PKG_LINK_LIBRARIES}"
+            )
+        endif()
+    endif()
+endif()
+
+if(NOT TARGET Sodium::Sodium)
+    find_path(SODIUM_INCLUDE_DIR NAMES sodium.h)
+    find_library(SODIUM_LIBRARY NAMES sodium libsodium)
+    if(SODIUM_INCLUDE_DIR AND SODIUM_LIBRARY)
+        add_library(Sodium::Sodium UNKNOWN IMPORTED)
+        set_target_properties(Sodium::Sodium PROPERTIES
+            IMPORTED_LOCATION "${SODIUM_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${SODIUM_INCLUDE_DIR}"
+        )
+    endif()
+endif()
+
+if(NOT TARGET Sodium::Sodium)
+    set(midnight_FOUND FALSE)
+    set(midnight_NOT_FOUND_MESSAGE "midnight requires libsodium; install libsodium or provide Sodium::Sodium before find_package(midnight).")
+    return()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/midnightTargets.cmake")

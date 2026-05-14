@@ -80,13 +80,13 @@ namespace midnight::tx
         std::vector<uint8_t> build_signed(
             const PalletCall &call,
             const std::vector<uint8_t> &secret_key_64,
-            const std::vector<uint8_t> &public_key_32);
+            const std::vector<uint8_t> &public_key_32) const;
 
         /// Build an unsigned extrinsic
-        std::vector<uint8_t> build_unsigned(const PalletCall &call);
+        std::vector<uint8_t> build_unsigned(const PalletCall &call) const;
 
         /// Build the raw signing payload (for external/hardware signers)
-        std::vector<uint8_t> build_signing_payload(const PalletCall &call);
+        std::vector<uint8_t> build_signing_payload(const PalletCall &call) const;
 
         /// Convert extrinsic bytes to hex string (for RPC)
         static std::string to_hex(const std::vector<uint8_t> &data);

@@ -1,7 +1,10 @@
 #include "midnight/contracts/contract_interactor.hpp"
 #include "midnight/core/logger.hpp"
 #include "midnight/core/common_utils.hpp"
+#include "midnight/production/validation.hpp"
+#include <cstdlib>
 #include <fstream>
+#include <stdexcept>
 #include <sstream>
 #include <filesystem>
 
@@ -19,16 +22,18 @@ namespace midnight::contracts
             .indexer_url = "https://indexer.preprod.midnight.network/api/v4/graphql",
             .proof_server_url = "http://localhost:6300",
             .network_name = "preprod",
+            .ledger_ffi_library = std::getenv("MIDNIGHT_LEDGER_FFI_LIBRARY") ? std::getenv("MIDNIGHT_LEDGER_FFI_LIBRARY") : "",
         };
     }
 
     NetworkConfig NetworkConfig::preview()
     {
         return {
-            .node_url = "https://rpc.preprod.midnight.network",
-            .indexer_url = "https://indexer.preprod.midnight.network/api/v4/graphql",
+            .node_url = "https://rpc.preview.midnight.network",
+            .indexer_url = "https://indexer.preview.midnight.network/api/v4/graphql",
             .proof_server_url = "http://localhost:6300",
-            .network_name = "preprod",
+            .network_name = "preview",
+            .ledger_ffi_library = std::getenv("MIDNIGHT_LEDGER_FFI_LIBRARY") ? std::getenv("MIDNIGHT_LEDGER_FFI_LIBRARY") : "",
         };
     }
 
@@ -42,6 +47,7 @@ namespace midnight::contracts
             .indexer_url = indexer,
             .proof_server_url = proof_server,
             .network_name = network,
+            .ledger_ffi_library = std::getenv("MIDNIGHT_LEDGER_FFI_LIBRARY") ? std::getenv("MIDNIGHT_LEDGER_FFI_LIBRARY") : "",
         };
     }
 
@@ -87,6 +93,7 @@ namespace midnight::contracts
         }
 
         proof_server_ = std::make_unique<zk::ProofServerClient>(ps_config);
+        ledger_backend_ = ledger::make_ffi_ledger_backend(config.ledger_ffi_library);
 
         midnight::g_logger->info("ContractInteractor initialized: " + config.network_name +
                                  " (node=" + config.node_url +
@@ -111,91 +118,21 @@ namespace midnight::contracts
             return;
         }
 
-        try
+        auto *ffi_backend = dynamic_cast<ledger::FfiLedgerBackend *>(ledger_backend_.get());
+        if (ffi_backend == nullptr || !ffi_backend->can_derive_wallet_addresses())
         {
-            // Initialize libsodium (idempotent)
-            crypto::Ed25519Signer::initialize();
-
-            // Normalize seed_hex_ - remove 0x prefix if present
-            std::string normalized_seed = seed_hex_;
-            if (normalized_seed.rfind("0x", 0) == 0 || normalized_seed.rfind("0X", 0) == 0) {
-                normalized_seed = normalized_seed.substr(2);
-            }
-
-            // Derive keypair from seed
-            crypto::Ed25519Signer::PrivateKey priv_key{};
-            std::array<uint8_t, 32> seed{};
-            
-            if (normalized_seed.size() >= 128)  // 64 bytes in hex
-            {
-                // Full 64-byte private key in hex
-                for (size_t i = 0; i < 64; ++i)
-                {
-                    if (i * 2 + 1 >= normalized_seed.size()) {
-                        midnight::g_logger->error("Invalid seed hex: too short for 64-byte key");
-                        return;
-                    }
-                    
-                    int hi = midnight::util::hex_nibble(normalized_seed[i * 2]);
-                    int lo = midnight::util::hex_nibble(normalized_seed[i * 2 + 1]);
-                    
-                    // Validate hex values - hex_nibble returns -1 for invalid
-                    if (hi < 0 || lo < 0) {
-                        midnight::g_logger->error("Invalid hex character in seed");
-                        return;
-                    }
-                    
-                    priv_key[i] = static_cast<uint8_t>((hi << 4) | lo);
-                }
-            }
-            else if (normalized_seed.size() >= 64)  // 32 bytes in hex
-            {
-                // 32-byte seed - use directly as key
-                for (size_t i = 0; i < 32; ++i)
-                {
-                    if (i * 2 + 1 >= normalized_seed.size()) {
-                        midnight::g_logger->error("Invalid seed hex: too short for 32-byte seed");
-                        return;
-                    }
-                    
-                    int hi = midnight::util::hex_nibble(normalized_seed[i * 2]);
-                    int lo = midnight::util::hex_nibble(normalized_seed[i * 2 + 1]);
-                    
-                    // Validate hex values
-                    if (hi < 0 || lo < 0) {
-                        midnight::g_logger->error("Invalid hex character in seed");
-                        return;
-                    }
-                    
-                    seed[i] = static_cast<uint8_t>((hi << 4) | lo);
-                }
-                
-                // Copy seed to private key (first 32 bytes)
-                std::copy(seed.begin(), seed.end(), priv_key.begin());
-            }
-            else
-            {
-                midnight::g_logger->error("Seed too short: need at least 32 bytes (64 hex chars), got " + 
-                    std::to_string(normalized_seed.size()));
-                return;
-            }
-
-            // Extract public key from the private key
-            auto pub_key = crypto::Ed25519Signer::extract_public_key(priv_key);
-            std::string pub_hex = crypto::Ed25519Signer::public_key_to_hex(pub_key);
-
-            // Encode as Midnight address (Bech32m)
-            std::string hrp = (config_.network_name == "mainnet") ? "mn_addr_mainnet" : "mn_addr_preprod";
-            std::array<uint8_t, 32> payload{};
-            std::copy(pub_key.begin(), pub_key.end(), payload.begin());
-            derived_address_ = midnight::util::bech32m::encode(hrp, payload);
-
-            midnight::g_logger->info("Wallet derived: " + derived_address_.substr(0, 30) + "...");
+            throw std::runtime_error(
+                "ContractInteractor requires libmidnight_ledger_ffi to derive canonical Midnight wallet addresses");
         }
-        catch (const std::exception &e)
+
+        const auto addresses = ffi_backend->derive_wallet_addresses(seed_hex_, config_.network_name);
+        if (!addresses.success)
         {
-            midnight::g_logger->error("Failed to derive wallet: " + std::string(e.what()));
+            throw std::runtime_error("Canonical Midnight wallet derivation failed: " + addresses.error);
         }
+        derived_address_ = addresses.unshielded;
+
+        midnight::g_logger->info("Wallet derived: " + derived_address_.substr(0, 30) + "...");
     }
 
     std::string ContractInteractor::get_wallet_address() const
@@ -209,6 +146,11 @@ namespace midnight::contracts
 
     json ContractInteractor::read_state(const std::string &contract_address)
     {
+        if (!midnight::production::validation::is_contract_address_hex(contract_address))
+        {
+            throw std::invalid_argument(
+                "Contract state queries require a 32-byte contract hex address, not a wallet address");
+        }
         auto state = indexer_->query_contract_state(contract_address);
         if (!state.exists)
         {
@@ -221,6 +163,11 @@ namespace midnight::contracts
     json ContractInteractor::read_fields(const std::string &contract_address,
                                          const std::vector<std::string> &fields)
     {
+        if (!midnight::production::validation::is_contract_address_hex(contract_address))
+        {
+            throw std::invalid_argument(
+                "Contract field queries require a 32-byte contract hex address, not a wallet address");
+        }
         return indexer_->query_contract_fields(contract_address, fields);
     }
 
@@ -230,7 +177,30 @@ namespace midnight::contracts
         {
             return {.error = "No wallet derived. Call set_seed_hex() first."};
         }
-        return indexer_->query_wallet_state(derived_address_);
+        try
+        {
+            return indexer_->query_wallet_state(derived_address_);
+        }
+        catch (const std::exception &e)
+        {
+            return {.error = e.what()};
+        }
+    }
+
+    network::WalletState ContractInteractor::get_wallet_state_from_transaction(const std::string &tx_hash)
+    {
+        if (derived_address_.empty())
+        {
+            return {.error = "No wallet derived. Call set_seed_hex() first."};
+        }
+        try
+        {
+            return indexer_->query_wallet_state_from_transaction(derived_address_, tx_hash);
+        }
+        catch (const std::exception &e)
+        {
+            return {.error = e.what()};
+        }
     }
 
     network::DustRegistrationStatus ContractInteractor::query_dust_status()
@@ -239,7 +209,15 @@ namespace midnight::contracts
         {
             return network::DustRegistrationStatus::UNKNOWN;
         }
-        auto state = indexer_->query_wallet_state(derived_address_);
+        network::WalletState state;
+        try
+        {
+            state = indexer_->query_wallet_state(derived_address_);
+        }
+        catch (const std::exception &)
+        {
+            return network::DustRegistrationStatus::UNKNOWN;
+        }
         if (!state.error.empty())
         {
             return network::DustRegistrationStatus::UNKNOWN;
@@ -439,6 +417,7 @@ namespace midnight::contracts
         const json &args,
         const json &current_state)
     {
+        (void)circuit_name;
         zk::PublicInputs inputs;
 
         // Add circuit arguments as public inputs

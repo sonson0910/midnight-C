@@ -1,17 +1,23 @@
 // Quick balance checker using IndexerClient
 #include "midnight/network/indexer_client.hpp"
+#include <cstdlib>
 #include <iostream>
+#include <vector>
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <address>\n";
+        std::cerr << "Usage: " << argv[0] << " <address> [funding_tx_hash|block_height]\n";
         return 1;
     }
 
     std::string address = argv[1];
-    std::string network = "preprod";
+    const char* network_env = std::getenv("MIDNIGHT_NETWORK");
+    std::string network = network_env && *network_env ? network_env : "preview";
     
-    std::string graphql_url = "https://indexer.preprod.midnight.network/api/v4/graphql";
+    const char* indexer_env = std::getenv("MIDNIGHT_INDEXER_URL");
+    std::string graphql_url = indexer_env && *indexer_env
+        ? indexer_env
+        : "https://indexer." + network + ".midnight.network/api/v4/graphql";
 
     std::cout << "Querying balance for: " << address << "\n";
     std::cout << "Network: " << network << "\n\n";
@@ -19,8 +25,19 @@ int main(int argc, char* argv[]) {
     try {
         midnight::network::IndexerClient indexer(graphql_url, 30000);
         indexer.set_cache_enabled(false);
-        
-        auto state = indexer.query_wallet_state(address);
+
+        midnight::network::WalletState state;
+        if (argc >= 3) {
+            std::string source = argv[2];
+            if (source.rfind("0x", 0) == 0 || source.size() == 64) {
+                state = indexer.query_wallet_state_from_transaction(address, source);
+            } else {
+                auto block = static_cast<uint32_t>(std::stoul(source));
+                state = indexer.query_wallet_state(address, block, block);
+            }
+        } else {
+            state = indexer.query_wallet_state(address);
+        }
         
         std::cout << "=== WALLET STATE ===\n";
         std::cout << "Address: " << state.address << "\n";
@@ -36,7 +53,18 @@ int main(int argc, char* argv[]) {
         
         // Also query UTXOs
         std::cout << "\n=== UTXOs ===\n";
-        auto utxos = indexer.query_utxos(address, false);
+        std::vector<midnight::blockchain::UTXO> utxos;
+        if (argc >= 3) {
+            std::string source = argv[2];
+            if (source.rfind("0x", 0) == 0 || source.size() == 64) {
+                utxos = indexer.query_utxos_from_transaction(address, source);
+            } else {
+                auto block = static_cast<uint32_t>(std::stoul(source));
+                utxos = indexer.query_utxos(address, block, block);
+            }
+        } else {
+            utxos = indexer.query_utxos(address, false);
+        }
         std::cout << "Total UTXOs: " << utxos.size() << "\n";
         for (const auto& utxo : utxos) {
             std::cout << "  - TX: " << utxo.tx_hash

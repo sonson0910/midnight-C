@@ -75,6 +75,7 @@ wallet_preview.txt
 .wallet_preview.txt
 
 # Security-sensitive files (seeds, keys, secrets)
+.secrets/
 seed_*.hex
 *.seed
 *.pem

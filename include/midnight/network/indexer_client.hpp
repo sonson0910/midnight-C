@@ -209,6 +209,28 @@ public:
                                  bool use_cache = true);
 
   /**
+   * @brief Query wallet state from one known funding/spend transaction.
+   *
+   * This is the fast path for faucet/live-test flows where the wallet funding
+   * transaction is already known. It does not scan historical blocks.
+   *
+   * @param address Midnight address
+   * @param tx_hash Transaction hash with or without 0x
+   * @return WalletState computed from unspent outputs owned by address in tx
+   */
+  WalletState query_wallet_state_from_transaction(const std::string &address,
+                                                  const std::string &tx_hash);
+
+  /**
+   * @brief Query wallet state from a bounded block range.
+   *
+   * Use this for wallet sync checkpoints. Avoid large historical ranges on the
+   * request path; use a persisted wallet cache for production sync.
+   */
+  WalletState query_wallet_state(const std::string &address,
+                                 uint32_t from_block, uint32_t to_block);
+
+  /**
    * @brief Query UTXOs for an address (optimized with caching)
    * @param address Midnight address
    * @param use_cache Use cached result if available (default: true)
@@ -216,6 +238,16 @@ public:
    */
   std::vector<blockchain::UTXO> query_utxos(const std::string &address,
                                             bool use_cache = true);
+
+  /**
+   * @brief Query UTXOs for an address from one known transaction.
+   * @param address Midnight address
+   * @param tx_hash Transaction hash with or without 0x
+   * @return Unspent UTXOs in the transaction owned by address
+   */
+  std::vector<blockchain::UTXO>
+  query_utxos_from_transaction(const std::string &address,
+                               const std::string &tx_hash);
 
   /**
    * @brief Query UTXOs for an address within a block range (optimized)

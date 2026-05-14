@@ -102,9 +102,11 @@ namespace midnight::network
             uint32_t max_blocks = 10);
 
         /**
-         * @brief Get account balance
-         * @param address Address to query
-         * @return Balance in base units
+         * @brief Unsupported for Midnight user wallets.
+         *
+         * Wallet NIGHT/DUST balances are indexer UTXO queries, not node RPC
+         * contract-state queries. This method always throws; use
+         * IndexerClient::query_wallet_state* instead.
          */
         uint64_t get_balance(const std::string &address);
 

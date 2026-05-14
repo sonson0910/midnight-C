@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "midnight/contract/contract_manager.hpp"
 #include "midnight/codec/scale_codec.hpp"
+#include <cstdlib>
 #include <sodium.h>
 
 using namespace midnight::contract;
@@ -185,6 +186,11 @@ protected:
 
     void SetUp() override
     {
+        if (std::getenv("MIDNIGHT_RUN_LIVE_RPC_TESTS") == nullptr)
+        {
+            GTEST_SKIP() << "Set MIDNIGHT_RUN_LIVE_RPC_TESTS=1 to run live contract manager checks";
+        }
+
         const char *rpc_url = std::getenv("MIDNIGHT_RPC_URL");
         const char *proof_url = std::getenv("MIDNIGHT_PROOF_URL");
         const char *indexer_url = std::getenv("MIDNIGHT_INDEXER_URL");

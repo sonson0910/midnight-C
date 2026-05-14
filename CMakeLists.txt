@@ -38,6 +38,8 @@ option(ENABLE_COAP "Enable CoAP protocol support" ON)
 option(ENABLE_HTTP "Enable HTTP/HTTPS protocol support" ON)
 option(ENABLE_WEBSOCKET "Enable WebSocket support" ON)
 option(ENABLE_BLOCKCHAIN "Enable blockchain support" ON)
+option(MIDNIGHT_REQUIRE_OPENSSL_FOR_BLOCKCHAIN "Require OpenSSL when blockchain HTTPS support is enabled" ON)
+option(MIDNIGHT_BUILD_LEDGER_FFI "Build the native Midnight ledger FFI backend with Cargo when available" ON)
 
 # Set output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
@@ -106,13 +108,14 @@ if(MIDNIGHT_FORCE_FETCH_FMT OR NOT fmt_FOUND)
     unset(_MIDNIGHT_FMT_CANDIDATE)
 endif()
 
-# Fetch and build jsoncpp (JSON parsing library)
-# Force static library to ensure proper linking
-set(JSONCPP_BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
-set(JSONCPP_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(JSONCPP_BUILD_OBJECT_LIBS OFF CACHE BOOL "" FORCE)
+# jsoncpp (JSON parsing library)
+find_package(jsoncpp QUIET)
+if(NOT jsoncpp_FOUND AND NOT TARGET jsoncpp_static AND NOT TARGET jsoncpp_lib)
+    # Force static library to ensure proper linking for the vendored fallback.
+    set(JSONCPP_BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+    set(JSONCPP_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(JSONCPP_BUILD_OBJECT_LIBS OFF CACHE BOOL "" FORCE)
 
-if(NOT DEFINED jsoncpp_SOURCE_DIR)
     message(STATUS "Fetching jsoncpp...")
     FetchContent_Declare(
         jsoncpp
@@ -125,11 +128,15 @@ if(NOT DEFINED jsoncpp_SOURCE_DIR)
     endif()
     set(jsoncpp_SOURCE_DIR "${jsoncpp_SOURCE_DIR}")
     set(jsoncpp_POPULATED TRUE)
+    add_subdirectory("${jsoncpp_SOURCE_DIR}" "${jsoncpp_BINARY_DIR}" EXCLUDE_FROM_ALL)
 endif()
-add_subdirectory("${jsoncpp_SOURCE_DIR}" "${jsoncpp_BINARY_DIR}" EXCLUDE_FROM_ALL)
 
-# Fetch cpp-httplib (header-only HTTP client library)
-if(NOT DEFINED HTTPLIB_SOURCE_DIR)
+# cpp-httplib (header-only HTTP client library)
+find_package(httplib QUIET)
+if(TARGET httplib::httplib)
+    get_target_property(_MIDNIGHT_HTTPLIB_INCLUDES httplib::httplib INTERFACE_INCLUDE_DIRECTORIES)
+    list(GET _MIDNIGHT_HTTPLIB_INCLUDES 0 HTTPLIB_SOURCE_DIR)
+elseif(NOT DEFINED HTTPLIB_SOURCE_DIR)
     message(STATUS "Fetching cpp-httplib...")
     FetchContent_Declare(
         cpp-httplib
@@ -198,6 +205,48 @@ endif()
 option(ENABLE_BLST "Enable blst library for BLS signatures (requires manual blst installation)" OFF)
 
 # Add subdirectories
+if(MIDNIGHT_BUILD_LEDGER_FFI)
+    find_program(CARGO_EXECUTABLE cargo)
+    if(CARGO_EXECUTABLE)
+        set(MIDNIGHT_LEDGER_FFI_MANIFEST
+            "${CMAKE_SOURCE_DIR}/midnight-research/midnight-node/Cargo.toml")
+        set(MIDNIGHT_LEDGER_FFI_TARGET_DIR
+            "${CMAKE_BINARY_DIR}/midnight-ledger-ffi")
+        if(APPLE)
+            set(MIDNIGHT_LEDGER_FFI_LIBRARY
+                "${MIDNIGHT_LEDGER_FFI_TARGET_DIR}/release/libmidnight_ledger_ffi.dylib")
+        elseif(WIN32)
+            set(MIDNIGHT_LEDGER_FFI_LIBRARY
+                "${MIDNIGHT_LEDGER_FFI_TARGET_DIR}/release/midnight_ledger_ffi.dll")
+        else()
+            set(MIDNIGHT_LEDGER_FFI_LIBRARY
+                "${MIDNIGHT_LEDGER_FFI_TARGET_DIR}/release/libmidnight_ledger_ffi.so")
+        endif()
+
+        add_custom_command(
+            OUTPUT "${MIDNIGHT_LEDGER_FFI_LIBRARY}"
+            COMMAND "${CARGO_EXECUTABLE}" build
+                --manifest-path "${MIDNIGHT_LEDGER_FFI_MANIFEST}"
+                --package midnight-ledger-ffi
+                --release
+                --target-dir "${MIDNIGHT_LEDGER_FFI_TARGET_DIR}"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/midnight-research/midnight-node"
+            DEPENDS
+                "${CMAKE_SOURCE_DIR}/midnight-research/midnight-node/util/ledger-ffi/Cargo.toml"
+                "${CMAKE_SOURCE_DIR}/midnight-research/midnight-node/util/ledger-ffi/src/lib.rs"
+            COMMENT "Building native Midnight ledger FFI backend"
+            VERBATIM
+        )
+        add_custom_target(midnight-ledger-ffi ALL
+            DEPENDS "${MIDNIGHT_LEDGER_FFI_LIBRARY}")
+        install(FILES "${MIDNIGHT_LEDGER_FFI_LIBRARY}" DESTINATION lib OPTIONAL)
+    else()
+        message(WARNING
+            "MIDNIGHT_BUILD_LEDGER_FFI is ON but cargo was not found; "
+            "C++ will build, but production transaction construction needs libmidnight_ledger_ffi.")
+    endif()
+endif()
+
 add_subdirectory(src)
 
 if(BUILD_TESTS)
@@ -210,10 +259,54 @@ if(BUILD_EXAMPLES)
 endif()
 
 # Install targets
+include(CMakePackageConfigHelpers)
+
 install(
     DIRECTORY include/midnight
     DESTINATION include
 )
 
-# Export targets when dependencies are available in an installable export set.
-# Disabled for local/dev builds that fetch third-party dependencies.
+install(
+    TARGETS midnight-core
+    EXPORT midnightTargets
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+)
+
+install(
+    EXPORT midnightTargets
+    FILE midnightTargets.cmake
+    NAMESPACE midnight::
+    DESTINATION lib/cmake/midnight
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/midnightConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/midnightConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/midnightConfig.cmake"
+    INSTALL_DESTINATION lib/cmake/midnight
+)
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/midnight.pc.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/midnight.pc"
+    @ONLY
+)
+
+install(
+    FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/midnightConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/midnightConfigVersion.cmake"
+    DESTINATION lib/cmake/midnight
+)
+
+install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/midnight.pc"
+    DESTINATION lib/pkgconfig
+)

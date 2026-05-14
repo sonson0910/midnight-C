@@ -252,10 +252,22 @@ namespace midnight::utxo_transactions
                        std::shared_ptr<INodeProvider> node_provider);
 
         /**
-         * Query UTXOs for an address
-         * Returns unspent (available) UTXOs only
+         * Query UTXOs for an address.
+         *
+         * This compatibility method uses IndexerClient's guarded fast path and
+         * will not perform an unbounded historical scan unless
+         * MIDNIGHT_ENABLE_FULL_UTXO_SCAN=1 is set. Prefer the bounded overload
+         * when the relevant block range is known.
          */
         std::optional<std::vector<Utxo>> query_unspent_utxos(const std::string &address);
+
+        /**
+         * Query unspent UTXOs in a bounded block range.
+         */
+        std::optional<std::vector<Utxo>> query_unspent_utxos(
+            const std::string &address,
+            uint32_t from_block,
+            uint32_t to_block);
 
         /**
          * Query total spendable balance

@@ -421,6 +421,7 @@ SimpleBalancingRecipe TransactionBalancer::balance_finalized(
     TokenKindsToBalance kinds,
     std::chrono::system_clock::time_point ttl)
 {
+    (void)kinds;
     SimpleBalancingRecipe recipe;
     recipe.type = BalancingType::Finalized;
 
@@ -618,6 +619,7 @@ SimpleBalancingRecipe TransactionBalancer::balance_unproven(
     TokenKindsToBalance kinds,
     std::chrono::system_clock::time_point ttl)
 {
+    (void)ttl;
     SimpleBalancingRecipe recipe;
     recipe.type = BalancingType::Unproven;
 

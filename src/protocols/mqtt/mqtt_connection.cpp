@@ -23,6 +23,12 @@
 #include <chrono>
 #include <algorithm>
 
+#ifdef _WIN32
+using midnight_socket_fd = SOCKET;
+#else
+using midnight_socket_fd = int;
+#endif
+
 namespace midnight::protocols::mqtt
 {
 
@@ -129,7 +135,7 @@ bool MqttConnection::connect(const ConnectPayload& payload)
         // Wait for connection with timeout
         fd_set write_fds;
         FD_ZERO(&write_fds);
-        FD_SET(static_cast<SOCKET>(sock_), &write_fds);
+        FD_SET(static_cast<midnight_socket_fd>(sock_), &write_fds);
         struct timeval timeout = {5, 0};  // 5 second timeout
 
         conn_result = select(static_cast<int>(sock_) + 1, nullptr, &write_fds, nullptr, &timeout);

@@ -8,6 +8,7 @@
 #include <thread>
 #include <cstring>
 #include <cctype>
+#include <exception>
 
 namespace midnight::network
 {
@@ -29,7 +30,17 @@ namespace midnight::network
     // ─── Constructor ──────────────────────────────────────────
 
     SubstrateRPC::SubstrateRPC(const std::string &node_url, uint32_t timeout_ms)
-        : client_(std::make_unique<NetworkClient>(node_url, timeout_ms))
+        : client_(std::make_unique<NetworkClient>(node_url, timeout_ms)),
+          rate_limiter_(std::make_shared<RateLimiter>(20.0, 10)),
+          backoff_(std::make_shared<ExponentialBackoff>(
+              ExponentialBackoff::Config{
+                  retry_config_.initial_backoff_ms,
+                  retry_config_.max_backoff_ms,
+                  retry_config_.backoff_multiplier,
+                  0.25,
+                  retry_config_.max_retries})),
+          circuit_breaker_(std::make_shared<CircuitBreaker>(
+              CircuitBreaker::Config{5, 2, 30000}))
     {
         midnight::g_logger->info("SubstrateRPC initialized: " + node_url);
     }
@@ -38,32 +49,99 @@ namespace midnight::network
 
     json SubstrateRPC::rpc_call(const std::string &method, const json &params)
     {
-        json request = {
-            {"jsonrpc", "2.0"},
-            {"method", method},
-            {"params", params},
-            {"id", request_id_++}};
-
-        midnight::g_logger->debug("Substrate RPC: " + method);
-
-        json response = client_->post_json("/", request);
-
-        if (response.contains("error") && !response["error"].is_null())
-        {
-            auto error = response["error"];
-            std::string msg = error.value("message", "Unknown RPC error");
-            int code = error.value("code", 0);
-            throw std::runtime_error(
-                "RPC error [" + std::to_string(code) + "]: " + msg);
-        }
-
-        if (!response.contains("result"))
+        if (circuit_breaker_ && !circuit_breaker_->is_request_allowed())
         {
             throw std::runtime_error(
-                "Invalid RPC response: missing 'result' field");
+                "Substrate RPC circuit breaker is open for method: " + method);
         }
 
-        return response["result"];
+        std::exception_ptr last_error;
+        json result;
+        bool succeeded = false;
+        uint32_t attempt = 0;
+
+        while (attempt <= retry_config_.max_retries)
+        {
+            if (rate_limiter_)
+            {
+                rate_limiter_->acquire();
+            }
+
+            json request = {
+                {"jsonrpc", "2.0"},
+                {"method", method},
+                {"params", params},
+                {"id", request_id_++}};
+
+            try
+            {
+                midnight::g_logger->debug(
+                    "Substrate RPC: " + method +
+                    " attempt=" + std::to_string(attempt + 1));
+
+                json response = client_->post_json("/", request);
+
+                if (response.contains("error") && !response["error"].is_null())
+                {
+                    auto error = response["error"];
+                    std::string msg = error.value("message", "Unknown RPC error");
+                    int code = error.value("code", 0);
+                    throw std::runtime_error(
+                        "RPC error [" + std::to_string(code) + "]: " + msg);
+                }
+
+                if (!response.contains("result"))
+                {
+                    throw std::runtime_error(
+                        "Invalid RPC response: missing 'result' field");
+                }
+
+                result = response["result"];
+                succeeded = true;
+                if (backoff_)
+                {
+                    backoff_->reset();
+                }
+                if (circuit_breaker_)
+                {
+                    circuit_breaker_->record_success();
+                }
+                break;
+            }
+            catch (...)
+            {
+                last_error = std::current_exception();
+                if (attempt >= retry_config_.max_retries)
+                {
+                    break;
+                }
+
+                const uint32_t delay_ms = backoff_
+                                              ? backoff_->get_next_delay()
+                                              : retry_config_.get_backoff_delay_ms(attempt);
+                midnight::g_logger->warn(
+                    "Substrate RPC retry: method=" + method +
+                    " attempt=" + std::to_string(attempt + 1) +
+                    " delay_ms=" + std::to_string(delay_ms));
+                std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+                ++attempt;
+            }
+        }
+
+        if (succeeded)
+        {
+            return result;
+        }
+
+        if (circuit_breaker_)
+        {
+            circuit_breaker_->record_failure();
+        }
+        if (last_error)
+        {
+            std::rethrow_exception(last_error);
+        }
+        throw std::runtime_error("Substrate RPC failed for method: " + method);
     }
 
     // ─── Runtime Info ─────────────────────────────────────────

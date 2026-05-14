@@ -115,7 +115,7 @@ namespace midnight::network
             switch (network)
             {
             case Network::DEVNET:
-                return "devnet";
+                return "undeployed";
             case Network::PREVIEW:
                 return "preview";
             case Network::PREPROD:

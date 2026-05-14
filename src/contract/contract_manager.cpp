@@ -1,6 +1,7 @@
 #include "midnight/core/logger.hpp"
 #include "midnight/core/common_utils.hpp"
 #include "midnight/contract/contract_manager.hpp"
+#include "midnight/production/validation.hpp"
 #include <sstream>
 #include <iomanip>
 #include <fstream>
@@ -248,6 +249,11 @@ namespace midnight::contract
 
         try
         {
+            if (!midnight::production::validation::is_contract_address_hex(contract_address))
+            {
+                throw std::invalid_argument(
+                    "Contract state queries require a 32-byte contract hex address, not a wallet address");
+            }
             // Query via Indexer GraphQL
             auto state = indexer_->query_contract_state(contract_address);
             info.exists = state.exists;
@@ -268,6 +274,11 @@ namespace midnight::contract
     {
         try
         {
+            if (!midnight::production::validation::is_contract_address_hex(contract_address))
+            {
+                throw std::invalid_argument(
+                    "Contract field queries require a 32-byte contract hex address, not a wallet address");
+            }
             return indexer_->query_contract_fields(contract_address, fields);
         }
         catch (const std::exception &e)
@@ -281,7 +292,17 @@ namespace midnight::contract
     {
         try
         {
-            return rpc_->midnight_contract_state(contract_address);
+            if (!midnight::production::validation::is_contract_address_hex(contract_address))
+            {
+                throw std::invalid_argument(
+                    "Raw contract state queries require a 32-byte contract hex address, not a wallet address");
+            }
+            const auto state = rpc_->midnight_contract_state(contract_address);
+            if (state.is_string())
+            {
+                return state.get<std::string>();
+            }
+            return state.dump();
         }
         catch (const std::exception &e)
         {

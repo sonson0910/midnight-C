@@ -222,6 +222,8 @@ struct WalletFacadeConfig {
     std::string indexer_ws_url;             ///< Indexer WebSocket (optional)
     std::string relay_url;                  ///< Node relay for TX submission
     std::string proving_server_url;         ///< Proof server (http://localhost:6300)
+    std::string ledger_ffi_library;         ///< Native libmidnight_ledger_ffi for canonical wallet/tx operations
+    bool require_canonical_wallet_derivation = true; ///< Production mode: fail unless wallet addresses come from ledger FFI
     address::Network network = address::Network::PreProd;
     CoinSelectionStrategy coin_selection = CoinSelectionStrategy::LargestFirst;
 };
@@ -307,6 +309,9 @@ public:
         const std::string& indexer_url,
         address::Network network = address::Network::PreProd);
 
+    /// Local HD-wallet construction retained for tests and offline tooling.
+    /// Production wallet creation should use from_mnemonic()/from_mnemonic_with_config()
+    /// so Midnight addresses are derived by libmidnight_ledger_ffi.
     static WalletFacade from_wallet(
         const HDWallet& hd_wallet,
         const std::string& indexer_url,
@@ -444,6 +449,10 @@ private:
 
     WalletFacade() = default;
     void ensure_not_cleared() const;
+    bool apply_official_addresses(
+        const std::vector<uint8_t>& seed,
+        const std::string& ledger_ffi_library,
+        bool required);
 };
 
 } // namespace midnight::wallet

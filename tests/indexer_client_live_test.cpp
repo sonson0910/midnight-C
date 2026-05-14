@@ -1,6 +1,7 @@
 #include "midnight/network/indexer_client.hpp"
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cstdlib>
 #include <string>
 
@@ -36,6 +37,7 @@ TEST(IndexerClientLiveTest, PreprodKnownTransactionAndUtxoFormats)
 
     auto tx = indexer.query_transaction(kTxHashWithPrefix);
     ASSERT_FALSE(tx.empty());
+    EXPECT_EQ(tx.value("id", 0), 151162);
     EXPECT_EQ(tx.value("hash", ""), kTxHash);
     ASSERT_TRUE(tx.contains("block"));
     EXPECT_EQ(tx["block"].value("height", 0), static_cast<int>(kBlockHeight));
@@ -44,6 +46,14 @@ TEST(IndexerClientLiveTest, PreprodKnownTransactionAndUtxoFormats)
     EXPECT_EQ(block.height, kBlockHeight);
     EXPECT_EQ(block.hash, kBlockHash);
     ASSERT_FALSE(block.transactions.empty());
+    const auto contains_target_tx = std::any_of(
+        block.transactions.begin(),
+        block.transactions.end(),
+        [](const auto &block_tx) {
+            return block_tx.value("hash", "") == kTxHash ||
+                   block_tx.value("hash", "") == kTxHashWithPrefix;
+        });
+    EXPECT_TRUE(contains_target_tx);
 
     auto block_by_hash = indexer.query_block(0, std::string("0x") + kBlockHash);
     EXPECT_EQ(block_by_hash.height, kBlockHeight);

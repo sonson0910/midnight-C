@@ -1,0 +1,14 @@
+{
+  "command": "",
+  "contract_address": "",
+  "error": "Midnight ledger backend panicked while building transaction",
+  "intent_path": "",
+  "onchain_state_path": "",
+  "operation": "register-dust",
+  "output_file": "",
+  "private_state_path": "",
+  "result_path": "",
+  "success": false,
+  "transaction_hash": "",
+  "zswap_state_path": ""
+}

@@ -160,7 +160,12 @@ namespace midnight::blockchain
         std::string generate_address(uint32_t account = 0, uint32_t change = 0, uint32_t address_index = 0);
 
         /**
-         * @brief Sign ledger-provided transaction payload with private key
+         * @brief Legacy local signer retained for ABI compatibility.
+         *
+         * Production Midnight transactions must be built, proved, serialized,
+         * and signed by the native ledger backend. This method intentionally
+         * hard-fails instead of producing non-canonical signatures.
+         *
          * @param tx_hex Hex-encoded ledger signing payload
          * @return Hex-encoded signature
          */

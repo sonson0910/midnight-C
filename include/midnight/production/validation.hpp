@@ -1,9 +1,13 @@
 #pragma once
 
 #include "midnight/core/common_utils.hpp"
+#include "midnight/wallet/bech32m.hpp"
 #include <algorithm>
 #include <cctype>
+#include <stdexcept>
+#include <sstream>
 #include <string>
+#include <vector>
 
 namespace midnight::production::validation
 {
@@ -47,17 +51,41 @@ namespace midnight::production::validation
 
     inline bool is_unshielded_night_address(const std::string &value)
     {
-        return value.rfind("mn_addr_", 0) == 0;
+        try
+        {
+            midnight::wallet::address::decode_unshielded(value);
+            return true;
+        }
+        catch (const std::exception &)
+        {
+            return false;
+        }
     }
 
     inline bool is_dust_address(const std::string &value)
     {
-        return value.rfind("mn_dust_", 0) == 0;
+        try
+        {
+            midnight::wallet::address::decode_dust(value);
+            return true;
+        }
+        catch (const std::exception &)
+        {
+            return false;
+        }
     }
 
     inline bool is_shielded_address(const std::string &value)
     {
-        return value.rfind("mn_shield-addr_", 0) == 0;
+        try
+        {
+            midnight::wallet::address::decode_shielded(value);
+            return true;
+        }
+        catch (const std::exception &)
+        {
+            return false;
+        }
     }
 
     inline bool is_u128_decimal(const std::string &value)
@@ -88,6 +116,38 @@ namespace midnight::production::validation
         const std::string max(kMaxU128);
         return normalized.size() < max.size() ||
                (normalized.size() == max.size() && normalized <= max);
+    }
+
+    inline bool has_source_input(
+        const std::string &src_url,
+        const std::vector<std::string> &src_files)
+    {
+        return !src_url.empty() || !src_files.empty();
+    }
+
+    inline bool is_wallet_seed_or_mnemonic(const std::string &value)
+    {
+        const auto hex = normalized_hex(value);
+        if ((hex.size() == 32 || hex.size() == 64 || hex.size() == 128) &&
+            midnight::util::is_hex_string(hex))
+        {
+            return true;
+        }
+
+        std::istringstream words(value);
+        std::string word;
+        size_t count = 0;
+        while (words >> word)
+        {
+            if (!std::all_of(word.begin(), word.end(), [](unsigned char ch) {
+                    return std::islower(ch) != 0;
+                }))
+            {
+                return false;
+            }
+            ++count;
+        }
+        return count == 12 || count == 15 || count == 18 || count == 21 || count == 24;
     }
 
 } // namespace midnight::production::validation
