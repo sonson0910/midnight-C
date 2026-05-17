@@ -6,7 +6,7 @@
 #include <iomanip>
 #include <fstream>
 #include <filesystem>
-#include <sodium.h>
+#include <cstdlib>
 
 namespace midnight::contract
 {
@@ -173,6 +173,11 @@ namespace midnight::contract
         proof_server_ = std::make_unique<zk::ProofServerClient>(proof_config);
 
         indexer_ = std::make_unique<network::IndexerClient>(indexer_url);
+        const char *ffi_library = std::getenv("MIDNIGHT_LEDGER_FFI_LIBRARY");
+        if (ffi_library != nullptr && *ffi_library != '\0')
+        {
+            ledger_backend_ = ledger::make_ffi_ledger_backend(ffi_library);
+        }
 
         midnight::g_logger->info("ContractManager initialized");
     }
@@ -214,6 +219,19 @@ namespace midnight::contract
         DeployResult result;
         try
         {
+            if (auto *ffi = dynamic_cast<ledger::FfiLedgerBackend *>(ledger_backend_.get()))
+            {
+                if (ffi->can_inspect_transactions())
+                {
+                    const auto inspection = ffi->inspect_transaction(
+                        midnight::util::bytes_to_hex(transaction_bytes),
+                        8);
+                    if (inspection.success && !inspection.contract_address.empty())
+                    {
+                        result.contract_address = inspection.contract_address;
+                    }
+                }
+            }
             result.tx_hash = submit_midnight_tx_bytes(*rpc_, transaction_bytes);
             result.success = !result.tx_hash.empty();
         }
@@ -379,77 +397,24 @@ namespace midnight::contract
 
     std::vector<uint8_t> ContractManager::encode_constructor_args(const json &args)
     {
-        codec::ScaleEncoder enc;
-
-        for (const auto &arg : args)
-        {
-            if (arg.is_number_unsigned())
-            {
-                uint64_t val = arg.get<uint64_t>();
-                if (val <= 0xFF)
-                    enc.encode_u8(static_cast<uint8_t>(val));
-                else if (val <= 0xFFFF)
-                    enc.encode_u16_le(static_cast<uint16_t>(val));
-                else if (val <= 0xFFFFFFFF)
-                    enc.encode_u32_le(static_cast<uint32_t>(val));
-                else
-                    enc.encode_u64_le(val);
-            }
-            else if (arg.is_number_integer())
-            {
-                enc.encode_compact(static_cast<uint64_t>(arg.get<int64_t>()));
-            }
-            else if (arg.is_string())
-            {
-                std::string s = arg.get<std::string>();
-                // Check if hex-encoded bytes
-                if (s.substr(0, 2) == "0x")
-                {
-                    auto bytes = codec::util::hex_to_bytes(s);
-                    enc.encode_bytes(bytes);
-                }
-                else
-                {
-                    enc.encode_string(s);
-                }
-            }
-            else if (arg.is_boolean())
-            {
-                enc.encode_bool(arg.get<bool>());
-            }
-            else if (arg.is_array())
-            {
-                // Recursively encode
-                auto inner = encode_constructor_args(arg);
-                enc.encode_bytes(inner);
-            }
-        }
-
-        return enc.data();
+        (void)args;
+        throw std::logic_error(
+            "ContractManager::encode_constructor_args is disabled: Compact constructor "
+            "arguments must be encoded by the compiled Compact artifact/toolkit path and "
+            "submitted through MidnightClient::build_custom_contract_transaction or the "
+            "ledger FFI contract builders.");
     }
 
     std::vector<uint8_t> ContractManager::encode_call_args(
         const std::string &circuit_name,
         const json &args)
     {
-        codec::ScaleEncoder enc;
-
-        // Encode circuit name as selector (first 4 bytes of blake2b hash)
-        if (sodium_init() >= 0)
-        {
-            uint8_t selector[4];
-            auto name_bytes = reinterpret_cast<const uint8_t *>(
-                circuit_name.data());
-            crypto_generichash(selector, 4, name_bytes,
-                               circuit_name.size(), nullptr, 0);
-            enc.encode_raw({selector, selector + 4});
-        }
-
-        // Encode arguments
-        auto arg_bytes = encode_constructor_args(args);
-        enc.encode_raw(arg_bytes);
-
-        return enc.data();
+        (void)circuit_name;
+        (void)args;
+        throw std::logic_error(
+            "ContractManager::encode_call_args is disabled: Compact call payloads must be "
+            "encoded by the compiled Compact artifact/toolkit path and submitted through "
+            "MidnightClient::build_custom_contract_transaction or the ledger FFI contract builders.");
     }
 
 } // namespace midnight::contract

@@ -2,6 +2,7 @@
 
 #include "midnight/network/substrate_rpc.hpp"
 #include "midnight/network/indexer_client.hpp"
+#include "midnight/ledger/ledger_backend.hpp"
 #include "midnight/zk/proof_server_client.hpp"
 #include "midnight/wallet/hd_wallet.hpp"
 #include "midnight/tx/extrinsic_builder.hpp"
@@ -235,21 +236,27 @@ namespace midnight::contract
         json health_check();
 
         /**
-         * @brief Encode constructor arguments for deployment
+         * @brief Legacy helper disabled for production.
          *
-         * Convenience method to SCALE-encode constructor arguments
-         * matching the Compact contract's constructor signature.
+         * Compact constructor arguments must be encoded from the compiled
+         * Compact artifact/toolkit path. This method throws to prevent
+         * accidentally submitting non-canonical C++-guessed ABI bytes.
          *
          * @param args JSON array of arguments
-         * @return SCALE-encoded bytes
+         * @throws std::logic_error Always, with a production guidance message.
          */
         static std::vector<uint8_t> encode_constructor_args(const json &args);
 
         /**
-         * @brief Encode circuit call arguments
+         * @brief Legacy helper disabled for production.
+         *
+         * Compact call payloads must be encoded from the compiled Compact
+         * artifact/toolkit path. This method throws to prevent non-canonical
+         * selector/argument encoding.
+         *
          * @param circuit_name Circuit function name
          * @param args JSON array of arguments
-         * @return SCALE-encoded call data
+         * @throws std::logic_error Always, with a production guidance message.
          */
         static std::vector<uint8_t> encode_call_args(
             const std::string &circuit_name,
@@ -259,6 +266,7 @@ namespace midnight::contract
         std::unique_ptr<network::SubstrateRPC> rpc_;
         std::unique_ptr<zk::ProofServerClient> proof_server_;
         std::unique_ptr<network::IndexerClient> indexer_;
+        std::shared_ptr<ledger::ILedgerBackend> ledger_backend_;
 
     };
 

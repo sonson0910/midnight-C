@@ -6,9 +6,11 @@
 #include "midnight/ledger/ledger_backend.hpp"
 #include "midnight/production/artifact_manager.hpp"
 #include "midnight/production/errors.hpp"
+#include "midnight/production/state_backend.hpp"
 #include "midnight/zk/proof_server_client.hpp"
 #include <nlohmann/json.hpp>
 #include <chrono>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -26,6 +28,8 @@ namespace midnight::production
         std::string ledger_ffi_library;
         uint32_t node_timeout_ms = 10000;
         uint32_t proof_timeout_ms = 120000;
+        StateBackendMode state_backend_mode = StateBackendMode::LocalCache;
+        ManagedStateServiceConfig managed_state;
 
         /**
          * @brief Build canonical service URLs for a named Midnight network.
@@ -39,7 +43,9 @@ namespace midnight::production
          *
          * Reads MIDNIGHT_NETWORK, MIDNIGHT_NODE_URL, MIDNIGHT_INDEXER_URL,
          * MIDNIGHT_PROOF_SERVER_URL, MIDNIGHT_LEDGER_FFI_LIBRARY,
-         * MIDNIGHT_NODE_TIMEOUT_MS, and MIDNIGHT_PROOF_TIMEOUT_MS.
+         * MIDNIGHT_NODE_TIMEOUT_MS, MIDNIGHT_PROOF_TIMEOUT_MS,
+         * MIDNIGHT_STATE_MODE, MIDNIGHT_STATE_SERVICE_URL,
+         * MIDNIGHT_STATE_SERVICE_API_KEY, and MIDNIGHT_STATE_SERVICE_TIMEOUT_MS.
          */
         static ClientConfig from_environment();
     };
@@ -115,6 +121,7 @@ namespace midnight::production
 
         const ClientConfig &config() const { return config_; }
         void set_ledger_backend(std::shared_ptr<ledger::ILedgerBackend> ledger_backend);
+        void set_state_backend(std::shared_ptr<IStateBackend> state_backend);
 
         /**
          * @brief Check node, indexer, proof-server, and ledger backend readiness.
@@ -123,6 +130,26 @@ namespace midnight::production
          * best-effort and do not throw.
          */
         json health_check();
+
+        /**
+         * @brief Native ledger backend version/capability metadata.
+         */
+        ledger::LedgerBackendInfo ledger_backend_info();
+
+        /**
+         * @brief Validate address/token/seed formats with native ledger parsers.
+         */
+        ledger::ValidationResult validate_ledger_value(
+            const std::string &kind,
+            const std::string &value,
+            const std::string &network = {});
+
+        /**
+         * @brief Hash/verify a ledger-serialized Midnight transaction.
+         */
+        ledger::TransactionInspectionResult inspect_transaction_hex(
+            const std::string &transaction_hex,
+            uint8_t ledger_version = 8);
 
         /**
          * @brief Derive canonical Midnight wallet addresses through ledger FFI.
@@ -159,6 +186,41 @@ namespace midnight::production
         ledger::BuildResult build_simple_contract_call(const ledger::SimpleContractCallParams &params);
         ledger::BuildResult build_custom_contract_transaction(const ledger::CustomContractIntentParams &params);
         ledger::BuildResult sync_ledger_state(const ledger::SyncLedgerStateParams &params);
+
+        /**
+         * @brief Inspect local or managed wallet ledger-state readiness.
+         *
+         * A ready state means transaction building can run in LocalCache mode
+         * without secretly performing a long full-source fetch.
+         */
+        StateStatus state_status(
+            const ledger::SourceConfig &source,
+            uint64_t max_lag_blocks = 100);
+
+        /**
+         * @brief Refresh the configured state backend.
+         *
+         * Local backend calls the native ledger FFI sync operation. Managed
+         * backend calls a state service that owns the sync workload.
+         */
+        StateRefreshResult refresh_state(
+            const ledger::SyncLedgerStateParams &params,
+            const StateRefreshOptions &options = {});
+
+        /**
+         * @brief Ensure state is usable before build/submit workflows.
+         */
+        StateRefreshResult ensure_state_fresh(
+            const ledger::SyncLedgerStateParams &params,
+            const StateRefreshOptions &options = {});
+
+        SnapshotResult export_state_snapshot(
+            const ledger::SourceConfig &source,
+            const std::filesystem::path &snapshot_dir);
+
+        SnapshotResult import_state_snapshot(
+            const std::filesystem::path &snapshot_dir,
+            const ledger::SourceConfig &destination);
 
         BuildSubmitResult submit_build_result(ledger::BuildResult build);
 
@@ -227,6 +289,7 @@ namespace midnight::production
         network::WalletState query_wallet_state_from_transaction(
             const std::string &address,
             const std::string &tx_hash);
+        json query_cached_wallet_summary(const ledger::WalletSummaryParams &params);
         json query_contract_state(const std::string &contract_address_hex);
 
     private:
@@ -235,6 +298,7 @@ namespace midnight::production
         std::unique_ptr<network::IndexerClient> indexer_;
         std::unique_ptr<zk::ProofServerClient> proof_server_;
         std::shared_ptr<ledger::ILedgerBackend> ledger_backend_;
+        std::shared_ptr<IStateBackend> state_backend_;
     };
 
 } // namespace midnight::production

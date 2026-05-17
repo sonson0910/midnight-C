@@ -53,6 +53,12 @@ target_include_directories(midnight-tests
         ${JSONCPP_INCLUDE_DIR}
 )
 
+target_compile_definitions(midnight-tests
+    PRIVATE
+        MIDNIGHT_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+        MIDNIGHT_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"
+)
+
 if(TARGET midnight-ledger-ffi)
     add_dependencies(midnight-tests midnight-ledger-ffi)
 endif()

@@ -146,14 +146,6 @@ std::vector<uint8_t> build_connect_packet(const ConnectPayload& payload)
     size_t variable_header_size = 10;  // Protocol name + level + flags + keepalive
     size_t remaining_length = variable_header_size + payload_size;
 
-    // Encode remaining length (1-4 bytes)
-    uint32_t rl_encoded = encode_remaining_length(remaining_length);
-    size_t rl_bytes = 0;
-    if (rl_encoded > 0xFFFFFF) rl_bytes = 4;
-    else if (rl_encoded > 0xFFFF) rl_bytes = 3;
-    else if (rl_encoded > 0x7F) rl_bytes = 2;
-    else rl_bytes = 1;
-
     // Build fixed header: packet type (1 byte) + remaining length (1-4 bytes)
     packet.push_back(static_cast<uint8_t>(PacketType::CONNECT) << 4);
 

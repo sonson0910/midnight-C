@@ -19,13 +19,21 @@ namespace midnight::ledger
 
         void source_to_json(json &j, const SourceConfig &source)
         {
+            j["source_mode"] = source_mode_to_string(source.source_mode);
             j["src_url"] = source.src_url;
             j["src_files"] = source.src_files;
             j["fetch_only_cached"] = source.fetch_only_cached;
+            j["require_ledger_state_cache"] = source.require_ledger_state_cache;
             j["ignore_block_context"] = source.ignore_block_context;
             j["dust_warp"] = source.dust_warp;
             j["fetch_cache"] = source.fetch_cache;
             j["ledger_state_db"] = source.ledger_state_db;
+            j["fetch_concurrency"] = source.fetch_concurrency;
+            j["fetch_compute_concurrency"] = source.fetch_compute_concurrency
+                                                 ? json(*source.fetch_compute_concurrency)
+                                                 : json(nullptr);
+            j["fetch_retry_count"] = source.fetch_retry_count;
+            j["fetch_retry_delay_ms"] = source.fetch_retry_delay_ms;
             j["from_block"] = source.from_block ? json(*source.from_block) : json(nullptr);
             j["to_block"] = source.to_block ? json(*source.to_block) : json(nullptr);
             j["transaction_hashes"] = source.transaction_hashes;
@@ -119,6 +127,15 @@ namespace midnight::ledger
             return j;
         }
 
+        json wallet_summary_to_json(const WalletSummaryParams &params)
+        {
+            json j;
+            source_to_json(j["source"], params.source);
+            j["wallet_seed"] = params.wallet_seed;
+            j["timeout_ms"] = params.timeout_ms;
+            return j;
+        }
+
         BuildResult build_result_from_json(const json &j)
         {
             BuildResult result;
@@ -169,6 +186,56 @@ namespace midnight::ledger
             return result;
         }
 
+        LedgerBackendInfo backend_info_from_json(const json &j, std::string raw_json)
+        {
+            LedgerBackendInfo result;
+            result.success = j.value("success", false);
+            result.ffi_name = j.value("ffi_name", "");
+            result.ffi_version = j.value("ffi_version", "");
+            result.abi_version = j.value("abi_version", 0u);
+            result.source = j.value("source", "");
+            result.ledger = j.value("ledger", "");
+            result.zswap = j.value("zswap", "");
+            result.onchain_runtime = j.value("onchain_runtime", "");
+            result.compact_toolchain = j.value("compact_toolchain", "");
+            result.compact_runtime = j.value("compact_runtime", "");
+            result.indexer_schema = j.value("indexer_schema", "");
+            result.proof_server = j.value("proof_server", "");
+            result.panic_strategy = j.value("panic_strategy", "");
+            result.capabilities = j.value("capabilities", std::vector<std::string>{});
+            result.warnings = j.value("warnings", std::vector<std::string>{});
+            result.error = j.value("error", "");
+            result.raw_json = std::move(raw_json);
+            return result;
+        }
+
+        ValidationResult validation_from_json(const json &j)
+        {
+            ValidationResult result;
+            result.success = j.value("success", false);
+            result.valid = j.value("valid", false);
+            result.kind = j.value("kind", "");
+            result.normalized = j.value("normalized", "");
+            result.network = j.value("network", "");
+            result.error = j.value("error", "");
+            return result;
+        }
+
+        TransactionInspectionResult inspection_from_json(const json &j)
+        {
+            TransactionInspectionResult result;
+            result.success = j.value("success", false);
+            result.verified = j.value("verified", false);
+            result.transaction_hash = j.value("transaction_hash", "");
+            result.tx_type = j.value("tx_type", "");
+            result.size_bytes = j.value("size_bytes", 0u);
+            result.ledger_version = j.value("ledger_version", "");
+            result.contract_address = j.value("contract_address", "");
+            result.tagged_contract_address = j.value("tagged_contract_address", "");
+            result.error = j.value("error", "");
+            return result;
+        }
+
         std::string default_library_name()
         {
 #ifdef _WIN32
@@ -196,6 +263,7 @@ namespace midnight::ledger
     BuildResult UnavailableLedgerBackend::build_simple_contract_call(const SimpleContractCallParams &) { return unavailable("call_contract"); }
     BuildResult UnavailableLedgerBackend::build_custom_contract_transaction(const CustomContractIntentParams &) { return unavailable("custom_contract_transaction"); }
     BuildResult UnavailableLedgerBackend::sync_ledger_state(const SyncLedgerStateParams &) { return unavailable("sync_ledger_state"); }
+    BuildResult UnavailableLedgerBackend::wallet_summary(const WalletSummaryParams &) { return unavailable("wallet_summary"); }
 
     FfiLedgerBackend::FfiLedgerBackend(std::string library_path)
     {
@@ -212,7 +280,10 @@ namespace midnight::ledger
             return;
         }
         build_fn_ = reinterpret_cast<BuildFn>(GetProcAddress(module, "midnight_ledger_build_transaction"));
+        info_fn_ = reinterpret_cast<InfoFn>(GetProcAddress(module, "midnight_ledger_backend_info"));
         wallet_addresses_fn_ = reinterpret_cast<WalletAddressesFn>(GetProcAddress(module, "midnight_ledger_derive_wallet_addresses"));
+        validate_fn_ = reinterpret_cast<ValidateFn>(GetProcAddress(module, "midnight_ledger_validate"));
+        inspect_tx_fn_ = reinterpret_cast<InspectTxFn>(GetProcAddress(module, "midnight_ledger_inspect_transaction"));
         free_fn_ = reinterpret_cast<FreeFn>(GetProcAddress(module, "midnight_ledger_free_string"));
 #else
         handle_ = dlopen(library_path.c_str(), RTLD_NOW);
@@ -223,7 +294,10 @@ namespace midnight::ledger
             return;
         }
         build_fn_ = reinterpret_cast<BuildFn>(dlsym(handle_, "midnight_ledger_build_transaction"));
+        info_fn_ = reinterpret_cast<InfoFn>(dlsym(handle_, "midnight_ledger_backend_info"));
         wallet_addresses_fn_ = reinterpret_cast<WalletAddressesFn>(dlsym(handle_, "midnight_ledger_derive_wallet_addresses"));
+        validate_fn_ = reinterpret_cast<ValidateFn>(dlsym(handle_, "midnight_ledger_validate"));
+        inspect_tx_fn_ = reinterpret_cast<InspectTxFn>(dlsym(handle_, "midnight_ledger_inspect_transaction"));
         free_fn_ = reinterpret_cast<FreeFn>(dlsym(handle_, "midnight_ledger_free_string"));
 #endif
         if (!build_fn_ || !free_fn_)
@@ -245,6 +319,120 @@ namespace midnight::ledger
             dlclose(handle_);
         }
 #endif
+    }
+
+    LedgerBackendInfo FfiLedgerBackend::backend_info()
+    {
+        LedgerBackendInfo result;
+        if (!can_report_backend_info())
+        {
+            result.error = last_error_.empty()
+                ? "Native Midnight ledger FFI backend is missing midnight_ledger_backend_info"
+                : last_error_;
+            return result;
+        }
+
+        char *response_raw = nullptr;
+        const int code = info_fn_(&response_raw);
+        std::string response = response_raw ? response_raw : "";
+        if (response_raw)
+        {
+            free_fn_(response_raw);
+        }
+        try
+        {
+            result = backend_info_from_json(json::parse(response), response);
+        }
+        catch (const std::exception &e)
+        {
+            result.error = std::string("Invalid native Midnight backend info response: ") + e.what();
+            return result;
+        }
+        if (code != 0 && result.error.empty())
+        {
+            result.error = "Native Midnight backend info call failed";
+        }
+        return result;
+    }
+
+    ValidationResult FfiLedgerBackend::validate(
+        const std::string &kind,
+        const std::string &value,
+        const std::string &network)
+    {
+        ValidationResult result;
+        if (!can_validate())
+        {
+            result.error = last_error_.empty()
+                ? "Native Midnight ledger FFI backend is missing midnight_ledger_validate"
+                : last_error_;
+            return result;
+        }
+
+        json request = {
+            {"kind", kind},
+            {"value", value},
+            {"network", network}};
+        char *response_raw = nullptr;
+        const int code = validate_fn_(request.dump().c_str(), &response_raw);
+        std::string response = response_raw ? response_raw : "";
+        if (response_raw)
+        {
+            free_fn_(response_raw);
+        }
+        try
+        {
+            result = validation_from_json(json::parse(response));
+        }
+        catch (const std::exception &e)
+        {
+            result.error = std::string("Invalid native Midnight validation response: ") + e.what();
+            return result;
+        }
+        if (code != 0 && result.error.empty())
+        {
+            result.error = "Native Midnight validation call failed";
+        }
+        return result;
+    }
+
+    TransactionInspectionResult FfiLedgerBackend::inspect_transaction(
+        const std::string &transaction_hex,
+        uint8_t ledger_version)
+    {
+        TransactionInspectionResult result;
+        if (!can_inspect_transactions())
+        {
+            result.error = last_error_.empty()
+                ? "Native Midnight ledger FFI backend is missing midnight_ledger_inspect_transaction"
+                : last_error_;
+            return result;
+        }
+
+        json request = {
+            {"transaction_hex", transaction_hex},
+            {"ledger_version", ledger_version}};
+        char *response_raw = nullptr;
+        const int code = inspect_tx_fn_(request.dump().c_str(), &response_raw);
+        std::string response = response_raw ? response_raw : "";
+        if (response_raw)
+        {
+            free_fn_(response_raw);
+        }
+        try
+        {
+            result = inspection_from_json(json::parse(response));
+        }
+        catch (const std::exception &e)
+        {
+            result.error = std::string("Invalid native Midnight transaction inspection response: ") + e.what();
+            return result;
+        }
+        if (code != 0 && result.error.empty())
+        {
+            result.error = "Native Midnight transaction inspection call failed";
+        }
+        return result;
     }
 
     WalletAddressDerivationResult FfiLedgerBackend::derive_wallet_addresses(
@@ -369,6 +557,10 @@ namespace midnight::ledger
     BuildResult FfiLedgerBackend::sync_ledger_state(const SyncLedgerStateParams &params)
     {
         return call_backend("sync_ledger_state", sync_to_json(params).dump());
+    }
+    BuildResult FfiLedgerBackend::wallet_summary(const WalletSummaryParams &params)
+    {
+        return call_backend("wallet_summary", wallet_summary_to_json(params).dump());
     }
 
     std::shared_ptr<ILedgerBackend> make_unavailable_ledger_backend()

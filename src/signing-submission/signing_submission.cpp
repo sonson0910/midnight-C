@@ -158,36 +158,6 @@ namespace midnight::signing_submission
     // KeyManager Implementation
     // ============================================================================
 
-    /**
-     * SR25519 Key Derivation Helper
-     * 
-     * Uses the production-ready Sr25519Signer implementation based on
-     * libsodium's Ristretto255 which provides:
-     * - Same security properties as SR25519 (cofactor 8)
-     * - Wire-compatible with Substrate chains
-     * - HDKD derivation following BIP-39 + SLIP-0010
-     * 
-     * Key derivation: BIP39 seed -> HD path m/44'/2400'/account'/role/index
-     * This mirrors the Midnight SDK behavior where:
-     *   - SR25519 is used for AURA block authorship
-     *   - Ristretto255 provides the cryptographic primitives
-     */
-    static std::pair<std::array<uint8_t, 32>, std::array<uint8_t, 64>> derive_sr25519_from_seed(
-        const std::array<uint8_t, 32>& seed) {
-        
-        // Use production Sr25519Signer for key derivation
-        midnight::crypto::Sr25519Signer::initialize();
-        
-        auto [secret_key, public_key] = midnight::crypto::Sr25519Signer::keypair_from_seed(seed);
-        
-        std::array<uint8_t, 32> pk{};
-        std::array<uint8_t, 64> sk{};
-        std::memcpy(pk.data(), public_key.data(), 32);
-        std::memcpy(sk.data(), secret_key.data(), 64);
-        
-        return {pk, sk};
-    }
-
     std::optional<Keypair> KeyManager::generate_sr25519_key()
     {
         if (!kHasSodium)
@@ -1050,7 +1020,7 @@ namespace midnight::signing_submission
             auto now = std::chrono::high_resolution_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start);
 
-            if (elapsed.count() > timeout_ms)
+            if (timeout_ms > 0 && elapsed > std::chrono::milliseconds(timeout_ms))
             {
                 return false;
             }

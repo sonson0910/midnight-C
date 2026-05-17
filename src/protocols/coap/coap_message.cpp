@@ -67,13 +67,11 @@ namespace midnight::protocols::coap
         // Extended delta (RFC 7252 §3.1):
         //   delta 13 -> delta = 13 + next byte
         //   delta 14 -> delta = 269 + (next_byte << 8) + next_next_byte  <-- addition, not OR
-        uint16_t delta = delta_nibble;
         if (delta_nibble == 13) {
             if (pos >= len) return "";
-            delta = 13 + data[pos++];
+            ++pos;
         } else if (delta_nibble == 14) {
             if (pos + 1 >= len) return "";
-            delta = 269 + (static_cast<uint16_t>(data[pos]) << 8) + data[pos + 1];
             pos += 2;
         }
 

@@ -27,7 +27,7 @@ struct GraphQLSubscriptionClient::WsImpl {
     std::shared_ptr<httplib::ws::WebSocketClient> ws_client;
     std::string url;
 
-    WsImpl(const std::string& wss_url)
+    WsImpl(const std::string& wss_url, int timeout_ms)
         : url(wss_url)
     {
         // Midnight Indexer uses graphql-transport-ws subprotocol
@@ -37,7 +37,9 @@ struct GraphQLSubscriptionClient::WsImpl {
             {"Sec-WebSocket-Protocol", "graphql-transport-ws"}
         };
         ws_client = std::make_shared<httplib::ws::WebSocketClient>(wss_url, headers);
-        ws_client->set_connection_timeout(30, 0);
+        const int effective_timeout_ms = timeout_ms > 0 ? timeout_ms : 30000;
+        ws_client->set_connection_timeout(effective_timeout_ms / 1000,
+                                          (effective_timeout_ms % 1000) * 1000);
         ws_client->set_read_timeout(60, 0);
         // Disable SSL certificate verification for preview network
         ws_client->enable_server_certificate_verification(false);
@@ -74,7 +76,7 @@ struct GraphQLSubscriptionClient::WsImpl {
 
 GraphQLSubscriptionClient::GraphQLSubscriptionClient(const std::string& ws_url,
                                                      const std::string& http_base)
-    : ws_url_(ws_url), http_base_(http_base)
+    : ws_impl_(nullptr), ws_url_(ws_url), http_base_(http_base)
 {
     // Derive HTTP GraphQL URL from WS URL if not provided
     if (http_base_.empty()) {
@@ -103,11 +105,12 @@ GraphQLSubscriptionClient::~GraphQLSubscriptionClient() {
 }
 
 GraphQLSubscriptionClient::GraphQLSubscriptionClient(GraphQLSubscriptionClient&& other) noexcept
-    : ws_url_(std::move(other.ws_url_))
+    : ws_impl_(std::move(other.ws_impl_))
+    , ws_url_(std::move(other.ws_url_))
     , http_base_(std::move(other.http_base_))
-    , ws_impl_(std::move(other.ws_impl_))
     , connected_(other.connected_.load())
     , running_(other.running_.load())
+    , session_id_(std::move(other.session_id_))
     , subscription_counter_(other.subscription_counter_)
     , active_subscriptions_(std::move(other.active_subscriptions_))
     , conn_cb_(std::move(other.conn_cb_))
@@ -116,11 +119,11 @@ GraphQLSubscriptionClient::GraphQLSubscriptionClient(GraphQLSubscriptionClient&&
     , balance_cb_(std::move(other.balance_cb_))
     , progress_cb_(std::move(other.progress_cb_))
     , dust_generation_cb_(std::move(other.dust_generation_cb_))
+    , last_state_(std::move(other.last_state_))
+    , graphql_http_url_(std::move(other.graphql_http_url_))
     , night_balance_(other.night_balance_.load())
     , dust_balance_(other.dust_balance_.load())
     , utxo_count_(other.utxo_count_.load())
-    , last_state_(std::move(other.last_state_))
-    , graphql_http_url_(std::move(other.graphql_http_url_))
 {
     other.connected_ = false;
     other.running_ = false;
@@ -164,7 +167,7 @@ bool GraphQLSubscriptionClient::connect(int timeout_ms, const std::string& auth_
 
     // Create real WebSocket client using httplib::ws::WebSocketClient
     try {
-        ws_impl_ = std::make_unique<WsImpl>(ws_url_);
+        ws_impl_ = std::make_unique<WsImpl>(ws_url_, timeout_ms);
 
         // Open WebSocket connection
         if (!ws_impl_->connect_ws()) {

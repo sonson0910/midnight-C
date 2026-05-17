@@ -36,6 +36,8 @@ int main()
         "wss://rpc." + network + ".midnight.network");
     source.fetch_cache = env_or("MIDNIGHT_FETCH_CACHE", "redb:midnight_cache/fetch_cache.db");
     source.ledger_state_db = env_or("MIDNIGHT_LEDGER_STATE_DB", "midnight_cache/ledger_cache_db");
+    source.source_mode = midnight::ledger::source_mode_from_string(
+        env_or("MIDNIGHT_SOURCE_MODE", "local-cache"));
     source.fetch_only_cached = env_or("MIDNIGHT_FETCH_ONLY_CACHED", "1") == "1";
 
     TransferNightParams transfer;
@@ -51,6 +53,16 @@ int main()
     }
 
     MidnightClient client(client_cfg);
+
+    const auto state = client.state_status(source);
+    if (!state.ready && source.source_mode == midnight::ledger::SourceMode::LocalCache)
+    {
+        std::cerr
+            << "Local ledger state cache is not ready: "
+            << state.ledger_state_path
+            << "\nRun sync_ledger_state, import a state snapshot, or set MIDNIGHT_SOURCE_MODE=cold-sync explicitly.\n";
+        return 3;
+    }
 
     PipelineOptions options;
     options.artifacts.root_dir = "midnight-artifacts";

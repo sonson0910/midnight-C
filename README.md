@@ -63,6 +63,10 @@ cmake --build . --config Release
 Production wallet and transaction flows require the native ledger FFI built from
 `midnight-research` so address derivation, proof payloads, transaction bytes,
 and hashes stay canonical.
+The repository records the active source-compatible version set in
+[`midnight-versions.json`](midnight-versions.json). Treat the local
+`midnight-research` source tree as the build source of truth when public docs
+lag behind release-candidate code.
 
 ```bash
 export MIDNIGHT_NETWORK=preview
@@ -71,6 +75,7 @@ export MIDNIGHT_NODE_URL="https://rpc.preview.midnight.network"
 export MIDNIGHT_SOURCE_URL="wss://rpc.preview.midnight.network"
 export MIDNIGHT_INDEXER_URL="https://indexer.preview.midnight.network/api/v4/graphql"
 export MIDNIGHT_PROOF_SERVER_URL="http://127.0.0.1:6300"
+export MIDNIGHT_STATE_MODE="local-cache"
 
 ./build/bin/wallet-generator-new
 ```
@@ -78,6 +83,12 @@ export MIDNIGHT_PROOF_SERVER_URL="http://127.0.0.1:6300"
 `midnight::blockchain::Wallet` is retained for encrypted seed storage and legacy
 compatibility. It must not be used to produce production Midnight transactions.
 Use `midnight::production::MidnightClient` for build, submit, and confirmation.
+
+For future maintainers and Codex/ChatGPT sessions, read
+[`docs/MIDNIGHT_CXX_SDK_CONTEXT.md`](docs/MIDNIGHT_CXX_SDK_CONTEXT.md) first.
+It records the current production communication model, ledger FFI boundary,
+live-test workflow, and the Midnight-specific format rules that should not be
+regressed.
 
 ## Module Quick Start (2–6)
 
@@ -185,8 +196,16 @@ auto deployed = mgr.submit_deploy_transaction(ledger_built_deploy_tx_bytes);
 auto called = mgr.submit_call_transaction(ledger_built_call_tx_bytes);
 
 midnight::production::MidnightClient client(config);
+auto info = client.ledger_backend_info();
+auto validation = client.validate_ledger_value("contract-address", contract_hex);
+auto tx_info = client.inspect_transaction_hex(ledger_built_deploy_tx_hex);
 auto state = client.query_contract_state(contract_hex);
 ```
+
+Do not use `ContractManager::encode_constructor_args()` or
+`ContractManager::encode_call_args()` for production. They intentionally throw:
+Compact constructor/call payloads must come from compiled Compact artifacts and
+the native ledger/toolkit path.
 
 ### 6 — Production Transaction Building
 
@@ -247,6 +266,26 @@ cargo build \
 Use the resulting `libmidnight_ledger_ffi.dylib`/`.so`/`.dll` as
 `ClientConfig::ledger_ffi_library`.
 
+Production transaction builds should run from a prepared state backend, not from
+an accidental cold sync on a user request path. The default is local cache:
+
+```cpp
+midnight::production::ClientConfig config =
+    midnight::production::ClientConfig::from_environment();
+config.state_backend_mode = midnight::production::StateBackendMode::LocalCache;
+
+midnight::production::MidnightClient client(config);
+auto status = client.state_status(source);
+if (!status.ready) {
+    auto refreshed = client.refresh_state(sync_params);
+}
+```
+
+For managed deployments, set `MIDNIGHT_STATE_MODE=managed` and
+`MIDNIGHT_STATE_SERVICE_URL=https://...`; the SDK will use the managed state
+service for status/refresh while keeping C++ as the public API and ledger FFI as
+the canonical transaction builder.
+
 Live submit verification is intentionally gated and never runs by default:
 
 ```bash
@@ -263,20 +302,47 @@ ctest --test-dir build_codex_verify_full --output-on-failure
 Optional live-test overrides: `MIDNIGHT_LIVE_INDEXER_URL`,
 `MIDNIGHT_LIVE_PROOF_SERVER_URL`, `MIDNIGHT_LIVE_FETCH_CACHE`,
 `MIDNIGHT_LIVE_LEDGER_STATE_DB`, `MIDNIGHT_LIVE_ARTIFACT_DIR`,
-`MIDNIGHT_LIVE_WALLET_ID`, and `MIDNIGHT_LIVE_CONFIRMATION_TIMEOUT_MS`.
+`MIDNIGHT_LIVE_WALLET_ID`, `MIDNIGHT_LIVE_DUST_WARP`,
+`MIDNIGHT_LIVE_FETCH_CONCURRENCY`, `MIDNIGHT_LIVE_FETCH_RETRY_COUNT`,
+`MIDNIGHT_LIVE_FETCH_RETRY_DELAY_MS`, and
+`MIDNIGHT_LIVE_CONFIRMATION_TIMEOUT_MS`.
 
 For an interactive preprod flow, use the helper script:
 
 ```bash
 tools/midnight-preprod-live.sh generate-wallet
 # Paste the printed NIGHT address into https://faucet.preprod.midnight.network/
-# Start your proof server, then:
+# Start your proof server, then check it:
+tools/midnight-preprod-live.sh proof-health
+
+# First production build needs a valid ledger cache. This can take a while on
+# a cold machine, but the helper writes midpoint progress to
+# midnight_cache/sync-ledger-state.log. Transient preview RPC fetch failures are
+# auto-resumed by default; tune with MIDNIGHT_LIVE_SYNC_MAX_RESTARTS.
+tools/midnight-preprod-live.sh sync-ledger-state
+tools/midnight-preprod-live.sh sync-status
+tools/midnight-preprod-live.sh watch-checkpoint 10
+tools/midnight-preprod-live.sh enable-local-mode
+tools/midnight-preprod-live.sh local-mode-status
+
+# If the public preview RPC drops the background WSS task during cold sync,
+# retry with lower concurrency:
+MIDNIGHT_LIVE_FETCH_CONCURRENCY=1 MIDNIGHT_LIVE_FETCH_RETRY_COUNT=10 \
+  tools/midnight-preprod-live.sh sync-ledger-state
+
+# Reuse the cache later or move it to another machine:
+tools/midnight-preprod-live.sh export-cache
+tools/midnight-preprod-live.sh import-cache midnight_cache/midnight-preview-cache.tar.gz
+
+# After cache sync:
 tools/midnight-preprod-live.sh register-dust
 tools/midnight-preprod-live.sh transfer-night
 ```
 
-Wallet secrets are written under `.secrets/midnight-preprod/`, which is ignored
-by git.
+Wallet secrets are written under `.secrets/midnight-<network>/`, which is
+ignored by git. The source transaction cache and wallet ledger-state cache live
+under `midnight_cache/`; applications should treat them as build artifacts and
+not commit them.
 
 ---
 
@@ -403,6 +469,7 @@ ctest --output-on-failure
 - ✅ Node JSON-RPC submission for ledger-built Midnight transactions
 - ✅ Production transaction builder abstraction through native ledger FFI
 - ✅ DUST registration, NIGHT transfer, Compact deploy/call, custom intent submission
+- ✅ Native FFI backend info, format validation, tx hash/verify, and deploy address extraction
 - ✅ Artifact saving and indexer confirmation pipeline
 - ⏳ Optional protocol integrations such as CoAPS/DTLS
 

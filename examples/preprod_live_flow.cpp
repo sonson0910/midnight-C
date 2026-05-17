@@ -93,15 +93,30 @@ namespace
         source.src_url = env_value(
             "MIDNIGHT_LIVE_SOURCE_URL",
             env_value("MIDNIGHT_SOURCE_URL", "wss://rpc." + network + ".midnight.network"));
+        source.source_mode = midnight::ledger::source_mode_from_string(
+            env_value("MIDNIGHT_LIVE_SOURCE_MODE", "auto"));
         source.fetch_only_cached = env_bool("MIDNIGHT_LIVE_FETCH_ONLY_CACHED", false);
+        source.require_ledger_state_cache =
+            env_bool("MIDNIGHT_LIVE_REQUIRE_LEDGER_STATE_CACHE", true);
         source.ignore_block_context = env_bool("MIDNIGHT_LIVE_IGNORE_BLOCK_CONTEXT", false);
-        source.dust_warp = env_bool("MIDNIGHT_LIVE_DUST_WARP", false);
+        source.dust_warp = env_bool("MIDNIGHT_LIVE_DUST_WARP", true);
         source.fetch_cache = env_value(
             "MIDNIGHT_LIVE_FETCH_CACHE",
             "redb:midnight_cache/live_submit_fetch_cache.db");
         source.ledger_state_db = env_value(
             "MIDNIGHT_LIVE_LEDGER_STATE_DB",
             "midnight_cache/live_submit_ledger_state_db");
+        source.fetch_concurrency = static_cast<uint32_t>(
+            env_u64("MIDNIGHT_LIVE_FETCH_CONCURRENCY", 4));
+        const auto compute_concurrency = env_value("MIDNIGHT_LIVE_FETCH_COMPUTE_CONCURRENCY");
+        if (!compute_concurrency.empty())
+        {
+            source.fetch_compute_concurrency =
+                static_cast<uint32_t>(std::stoul(compute_concurrency));
+        }
+        source.fetch_retry_count = static_cast<uint32_t>(
+            env_u64("MIDNIGHT_LIVE_FETCH_RETRY_COUNT", 5));
+        source.fetch_retry_delay_ms = env_u64("MIDNIGHT_LIVE_FETCH_RETRY_DELAY_MS", 5000);
         if (auto from_block = env_optional_u64("MIDNIGHT_LIVE_SOURCE_FROM_BLOCK"))
         {
             source.from_block = *from_block;
@@ -119,6 +134,25 @@ namespace
             source.transaction_hashes.push_back(funding_tx);
         }
         return source;
+    }
+
+    bool is_bounded_source(const midnight::ledger::SourceConfig &source)
+    {
+        return source.from_block.has_value() || source.to_block.has_value();
+    }
+
+    void configure_build_source_for_safety(midnight::ledger::SourceConfig &source)
+    {
+        if (!env_bool("MIDNIGHT_LIVE_ALLOW_COLD_SYNC", false) && !is_bounded_source(source))
+        {
+            source.source_mode = midnight::ledger::SourceMode::LocalCache;
+            source.fetch_only_cached = true;
+            return;
+        }
+        if (source.source_mode == midnight::ledger::SourceMode::Auto && !is_bounded_source(source))
+        {
+            source.source_mode = midnight::ledger::SourceMode::ColdSync;
+        }
     }
 
     void print_build_result(const midnight::ledger::BuildResult &result)
@@ -169,8 +203,11 @@ namespace
 
     bool should_fail_for_unsynced_cache(const midnight::ledger::SourceConfig &source)
     {
-        return source.fetch_only_cached && !source.from_block && !source.to_block &&
-               !has_cache_files(source.ledger_state_db);
+        const bool local_cache_mode =
+            source.source_mode == midnight::ledger::SourceMode::LocalCache ||
+            source.fetch_only_cached;
+        return source.require_ledger_state_cache && local_cache_mode &&
+               !is_bounded_source(source) && !has_cache_files(source.ledger_state_db);
     }
 
     midnight::production::PipelineOptions pipeline_options(const std::string &wallet_id)
@@ -224,11 +261,7 @@ namespace
 
         midnight::ledger::RegisterDustParams params;
         params.source = source_config();
-        if (!env_bool("MIDNIGHT_LIVE_ALLOW_COLD_SYNC", false) &&
-            !params.source.from_block && !params.source.to_block)
-        {
-            params.source.fetch_only_cached = true;
-        }
+        configure_build_source_for_safety(params.source);
         if (should_fail_for_unsynced_cache(params.source))
         {
             std::cerr << "error=Ledger state cache is not synced. Run `tools/midnight-preprod-live.sh sync-ledger-state` first, or set MIDNIGHT_LIVE_ALLOW_COLD_SYNC=1 to opt into a long cold sync inside register-dust.\n";
@@ -278,11 +311,7 @@ namespace
 
         midnight::ledger::TransferNightParams params;
         params.source = source_config();
-        if (!env_bool("MIDNIGHT_LIVE_ALLOW_COLD_SYNC", false) &&
-            !params.source.from_block && !params.source.to_block)
-        {
-            params.source.fetch_only_cached = true;
-        }
+        configure_build_source_for_safety(params.source);
         if (should_fail_for_unsynced_cache(params.source))
         {
             std::cerr << "error=Ledger state cache is not synced. Run `tools/midnight-preprod-live.sh sync-ledger-state` first, or set MIDNIGHT_LIVE_ALLOW_COLD_SYNC=1 to opt into a long cold sync inside transfer-night.\n";
@@ -308,21 +337,74 @@ namespace
         auto config = client_config();
         midnight::production::MidnightClient client(config);
         const auto address = require_env("MIDNIGHT_LIVE_NIGHT_ADDRESS");
+        const auto source_mode = env_value("MIDNIGHT_LIVE_BALANCE_SOURCE", "local-cache");
 
         midnight::network::WalletState state;
         midnight::network::IndexerClient indexer(config.indexer_url, config.node_timeout_ms);
         const auto funding_tx = env_value("MIDNIGHT_LIVE_FUNDING_TX_HASH");
         const auto funding_block = env_optional_u64("MIDNIGHT_LIVE_FUNDING_BLOCK");
-        if (!funding_tx.empty())
+        if (source_mode == "local-cache" || source_mode == "cache")
+        {
+            midnight::ledger::WalletSummaryParams params;
+            params.source = source_config();
+            configure_build_source_for_safety(params.source);
+            if (should_fail_for_unsynced_cache(params.source))
+            {
+                std::cerr << "error=Ledger state cache is not synced. Run `tools/midnight-preprod-live.sh sync-ledger-state` first, or set MIDNIGHT_LIVE_BALANCE_SOURCE=funding-tx for the old faucet transaction debug path.\n";
+                return 1;
+            }
+            params.wallet_seed = require_env("MIDNIGHT_LIVE_SOURCE_SEED");
+            params.timeout_ms = env_u64("MIDNIGHT_LIVE_BALANCE_TIMEOUT_MS", 60000);
+
+            const auto summary = client.query_cached_wallet_summary(params);
+            const auto spendable_night = summary.value("spendable_night_balance", "0");
+            const auto shielded_night = summary.value("shielded_night_balance", "0");
+            const auto registered_night = summary.value("registered_night_balance", "0");
+            const auto generated_dust = summary.value("generated_dust_balance", "0");
+            const auto dust_capacity = summary.value("generated_dust_capacity", "0");
+
+            std::cout << "address=" << address << "\n";
+            std::cout << "night_balance=" << spendable_night << "\n";
+            std::cout << "spendable_night_balance=" << spendable_night << "\n";
+            std::cout << "registered_night_balance=" << registered_night << "\n";
+            std::cout << "shielded_night_balance=" << shielded_night << "\n";
+            std::cout << "dust_balance=" << generated_dust << "\n";
+            std::cout << "dust_capacity=" << dust_capacity << "\n";
+            std::cout << "utxo_count=" << summary.value("utxo_count", 0u) << "\n";
+            std::cout << "dust_utxo_count=" << summary.value("dust_utxo_count", 0u) << "\n";
+            std::cout << "shielded_coin_count=" << summary.value("shielded_coin_count", 0u) << "\n";
+            std::cout << "ledger_cache_height=" << summary.value("latest_source_height", 0u) << "\n";
+            std::cout << "balance_source=local-ledger-cache\n";
+            const auto dust_error = summary.value("dust_error", "");
+            if (!dust_error.empty())
+            {
+                std::cerr << "dust_warning=" << dust_error << "\n";
+            }
+            return 0;
+        }
+
+        if (source_mode == "funding-tx" && !funding_tx.empty())
         {
             state = indexer.query_wallet_state_from_transaction(address, funding_tx);
         }
-        else if (funding_block)
+        else if (source_mode == "funding-block" && funding_block)
         {
             state = indexer.query_wallet_state(
                 address,
                 static_cast<uint32_t>(*funding_block),
                 static_cast<uint32_t>(*funding_block));
+        }
+        else if (source_mode == "funding-tx" || source_mode == "funding-block")
+        {
+            std::cerr << "error=MIDNIGHT_LIVE_BALANCE_SOURCE='" << source_mode
+                      << "' requires the matching MIDNIGHT_LIVE_FUNDING_TX_HASH or MIDNIGHT_LIVE_FUNDING_BLOCK value.\n";
+            return 1;
+        }
+        else if (source_mode != "wallet-scan" && source_mode != "indexer-scan")
+        {
+            std::cerr << "error=Unknown MIDNIGHT_LIVE_BALANCE_SOURCE='" << source_mode
+                      << "'. Use local-cache, funding-tx, funding-block, or indexer-scan.\n";
+            return 1;
         }
         else
         {
@@ -331,14 +413,15 @@ namespace
 
         std::cout << "address=" << state.address << "\n";
         std::cout << "night_balance=" << state.unshielded_balance << "\n";
+        std::cout << "spendable_night_balance=" << state.unshielded_balance << "\n";
         std::cout << "dust_balance=" << state.dust_balance << "\n";
         std::cout << "utxo_count=" << state.available_utxo_count << "\n";
         std::cout << "dust_registered_utxo_count=" << state.dust_registered_utxo_count << "\n";
-        if (!funding_tx.empty())
+        if (source_mode == "funding-tx" && !funding_tx.empty())
         {
             std::cout << "balance_source=transaction:" << funding_tx << "\n";
         }
-        else if (funding_block)
+        else if (source_mode == "funding-block" && funding_block)
         {
             std::cout << "balance_source=block:" << *funding_block << "\n";
         }

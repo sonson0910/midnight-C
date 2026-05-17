@@ -160,6 +160,7 @@ if(ENABLE_BLOCKCHAIN)
         signing-submission/signing_submission.cpp
         production/midnight_client.cpp
         production/artifact_manager.cpp
+        production/state_backend.cpp
         contracts/contract_interactor.cpp
         contract/contract_manager.cpp
     )

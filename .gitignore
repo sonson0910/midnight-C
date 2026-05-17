@@ -7,8 +7,11 @@ build_verify/
 build_check/
 cmake_build/
 cmake-build/
+.cmake-build/
 out/
 Testing/
+midnight_cache/
+midnight-artifacts/
 
 # Compiled files
 *.o

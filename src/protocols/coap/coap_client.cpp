@@ -37,13 +37,6 @@ namespace midnight::protocols::coap
         constexpr uint16_t DEFAULT_COAPS_PORT = 5684;
         constexpr size_t MAX_UDP_PACKET_SIZE = 1152;
 
-        uint16_t generate_message_id()
-        {
-            static std::mt19937 rng(static_cast<uint32_t>(
-                std::chrono::steady_clock::now().time_since_epoch().count()));
-            return static_cast<uint16_t>(rng() & 0xFFFF);
-        }
-
         uint8_t generate_token()
         {
             static std::mt19937 rng(static_cast<uint32_t>(
@@ -459,14 +452,13 @@ namespace midnight::protocols::coap
             uint8_t delta_nibble = (first_byte >> 4) & 0x0F;
             uint8_t length_nibble = first_byte & 0x0F;
 
-                // Extended delta
-                uint16_t delta = delta_nibble;
-                if (delta_nibble == 13) {
+            // Extended delta bytes are consumed here; this response parser does
+            // not need the reconstructed option number.
+            if (delta_nibble == 13) {
                 if (pos >= len) break;
-                delta = 13 + data[pos++];
+                ++pos;
             } else if (delta_nibble == 14) {
                 if (pos + 1 >= len) break;
-                delta = 269 + ((static_cast<uint16_t>(data[pos]) << 8) | data[pos + 1]);
                 pos += 2;
             }
 

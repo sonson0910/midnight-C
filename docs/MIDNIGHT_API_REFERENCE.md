@@ -317,8 +317,9 @@ interface ServiceUriConfig {
 │  C Library → MidnightNodeRPC → JSON-RPC HTTP POST    │
 │                                                     │
 │  ✓ Submit signed transactions                        │
-│  ✓ Query UTXOs, block state                         │
+│  ✓ Query block/header/body and contract state        │
 │  ✓ Query contract state                              │
+│  ✗ Wallet NIGHT/UTXO balance must use indexer/state  │
 │  ✗ Cannot get shielded balances directly             │
 └─────────────────────────────────────────────────────┘
 ```
@@ -373,6 +374,80 @@ uint64_t height = indexer.get_block_height();
 
 // Check if indexer is synced
 bool synced = indexer.is_synced();
+```
+
+### 6.2.1 Production State Backend API
+
+Transaction build/prove paths need a canonical wallet ledger state. The C++
+production API exposes that state as an SDK concept instead of forcing
+applications to parse helper-script logs.
+
+```cpp
+#include "midnight/production/midnight_client.hpp"
+
+midnight::production::ClientConfig config =
+    midnight::production::ClientConfig::from_environment();
+
+// Options: LocalCache, Snapshot, Managed
+config.state_backend_mode =
+    midnight::production::StateBackendMode::LocalCache;
+
+midnight::production::MidnightClient client(config);
+
+midnight::ledger::SourceConfig source;
+source.src_url = "wss://rpc.preview.midnight.network";
+source.fetch_cache = "redb:midnight_cache/live_submit_fetch_cache.db";
+source.ledger_state_db = "midnight_cache/live_submit_ledger_state_db";
+source.source_mode = midnight::ledger::SourceMode::LocalCache;
+
+auto status = client.state_status(source);
+if (!status.ready) {
+    midnight::ledger::SyncLedgerStateParams sync;
+    sync.source = source;
+    sync.wallet_seeds = {wallet_seed_hex};
+    auto refreshed = client.refresh_state(sync);
+}
+
+client.export_state_snapshot(source, "midnight_cache/snapshot");
+client.import_state_snapshot("midnight_cache/snapshot", source);
+```
+
+For a managed cache service:
+
+```bash
+export MIDNIGHT_STATE_MODE=managed
+export MIDNIGHT_STATE_SERVICE_URL=https://state.example.com
+export MIDNIGHT_STATE_SERVICE_API_KEY=...
+```
+
+The managed backend uses `POST /v1/state/status` and
+`POST /v1/state/refresh`. C++ remains the public API; the state service only
+owns cache synchronization.
+
+### 6.2.2 Ledger FFI Diagnostics
+
+Use the production client to verify that the loaded native backend matches the
+local Midnight source tree and to validate user inputs with the same parsers
+used by transaction building.
+
+```cpp
+auto info = client.ledger_backend_info();
+if (!info.success || info.abi_version < 2) {
+    throw std::runtime_error("Unsupported Midnight ledger FFI backend");
+}
+
+auto address = client.validate_ledger_value(
+    "contract-address",
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "preview");
+if (!address.valid) {
+    throw std::runtime_error(address.error);
+}
+
+auto tx_info = client.inspect_transaction_hex(built.transaction_hex, 8);
+if (!tx_info.verified) {
+    throw std::runtime_error(tx_info.error);
+}
 ```
 
 ### 6.3 Using MidnightNodeRPC (For transaction submission)
@@ -1328,5 +1403,3 @@ The indexer may apply limitations to queries:
 | Preprod    | `preprod`    | `mn_addr_preprod`, `mn_shield-addr_preprod`, `mn_dust_preprod`          |
 | Preview    | `preview`    | `mn_addr_preview`, `mn_shield-addr_preview`, `mn_dust_preview`          |
 | Undeployed | `undeployed` | `mn_addr_undeployed`, `mn_shield-addr_undeployed`, `mn_dust_undeployed` |
-
-

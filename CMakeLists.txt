@@ -310,3 +310,8 @@ install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/midnight.pc"
     DESTINATION lib/pkgconfig
 )
+
+install(
+    FILES "${CMAKE_CURRENT_SOURCE_DIR}/midnight-versions.json"
+    DESTINATION share/midnight
+)

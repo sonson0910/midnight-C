@@ -7,15 +7,73 @@
 
 namespace midnight::ledger
 {
+    enum class SourceMode
+    {
+        Auto,       ///< SDK chooses the safest production mode for the operation.
+        LocalCache, ///< Use an already-synced local ledger/wallet cache only.
+        ColdSync,   ///< Allow the ledger backend to fetch source history from RPC.
+        Bounded     ///< Use an explicit bounded block/transaction source.
+    };
+
+    inline std::string source_mode_to_string(SourceMode mode)
+    {
+        switch (mode)
+        {
+        case SourceMode::LocalCache:
+            return "local-cache";
+        case SourceMode::ColdSync:
+            return "cold-sync";
+        case SourceMode::Bounded:
+            return "bounded";
+        case SourceMode::Auto:
+        default:
+            return "auto";
+        }
+    }
+
+    inline SourceMode source_mode_from_string(std::string value)
+    {
+        for (auto &c : value)
+        {
+            if (c >= 'A' && c <= 'Z')
+            {
+                c = static_cast<char>(c - 'A' + 'a');
+            }
+            else if (c == '_')
+            {
+                c = '-';
+            }
+        }
+        if (value == "local" || value == "local-cache" || value == "cache-only")
+        {
+            return SourceMode::LocalCache;
+        }
+        if (value == "cold" || value == "cold-sync" || value == "rpc")
+        {
+            return SourceMode::ColdSync;
+        }
+        if (value == "bounded" || value == "range")
+        {
+            return SourceMode::Bounded;
+        }
+        return SourceMode::Auto;
+    }
+
     struct SourceConfig
     {
+        SourceMode source_mode = SourceMode::Auto;
         std::string src_url;
         std::vector<std::string> src_files;
         bool fetch_only_cached = false;
+        bool require_ledger_state_cache = true;
         bool ignore_block_context = false;
         bool dust_warp = false;
         std::string fetch_cache = "redb:midnight_cache/fetch_cache.db";
         std::string ledger_state_db = "midnight_cache/ledger_cache_db";
+        uint32_t fetch_concurrency = 4;
+        std::optional<uint32_t> fetch_compute_concurrency;
+        uint32_t fetch_retry_count = 3;
+        uint64_t fetch_retry_delay_ms = 5000;
         std::optional<uint64_t> from_block; ///< Optional bounded source start
         std::optional<uint64_t> to_block;   ///< Optional bounded source end
         std::vector<std::string> transaction_hashes; ///< Optional source tx filter
@@ -44,6 +102,13 @@ namespace midnight::ledger
     {
         SourceConfig source;
         std::vector<std::string> wallet_seeds;
+        uint64_t timeout_ms = 0; ///< 0 means no backend timeout
+    };
+
+    struct WalletSummaryParams
+    {
+        SourceConfig source;
+        std::string wallet_seed;
         uint64_t timeout_ms = 0; ///< 0 means no backend timeout
     };
 

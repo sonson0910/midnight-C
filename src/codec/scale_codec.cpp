@@ -315,15 +315,12 @@ namespace midnight::codec
             offset_++;
             // Accumulate into u128 for values > 8 bytes
             uint64_t lo = 0;
-            uint64_t hi = 0;
             uint8_t actual_bytes = std::min(bytes_needed, uint8_t(16));
             for (uint8_t i = 0; i < actual_bytes; i++)
             {
                 uint64_t byte_val = data_[offset_ + i];
                 if (i < 8)
                     lo |= byte_val << (i * 8);
-                else
-                    hi |= byte_val << ((i - 8) * 8);
             }
             offset_ += bytes_needed;
             // For values that fit in u64, return as u64; otherwise combine

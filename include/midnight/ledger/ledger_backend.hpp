@@ -22,6 +22,50 @@ namespace midnight::ledger
         std::string error;
     };
 
+    struct LedgerBackendInfo
+    {
+        bool success = false;
+        std::string ffi_name;
+        std::string ffi_version;
+        uint32_t abi_version = 0;
+        std::string source;
+        std::string ledger;
+        std::string zswap;
+        std::string onchain_runtime;
+        std::string compact_toolchain;
+        std::string compact_runtime;
+        std::string indexer_schema;
+        std::string proof_server;
+        std::string panic_strategy;
+        std::vector<std::string> capabilities;
+        std::vector<std::string> warnings;
+        std::string error;
+        std::string raw_json;
+    };
+
+    struct ValidationResult
+    {
+        bool success = false;
+        bool valid = false;
+        std::string kind;
+        std::string normalized;
+        std::string network;
+        std::string error;
+    };
+
+    struct TransactionInspectionResult
+    {
+        bool success = false;
+        bool verified = false;
+        std::string transaction_hash;
+        std::string tx_type;
+        uint64_t size_bytes = 0;
+        std::string ledger_version;
+        std::string contract_address;
+        std::string tagged_contract_address;
+        std::string error;
+    };
+
     /**
      * @brief Production ledger transaction construction backend.
      *
@@ -42,6 +86,7 @@ namespace midnight::ledger
         virtual BuildResult build_simple_contract_call(const SimpleContractCallParams &params) = 0;
         virtual BuildResult build_custom_contract_transaction(const CustomContractIntentParams &params) = 0;
         virtual BuildResult sync_ledger_state(const SyncLedgerStateParams &params) = 0;
+        virtual BuildResult wallet_summary(const WalletSummaryParams &params) = 0;
     };
 
     /**
@@ -57,6 +102,7 @@ namespace midnight::ledger
         BuildResult build_simple_contract_call(const SimpleContractCallParams &params) override;
         BuildResult build_custom_contract_transaction(const CustomContractIntentParams &params) override;
         BuildResult sync_ledger_state(const SyncLedgerStateParams &params) override;
+        BuildResult wallet_summary(const WalletSummaryParams &params) override;
 
     private:
         static BuildResult unavailable(const char *operation);
@@ -83,7 +129,19 @@ namespace midnight::ledger
 
         bool is_available() const { return build_fn_ != nullptr && free_fn_ != nullptr; }
         bool can_derive_wallet_addresses() const { return wallet_addresses_fn_ != nullptr && free_fn_ != nullptr; }
+        bool can_report_backend_info() const { return info_fn_ != nullptr && free_fn_ != nullptr; }
+        bool can_validate() const { return validate_fn_ != nullptr && free_fn_ != nullptr; }
+        bool can_inspect_transactions() const { return inspect_tx_fn_ != nullptr && free_fn_ != nullptr; }
         std::string last_error() const { return last_error_; }
+
+        LedgerBackendInfo backend_info();
+        ValidationResult validate(
+            const std::string &kind,
+            const std::string &value,
+            const std::string &network = {});
+        TransactionInspectionResult inspect_transaction(
+            const std::string &transaction_hex,
+            uint8_t ledger_version = 8);
 
         WalletAddressDerivationResult derive_wallet_addresses(
             const std::string &seed_hex_or_mnemonic,
@@ -96,15 +154,22 @@ namespace midnight::ledger
         BuildResult build_simple_contract_call(const SimpleContractCallParams &params) override;
         BuildResult build_custom_contract_transaction(const CustomContractIntentParams &params) override;
         BuildResult sync_ledger_state(const SyncLedgerStateParams &params) override;
+        BuildResult wallet_summary(const WalletSummaryParams &params) override;
 
     private:
         using BuildFn = int (*)(const char *, char **);
+        using InfoFn = int (*)(char **);
         using WalletAddressesFn = int (*)(const char *, char **);
+        using ValidateFn = int (*)(const char *, char **);
+        using InspectTxFn = int (*)(const char *, char **);
         using FreeFn = void (*)(char *);
 
         void *handle_ = nullptr;
         BuildFn build_fn_ = nullptr;
+        InfoFn info_fn_ = nullptr;
         WalletAddressesFn wallet_addresses_fn_ = nullptr;
+        ValidateFn validate_fn_ = nullptr;
+        InspectTxFn inspect_tx_fn_ = nullptr;
         FreeFn free_fn_ = nullptr;
         std::string last_error_;
 

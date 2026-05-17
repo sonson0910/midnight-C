@@ -55,6 +55,24 @@ namespace
         }
         return std::stoull(value);
     }
+
+    std::string test_source_dir()
+    {
+#ifdef MIDNIGHT_TEST_SOURCE_DIR
+        return MIDNIGHT_TEST_SOURCE_DIR;
+#else
+        return std::filesystem::current_path().string();
+#endif
+    }
+
+    std::string test_binary_dir()
+    {
+#ifdef MIDNIGHT_TEST_BINARY_DIR
+        return MIDNIGHT_TEST_BINARY_DIR;
+#else
+        return std::filesystem::current_path().string();
+#endif
+    }
 }
 
 TEST(ProductionLiveSubmitTest, GatedPreprodNightTransferBuildSubmitAndConfirm)
@@ -121,13 +139,15 @@ TEST(ProductionLiveSubmitTest, GatedPreprodNightTransferBuildSubmitAndConfirm)
     params.source.fetch_cache = first_present({"MIDNIGHT_LIVE_FETCH_CACHE", "MIDNIGHT_PREVIEW_FETCH_CACHE", "MIDNIGHT_PREPROD_FETCH_CACHE"});
     if (params.source.fetch_cache.empty())
     {
-        params.source.fetch_cache = "redb:midnight_cache/live_submit_fetch_cache.db";
+        params.source.fetch_cache =
+            "redb:" + test_source_dir() + "/midnight_cache/live_submit_fetch_cache.db";
     }
     params.source.ledger_state_db =
         first_present({"MIDNIGHT_LIVE_LEDGER_STATE_DB", "MIDNIGHT_PREVIEW_LEDGER_STATE_DB", "MIDNIGHT_PREPROD_LEDGER_STATE_DB"});
     if (params.source.ledger_state_db.empty())
     {
-        params.source.ledger_state_db = "midnight_cache/live_submit_ledger_state_db";
+        params.source.ledger_state_db =
+            test_source_dir() + "/midnight_cache/live_submit_ledger_state_db";
     }
     params.source_seed = source_seed;
     params.destination_addresses = {destination};
@@ -138,7 +158,7 @@ TEST(ProductionLiveSubmitTest, GatedPreprodNightTransferBuildSubmitAndConfirm)
         first_present({"MIDNIGHT_LIVE_ARTIFACT_DIR", "MIDNIGHT_PREVIEW_ARTIFACT_DIR", "MIDNIGHT_PREPROD_ARTIFACT_DIR"});
     if (options.artifacts.root_dir.empty())
     {
-        options.artifacts.root_dir = "midnight-artifacts";
+        options.artifacts.root_dir = test_source_dir() + "/midnight-artifacts";
     }
     options.artifacts.network = network.empty() ? "preview" : network;
     options.artifacts.wallet_id = first_present({"MIDNIGHT_LIVE_WALLET_ID", "MIDNIGHT_PREVIEW_WALLET_ID", "MIDNIGHT_PREPROD_WALLET_ID"});

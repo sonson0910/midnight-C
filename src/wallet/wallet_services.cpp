@@ -22,58 +22,12 @@ static std::string sha256_hex(const std::vector<uint8_t>& data) {
     return oss.str();
 }
 
-// ─── SCALE Codec Helpers ─────────────────────────────────────
-// SCALE (Simple Concatenated Accumulated Little-Endian) encoding
-// Used by Substrate/Polkadot for blockchain data serialization
-
-static void scale_encode_compact_u32(uint32_t value, std::vector<uint8_t>& out) {
-    // Compact encoding for u32
-    if (value < 0x40) {
-        // mode 0: single-byte, value in upper 6 bits
-        out.push_back(static_cast<uint8_t>((value << 2) | 0x00));
-    } else if (value < 0x4000) {
-        // mode 1: two-byte, value in upper 14 bits
-        uint16_t encoded = (value << 2) | 0x01;
-        out.push_back(static_cast<uint8_t>(encoded & 0xFF));
-        out.push_back(static_cast<uint8_t>((encoded >> 8) & 0xFF));
-    } else {
-        // mode 2: four-byte big-endian
-        out.push_back(0x82);  // mode 2 + 4 bytes
-        out.push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
-        out.push_back(static_cast<uint8_t>((value >> 16) & 0xFF));
-        out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
-        out.push_back(static_cast<uint8_t>(value & 0xFF));
-    }
-}
-
-static std::vector<uint8_t> scale_encode_compact_u32_vec(uint32_t value) {
-    std::vector<uint8_t> out;
-    scale_encode_compact_u32(value, out);
-    return out;
-}
-
 static std::string to_hex_string(const std::vector<uint8_t>& data) {
     std::ostringstream oss;
     oss << "0x";
     for (auto b : data)
         oss << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(b);
     return oss.str();
-}
-
-static std::vector<uint8_t> hex_to_bytes(const std::string& hex) {
-    std::vector<uint8_t> result;
-    std::string clean = hex;
-    if (clean.rfind("0x", 0) == 0) clean = clean.substr(2);
-    for (size_t i = 0; i < clean.size(); i += 2) {
-        if (i + 2 <= clean.size()) {
-            unsigned int byte;
-            std::stringstream ss;
-            ss << std::hex << clean.substr(i, 2);
-            ss >> byte;
-            result.push_back(static_cast<uint8_t>(byte));
-        }
-    }
-    return result;
 }
 
 // ─── SerializedTransaction ────────────────────────────────────

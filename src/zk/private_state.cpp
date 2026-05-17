@@ -5,7 +5,8 @@
 #include <sstream>
 #include <iomanip>
 #include <sodium.h>
-#include <openssl/sha.h>
+#include <openssl/evp.h>
+#include <stdexcept>
 
 namespace midnight::zk
 {
@@ -28,12 +29,19 @@ namespace midnight::zk
         uint8_t *derived_key_out)
     {
         // Derive: key = SHA256(master_key || nonce || name)
-        SHA256_CTX ctx;
-        SHA256_Init(&ctx);
-        SHA256_Update(&ctx, master_key.data(), master_key.size());
-        SHA256_Update(&ctx, nonce.data(), nonce.size());
-        SHA256_Update(&ctx, name.data(), name.size());
-        SHA256_Final(derived_key_out, &ctx);
+        std::vector<uint8_t> input;
+        input.reserve(master_key.size() + nonce.size() + name.size());
+        input.insert(input.end(), master_key.begin(), master_key.end());
+        input.insert(input.end(), nonce.begin(), nonce.end());
+        input.insert(input.end(), name.begin(), name.end());
+
+        unsigned int digest_len = 0;
+        if (EVP_Digest(input.data(), input.size(), derived_key_out, &digest_len,
+                       EVP_sha256(), nullptr) != 1 ||
+            digest_len != ENCRYPTED_KEY_SIZE)
+        {
+            throw std::runtime_error("SHA256 key derivation failed");
+        }
     }
 
     static std::vector<uint8_t> derive_encryption_key(
@@ -480,11 +488,17 @@ namespace midnight::zk
 
         std::string hash_secret(const std::vector<uint8_t> &secret)
         {
-            uint8_t hash[SHA256_DIGEST_LENGTH];
-            SHA256(secret.data(), secret.size(), hash);
+            uint8_t hash[ENCRYPTED_KEY_SIZE];
+            unsigned int digest_len = 0;
+            if (EVP_Digest(secret.data(), secret.size(), hash, &digest_len,
+                           EVP_sha256(), nullptr) != 1 ||
+                digest_len != ENCRYPTED_KEY_SIZE)
+            {
+                return {};
+            }
             std::string result;
-            result.reserve(SHA256_DIGEST_LENGTH * 2);
-            for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i)
+            result.reserve(ENCRYPTED_KEY_SIZE * 2);
+            for (size_t i = 0; i < ENCRYPTED_KEY_SIZE; ++i)
             {
                 result += fmt::format("{:02x}", hash[i]);
             }

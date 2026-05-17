@@ -2,7 +2,7 @@
 #include "midnight/contract/contract_manager.hpp"
 #include "midnight/codec/scale_codec.hpp"
 #include <cstdlib>
-#include <sodium.h>
+#include <stdexcept>
 
 using namespace midnight::contract;
 using namespace midnight::codec;
@@ -14,11 +14,7 @@ using namespace midnight::codec;
 class ContractManagerUnitTest : public ::testing::Test
 {
 protected:
-    void SetUp() override
-    {
-        if (sodium_init() < 0)
-            GTEST_SKIP() << "libsodium unavailable";
-    }
+    void SetUp() override {}
 };
 
 // ─── Struct Defaults ──────────────────────────────────────────
@@ -91,84 +87,20 @@ TEST(ContractArtifactTest, LoadFromDir_InvalidPath_Throws)
 
 // ─── Argument Encoding ────────────────────────────────────────
 
-TEST_F(ContractManagerUnitTest, EncodeConstructorArgs_IntegerTypes)
+TEST_F(ContractManagerUnitTest, LegacyConstructorEncodingIsDisabled)
 {
-    // nlohmann::json stores literal 10 as signed integer,
-    // which triggers encode_compact(10) = 10<<2 = 0x28
     nlohmann::json args = {10};
-    auto bytes = ContractManager::encode_constructor_args(args);
-    EXPECT_FALSE(bytes.empty());
-    EXPECT_EQ(bytes[0], 0x28); // Compact(10) = 10 << 2 = 40
+    EXPECT_THROW(
+        ContractManager::encode_constructor_args(args),
+        std::logic_error);
 }
 
-TEST_F(ContractManagerUnitTest, EncodeConstructorArgs_MultipleArgs)
-{
-    nlohmann::json args = {42, "hello", true};
-    auto bytes = ContractManager::encode_constructor_args(args);
-    EXPECT_GT(bytes.size(), 3u);
-}
-
-TEST_F(ContractManagerUnitTest, EncodeConstructorArgs_HexBytes)
-{
-    nlohmann::json args = {"0xdeadbeef"};
-    auto bytes = ContractManager::encode_constructor_args(args);
-    EXPECT_FALSE(bytes.empty());
-}
-
-TEST_F(ContractManagerUnitTest, EncodeConstructorArgs_EmptyArray)
-{
-    nlohmann::json args = nlohmann::json::array();
-    auto bytes = ContractManager::encode_constructor_args(args);
-    EXPECT_TRUE(bytes.empty());
-}
-
-TEST_F(ContractManagerUnitTest, EncodeCallArgs_HasSelector)
+TEST_F(ContractManagerUnitTest, LegacyCallEncodingIsDisabled)
 {
     nlohmann::json args = {100};
-    auto bytes = ContractManager::encode_call_args("mintTokens", args);
-
-    // Should start with 4-byte selector
-    EXPECT_GE(bytes.size(), 4u);
-}
-
-TEST_F(ContractManagerUnitTest, EncodeCallArgs_DifferentCircuitsDifferentSelectors)
-{
-    nlohmann::json args = {};
-    auto bytes1 = ContractManager::encode_call_args("mint", args);
-    auto bytes2 = ContractManager::encode_call_args("burn", args);
-
-    // Different circuit names should produce different selectors
-    EXPECT_NE(bytes1, bytes2);
-}
-
-TEST_F(ContractManagerUnitTest, EncodeCallArgs_DeterministicSelector)
-{
-    nlohmann::json args = {};
-    auto bytes1 = ContractManager::encode_call_args("setupPool", args);
-    auto bytes2 = ContractManager::encode_call_args("setupPool", args);
-
-    EXPECT_EQ(bytes1, bytes2);
-}
-
-// ─── Large Integer Encoding ───────────────────────────────────
-
-TEST_F(ContractManagerUnitTest, EncodeConstructorArgs_LargeUint)
-{
-    nlohmann::json args = {1000000};
-    auto bytes = ContractManager::encode_constructor_args(args);
-    EXPECT_FALSE(bytes.empty());
-
-    // 1000000 > 0xFFFF so should use u32
-    EXPECT_GE(bytes.size(), 4u);
-}
-
-TEST_F(ContractManagerUnitTest, EncodeConstructorArgs_Boolean)
-{
-    nlohmann::json args = {true, false};
-    auto bytes = ContractManager::encode_constructor_args(args);
-    EXPECT_EQ(bytes.size(), 2u);
-    EXPECT_EQ(bytes[0], 0x01);
-    EXPECT_EQ(bytes[1], 0x00);
+    EXPECT_THROW(
+        ContractManager::encode_call_args("mintTokens", args),
+        std::logic_error);
 }
 
 // ═══════════════════════════════════════════════════════════════

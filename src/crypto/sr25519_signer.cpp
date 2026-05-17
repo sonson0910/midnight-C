@@ -58,6 +58,7 @@ namespace midnight::crypto
          */
         void derive_sr25519_key(
             const uint8_t* seed,
+            const uint8_t* chain_code,
             uint32_t index,
             uint8_t* out_secret,
             uint8_t* out_chain_code) {
@@ -66,13 +67,14 @@ namespace midnight::crypto
             uint32_t hard_index = index | 0x80000000;
 
             // Simplified HDKD: Use Blake2b for key derivation (Substrate-compatible)
-            // Build input: index || seed
-            uint8_t data[4 + 32];
+            // Build input: index || seed || parent chain code
+            uint8_t data[4 + 32 + 32];
             data[0] = (hard_index >> 24) & 0xFF;
             data[1] = (hard_index >> 16) & 0xFF;
             data[2] = (hard_index >> 8) & 0xFF;
             data[3] = hard_index & 0xFF;
             std::memcpy(data + 4, seed, 32);
+            std::memcpy(data + 36, chain_code, 32);
 
             // Use Blake2b for derivation (Substrate/Polkadot uses this)
             uint8_t hmac_output[64];
@@ -220,7 +222,7 @@ namespace midnight::crypto
         // Perform HDKD derivation
         uint8_t derived_secret[32];
         uint8_t derived_chain[32];
-        derive_sr25519_key(seed, index, derived_secret, derived_chain);
+        derive_sr25519_key(seed, chain_code.data(), index, derived_secret, derived_chain);
 
         // Derive public key
         uint8_t derived_public[32];

@@ -235,6 +235,19 @@ namespace midnight::contracts
         const std::vector<uint8_t> &transaction_bytes)
     {
         DeployResult result;
+        if (auto *ffi = dynamic_cast<ledger::FfiLedgerBackend *>(ledger_backend_.get()))
+        {
+            if (ffi->can_inspect_transactions())
+            {
+                const auto inspection = ffi->inspect_transaction(
+                    midnight::util::bytes_to_hex(transaction_bytes),
+                    8);
+                if (inspection.success && !inspection.contract_address.empty())
+                {
+                    result.contract_address = inspection.contract_address;
+                }
+            }
+        }
         auto submit = submit_serialized_transaction(transaction_bytes);
         result.success = submit.success;
         result.txid = submit.txid;

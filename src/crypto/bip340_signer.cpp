@@ -30,21 +30,6 @@ namespace midnight::crypto
             0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41
         };
 
-        // secp256k1 generator point G
-        constexpr uint8_t SECP256K1_GX[32] = {
-            0x79, 0xBE, 0x66, 0x7E, 0xF9, 0xDC, 0xBB, 0xAC,
-            0x55, 0xA0, 0x62, 0x95, 0xCE, 0x87, 0x0B, 0x07,
-            0x02, 0x9B, 0xFC, 0xDB, 0x2D, 0xCE, 0x28, 0xD9,
-            0x59, 0xF2, 0x81, 0x5B, 0x16, 0xF8, 0x17, 0x98
-        };
-
-        constexpr uint8_t SECP256K1_GY[32] = {
-            0x48, 0x3A, 0xDA, 0x77, 0x26, 0xA3, 0xC4, 0x65,
-            0xB5, 0x04, 0x49, 0x29, 0x06, 0xA5, 0x68, 0x8C,
-            0x30, 0xFE, 0x29, 0x29, 0x80, 0x7E, 0x25, 0xC8,
-            0x1A, 0xE0, 0xEB, 0x40, 0x7E, 0xDA, 0x11, 0xEE
-        };
-
         // Get secp256k1 EC_GROUP (cached)
         EC_GROUP* get_secp256k1_group() {
             static EC_GROUP* group = EC_GROUP_new_by_curve_name(NID_secp256k1);
@@ -96,16 +81,6 @@ namespace midnight::crypto
                 out[i / 2] = static_cast<uint8_t>(byte);
             }
             return true;
-        }
-
-        // Convert bytes to hex string (no 0x prefix)
-        std::string bytes_to_hex(const uint8_t* data, size_t len) {
-            std::ostringstream oss;
-            oss << std::hex << std::setfill('0');
-            for (size_t i = 0; i < len; i++) {
-                oss << std::setw(2) << (int)data[i];
-            }
-            return oss.str();
         }
 
         // Compute point = scalar * G, returns (x, y) coordinates
@@ -198,20 +173,22 @@ namespace midnight::crypto
                              0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01};
             uint8_t K[32] = {0};
 
-            uint8_t data1[32 + 1 + 32 + 32];
+            uint8_t data1[32 + 1 + 32 + 32 + 32];
             memcpy(data1, V, 32);
             data1[32] = 0x00;
             memcpy(data1 + 33, private_key, 32);
             memcpy(data1 + 65, x_only_pubkey, 32);
-            HMAC(EVP_sha256(), K, 32, data1, 97, K, nullptr);
+            memcpy(data1 + 97, message, 32);
+            HMAC(EVP_sha256(), K, 32, data1, sizeof(data1), K, nullptr);
             HMAC(EVP_sha256(), K, 32, V, 32, V, nullptr);
 
-            uint8_t data2[32 + 1 + 32 + 32];
+            uint8_t data2[32 + 1 + 32 + 32 + 32];
             memcpy(data2, V, 32);
             data2[32] = 0x01;
             memcpy(data2 + 33, private_key, 32);
             memcpy(data2 + 65, x_only_pubkey, 32);
-            HMAC(EVP_sha256(), K, 32, data2, 97, K, nullptr);
+            memcpy(data2 + 97, message, 32);
+            HMAC(EVP_sha256(), K, 32, data2, sizeof(data2), K, nullptr);
             HMAC(EVP_sha256(), K, 32, V, 32, V, nullptr);
 
             int attempts = 0;

@@ -10,10 +10,40 @@ extern "C" {
  * midnight-research/midnight-node/util/ledger-ffi and links against the
  * official Midnight ledger/toolkit crates. It is a native library boundary,
  * not a CLI/process bridge.
+ */
+
+/*
+ * Return backend ABI, source, version, and capability information as JSON.
+ * response_json must be released by midnight_ledger_free_string.
+ */
+int midnight_ledger_backend_info(char **response_json);
+
+/*
+ * Validate canonical Midnight values with the same parser stack used by the
+ * native ledger/toolkit builder. request_json:
+ *   {
+ *     "kind": "wallet|contract-address|token-type|wallet-seed",
+ *     "value": "...",
+ *     "network": "preview"
+ *   }
+ */
+int midnight_ledger_validate(const char *request_json, char **response_json);
+
+/*
+ * Inspect ledger-serialized Midnight transaction bytes. request_json:
+ *   { "transaction_hex": "...", "ledger_version": 8 }
+ *
+ * response_json includes transaction_hash, tx_type, size_bytes, verified, and
+ * contract_address when the transaction contains a deploy action.
+ */
+int midnight_ledger_inspect_transaction(const char *request_json, char **response_json);
+
+/*
+ * Build/prove a canonical Midnight transaction.
  *
  * request_json is a UTF-8 JSON object:
  *   {
- *     "operation": "transfer_night|register_dust|deregister_dust|deploy_simple_contract|call_simple_contract|custom_contract_transaction",
+ *     "operation": "transfer_night|register_dust|deregister_dust|deploy_simple_contract|call_simple_contract|custom_contract_transaction|sync_ledger_state|wallet_summary",
  *     "params": { ... }
  *   }
  *
@@ -30,7 +60,7 @@ extern "C" {
  *     "zswap_state_path": "...",
  *     "onchain_state_path": "...",
  *     "result_path": "...",
- *     "raw_output": "...",
+ *     "raw_output": "...",  // wallet_summary returns the JSON summary here
  *     "log": "..."
  *   }
  *

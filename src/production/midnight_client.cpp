@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cctype>
 #include <cstdlib>
+#include <filesystem>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -283,6 +284,96 @@ namespace midnight::production
             return result;
         }
 
+        bool is_bounded_source(const ledger::SourceConfig &source)
+        {
+            return source.from_block.has_value() || source.to_block.has_value();
+        }
+
+        bool cache_path_has_data(const std::string &path)
+        {
+            if (path.empty() || path.find("://") != std::string::npos)
+            {
+                return true;
+            }
+            std::error_code ec;
+            if (!std::filesystem::exists(path, ec))
+            {
+                return false;
+            }
+            if (std::filesystem::is_regular_file(path, ec))
+            {
+                const auto size = std::filesystem::file_size(path, ec);
+                return !ec && size > 0;
+            }
+            if (!std::filesystem::is_directory(path, ec))
+            {
+                return false;
+            }
+            for (const auto &entry : std::filesystem::recursive_directory_iterator(path, ec))
+            {
+                if (ec)
+                {
+                    return false;
+                }
+                if (entry.is_regular_file(ec) && entry.file_size(ec) > 0)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        ledger::SourceConfig normalize_source_for_transaction_build(
+            ledger::SourceConfig source)
+        {
+            switch (source.source_mode)
+            {
+            case ledger::SourceMode::LocalCache:
+                source.fetch_only_cached = true;
+                break;
+            case ledger::SourceMode::ColdSync:
+                source.fetch_only_cached = false;
+                break;
+            case ledger::SourceMode::Bounded:
+                source.fetch_only_cached = false;
+                break;
+            case ledger::SourceMode::Auto:
+            default:
+                if (is_bounded_source(source))
+                {
+                    source.source_mode = ledger::SourceMode::Bounded;
+                }
+                else if (source.src_files.empty())
+                {
+                    source.source_mode = ledger::SourceMode::LocalCache;
+                    source.fetch_only_cached = true;
+                }
+                break;
+            }
+            return source;
+        }
+
+        ledger::SourceConfig normalize_source_for_sync(ledger::SourceConfig source)
+        {
+            if (source.source_mode == ledger::SourceMode::LocalCache)
+            {
+                source.fetch_only_cached = true;
+            }
+            else if (source.source_mode == ledger::SourceMode::ColdSync)
+            {
+                source.fetch_only_cached = false;
+            }
+            return source;
+        }
+
+        template <typename Params>
+        Params normalize_params_for_transaction_build(const Params &params)
+        {
+            Params copy = params;
+            copy.source = normalize_source_for_transaction_build(params.source);
+            return copy;
+        }
+
         ledger::BuildResult build_validation_failure(
             const BuildSubmitResult &validation)
         {
@@ -300,6 +391,13 @@ namespace midnight::production
                 return validation_failure(
                     ErrorCode::LedgerBuildError,
                     "Ledger build source requires src_url or src_files");
+            }
+            if (source.source_mode == ledger::SourceMode::Bounded &&
+                (!source.from_block || !source.to_block))
+            {
+                return validation_failure(
+                    ErrorCode::LedgerBuildError,
+                    "Bounded ledger source mode requires from_block and to_block");
             }
             if ((source.from_block && !source.to_block) || (!source.from_block && source.to_block))
             {
@@ -323,7 +421,44 @@ namespace midnight::production
                         hash);
                 }
             }
+            if (source.require_ledger_state_cache &&
+                source.fetch_only_cached &&
+                source.source_mode == ledger::SourceMode::LocalCache &&
+                !cache_path_has_data(source.ledger_state_db))
+            {
+                return validation_failure(
+                    ErrorCode::LedgerBuildError,
+                    "Local ledger state cache is not synced",
+                    "Run sync_ledger_state first, import a cache snapshot, or set source_mode=ColdSync to opt into a full RPC source fetch");
+            }
             return {};
+        }
+
+        std::shared_ptr<IStateBackend> make_state_backend_for_config(
+            const ClientConfig &config,
+            const std::shared_ptr<ledger::ILedgerBackend> &ledger_backend)
+        {
+            if (config.state_backend_mode == StateBackendMode::Managed)
+            {
+                return make_managed_state_backend(config.managed_state);
+            }
+            return make_local_state_backend(ledger_backend, config.state_backend_mode);
+        }
+
+        std::optional<uint64_t> best_effort_remote_tip(network::MidnightNodeRPC *node)
+        {
+            if (node == nullptr)
+            {
+                return std::nullopt;
+            }
+            try
+            {
+                return node->get_chain_tip().first;
+            }
+            catch (...)
+            {
+                return std::nullopt;
+            }
         }
 
         BuildSubmitResult validate_seed(
@@ -567,8 +702,23 @@ namespace midnight::production
         {
             config.ledger_ffi_library = value;
         }
+        if (auto value = env_value("MIDNIGHT_STATE_MODE"); !value.empty())
+        {
+            config.state_backend_mode = state_backend_mode_from_string(value);
+        }
+        if (auto value = env_value("MIDNIGHT_STATE_SERVICE_URL"); !value.empty())
+        {
+            config.managed_state.base_url = value;
+        }
+        if (auto value = env_value("MIDNIGHT_STATE_SERVICE_API_KEY"); !value.empty())
+        {
+            config.managed_state.api_key = value;
+        }
         config.node_timeout_ms = env_u32("MIDNIGHT_NODE_TIMEOUT_MS", config.node_timeout_ms);
         config.proof_timeout_ms = env_u32("MIDNIGHT_PROOF_TIMEOUT_MS", config.proof_timeout_ms);
+        config.managed_state.timeout_ms = env_u32(
+            "MIDNIGHT_STATE_SERVICE_TIMEOUT_MS",
+            config.managed_state.timeout_ms);
         return config;
     }
 
@@ -609,6 +759,7 @@ namespace midnight::production
         {
             ledger_backend_ = ledger::make_unavailable_ledger_backend();
         }
+        state_backend_ = make_state_backend_for_config(config_, ledger_backend_);
     }
 
     json MidnightClient::health_check()
@@ -620,7 +771,9 @@ namespace midnight::production
             {"node_url", config_.node_url},
             {"indexer_url", config_.indexer_url},
             {"proof_server_url", config_.proof_server_url.empty() ? json(nullptr) : json(config_.proof_server_url)},
-            {"ledger_ffi_library", config_.ledger_ffi_library.empty() ? json(nullptr) : json(config_.ledger_ffi_library)}};
+            {"ledger_ffi_library", config_.ledger_ffi_library.empty() ? json(nullptr) : json(config_.ledger_ffi_library)},
+            {"state_backend_mode", state_backend_mode_to_string(config_.state_backend_mode)},
+            {"managed_state_service_url", config_.managed_state.base_url.empty() ? json(nullptr) : json(config_.managed_state.base_url)}};
 
         try
         {
@@ -670,7 +823,26 @@ namespace midnight::production
             status["ledger_backend"] = {
                 {"status", ffi->is_available() ? "ok" : "error"},
                 {"wallet_derivation", ffi->can_derive_wallet_addresses()},
+                {"backend_info", ffi->can_report_backend_info()},
+                {"native_validation", ffi->can_validate()},
+                {"transaction_inspection", ffi->can_inspect_transactions()},
                 {"error", ffi->last_error()}};
+            if (ffi->can_report_backend_info())
+            {
+                const auto info = ffi->backend_info();
+                status["ledger_backend"]["abi_version"] = info.abi_version;
+                status["ledger_backend"]["ffi_version"] = info.ffi_version;
+                status["ledger_backend"]["ledger"] = info.ledger;
+                status["ledger_backend"]["zswap"] = info.zswap;
+                status["ledger_backend"]["onchain_runtime"] = info.onchain_runtime;
+                status["ledger_backend"]["indexer_schema"] = info.indexer_schema;
+                status["ledger_backend"]["capabilities"] = info.capabilities;
+                status["ledger_backend"]["warnings"] = info.warnings;
+                if (!info.error.empty())
+                {
+                    status["ledger_backend"]["info_error"] = info.error;
+                }
+            }
         }
         else
         {
@@ -678,6 +850,53 @@ namespace midnight::production
         }
 
         return status;
+    }
+
+    ledger::LedgerBackendInfo MidnightClient::ledger_backend_info()
+    {
+        ledger::LedgerBackendInfo result;
+        auto *ffi = dynamic_cast<ledger::FfiLedgerBackend *>(ledger_backend_.get());
+        if (ffi == nullptr || !ffi->can_report_backend_info())
+        {
+            result.error =
+                "Ledger backend info requires libmidnight_ledger_ffi with "
+                "midnight_ledger_backend_info";
+            return result;
+        }
+        return ffi->backend_info();
+    }
+
+    ledger::ValidationResult MidnightClient::validate_ledger_value(
+        const std::string &kind,
+        const std::string &value,
+        const std::string &network)
+    {
+        ledger::ValidationResult result;
+        auto *ffi = dynamic_cast<ledger::FfiLedgerBackend *>(ledger_backend_.get());
+        if (ffi == nullptr || !ffi->can_validate())
+        {
+            result.error =
+                "Native ledger validation requires libmidnight_ledger_ffi with "
+                "midnight_ledger_validate";
+            return result;
+        }
+        return ffi->validate(kind, value, network.empty() ? config_.network_name : network);
+    }
+
+    ledger::TransactionInspectionResult MidnightClient::inspect_transaction_hex(
+        const std::string &transaction_hex,
+        uint8_t ledger_version)
+    {
+        ledger::TransactionInspectionResult result;
+        auto *ffi = dynamic_cast<ledger::FfiLedgerBackend *>(ledger_backend_.get());
+        if (ffi == nullptr || !ffi->can_inspect_transactions())
+        {
+            result.error =
+                "Transaction inspection requires libmidnight_ledger_ffi with "
+                "midnight_ledger_inspect_transaction";
+            return result;
+        }
+        return ffi->inspect_transaction(transaction_hex, ledger_version);
     }
 
     ledger::WalletAddressDerivationResult MidnightClient::derive_wallet_addresses(
@@ -704,6 +923,19 @@ namespace midnight::production
         if (!ledger_backend_)
         {
             ledger_backend_ = ledger::make_unavailable_ledger_backend();
+        }
+        if (config_.state_backend_mode != StateBackendMode::Managed)
+        {
+            state_backend_ = make_state_backend_for_config(config_, ledger_backend_);
+        }
+    }
+
+    void MidnightClient::set_state_backend(std::shared_ptr<IStateBackend> state_backend)
+    {
+        state_backend_ = std::move(state_backend);
+        if (!state_backend_)
+        {
+            state_backend_ = make_state_backend_for_config(config_, ledger_backend_);
         }
     }
 
@@ -842,85 +1074,190 @@ namespace midnight::production
     ledger::BuildResult MidnightClient::build_transfer_night(
         const ledger::TransferNightParams &params)
     {
-        if (auto invalid = validate_transfer_params(params); invalid.error_info)
+        const auto normalized = normalize_params_for_transaction_build(params);
+        if (auto invalid = validate_transfer_params(normalized); invalid.error_info)
         {
             return build_validation_failure(invalid);
         }
         return ledger_backend_->build_transfer_night(
-            with_configured_proof_server(params, config_));
+            with_configured_proof_server(normalized, config_));
     }
 
     ledger::BuildResult MidnightClient::build_register_dust(
         const ledger::RegisterDustParams &params)
     {
-        if (auto invalid = validate_register_dust_params(params); invalid.error_info)
+        const auto normalized = normalize_params_for_transaction_build(params);
+        if (auto invalid = validate_register_dust_params(normalized); invalid.error_info)
         {
             return build_validation_failure(invalid);
         }
         return ledger_backend_->build_register_dust(
-            with_configured_proof_server(params, config_));
+            with_configured_proof_server(normalized, config_));
     }
 
     ledger::BuildResult MidnightClient::build_deregister_dust(
         const ledger::DeregisterDustParams &params)
     {
-        if (auto invalid = validate_deregister_dust_params(params); invalid.error_info)
+        const auto normalized = normalize_params_for_transaction_build(params);
+        if (auto invalid = validate_deregister_dust_params(normalized); invalid.error_info)
         {
             return build_validation_failure(invalid);
         }
         return ledger_backend_->build_deregister_dust(
-            with_configured_proof_server(params, config_));
+            with_configured_proof_server(normalized, config_));
     }
 
     ledger::BuildResult MidnightClient::build_simple_contract_deploy(
         const ledger::SimpleContractDeployParams &params)
     {
-        if (auto invalid = validate_deploy_params(params); invalid.error_info)
+        const auto normalized = normalize_params_for_transaction_build(params);
+        if (auto invalid = validate_deploy_params(normalized); invalid.error_info)
         {
             return build_validation_failure(invalid);
         }
         return ledger_backend_->build_simple_contract_deploy(
-            with_configured_proof_server(params, config_));
+            with_configured_proof_server(normalized, config_));
     }
 
     ledger::BuildResult MidnightClient::build_simple_contract_call(
         const ledger::SimpleContractCallParams &params)
     {
-        if (auto invalid = validate_call_params(params); invalid.error_info)
+        const auto normalized = normalize_params_for_transaction_build(params);
+        if (auto invalid = validate_call_params(normalized); invalid.error_info)
         {
             return build_validation_failure(invalid);
         }
         return ledger_backend_->build_simple_contract_call(
-            with_configured_proof_server(params, config_));
+            with_configured_proof_server(normalized, config_));
     }
 
     ledger::BuildResult MidnightClient::build_custom_contract_transaction(
         const ledger::CustomContractIntentParams &params)
     {
-        if (auto invalid = validate_custom_contract_params(params); invalid.error_info)
+        const auto normalized = normalize_params_for_transaction_build(params);
+        if (auto invalid = validate_custom_contract_params(normalized); invalid.error_info)
         {
             return build_validation_failure(invalid);
         }
         return ledger_backend_->build_custom_contract_transaction(
-            with_configured_proof_server(params, config_));
+            with_configured_proof_server(normalized, config_));
     }
 
     ledger::BuildResult MidnightClient::sync_ledger_state(
         const ledger::SyncLedgerStateParams &params)
     {
-        if (!validation::has_source_input(params.source.src_url, params.source.src_files))
+        auto normalized = params;
+        normalized.source = normalize_source_for_sync(params.source);
+        if (!validation::has_source_input(normalized.source.src_url, normalized.source.src_files))
         {
             ledger::BuildResult result;
             result.error = "Ledger state sync requires source.src_url or source.src_files";
             return result;
         }
-        if (params.wallet_seeds.empty())
+        if ((normalized.source.from_block && !normalized.source.to_block) ||
+            (!normalized.source.from_block && normalized.source.to_block))
+        {
+            ledger::BuildResult result;
+            result.error = "Ledger state sync bounded source requires both from_block and to_block";
+            return result;
+        }
+        if (normalized.source.from_block && normalized.source.to_block &&
+            *normalized.source.from_block > *normalized.source.to_block)
+        {
+            ledger::BuildResult result;
+            result.error = "Ledger state sync bounded source from_block must be <= to_block";
+            return result;
+        }
+        if (normalized.wallet_seeds.empty())
         {
             ledger::BuildResult result;
             result.error = "Ledger state sync requires at least one wallet seed";
             return result;
         }
-        return ledger_backend_->sync_ledger_state(params);
+        return ledger_backend_->sync_ledger_state(normalized);
+    }
+
+    StateStatus MidnightClient::state_status(
+        const ledger::SourceConfig &source,
+        uint64_t max_lag_blocks)
+    {
+        if (!state_backend_)
+        {
+            state_backend_ = make_state_backend_for_config(config_, ledger_backend_);
+        }
+
+        auto status = state_backend_->status(source);
+        if (status.local_checkpoint_available && status.remote_tip_height == 0)
+        {
+            const auto remote_tip = best_effort_remote_tip(node_.get());
+            status.remote_tip_height = remote_tip.value_or(status.remote_tip_height);
+        }
+        if (status.ready && status.local_checkpoint_available && status.remote_tip_height > 0)
+        {
+            status.lag_blocks = status.remote_tip_height > status.local_checkpoint
+                                    ? status.remote_tip_height - status.local_checkpoint
+                                    : 0;
+            status.stale = status.lag_blocks > max_lag_blocks;
+        }
+        if (status.raw.is_object())
+        {
+            status.raw["remote_tip_height"] = status.remote_tip_height;
+            status.raw["lag_blocks"] = status.lag_blocks;
+            status.raw["stale"] = status.stale;
+        }
+        return status;
+    }
+
+    StateRefreshResult MidnightClient::refresh_state(
+        const ledger::SyncLedgerStateParams &params,
+        const StateRefreshOptions &options)
+    {
+        if (!state_backend_)
+        {
+            state_backend_ = make_state_backend_for_config(config_, ledger_backend_);
+        }
+        return state_backend_->refresh(params, options);
+    }
+
+    StateRefreshResult MidnightClient::ensure_state_fresh(
+        const ledger::SyncLedgerStateParams &params,
+        const StateRefreshOptions &options)
+    {
+        StateRefreshResult result;
+        result.before = state_status(params.source, options.max_lag_blocks);
+        if (!options.force &&
+            result.before.ready &&
+            (!result.before.local_checkpoint_available ||
+             result.before.lag_blocks <= options.max_lag_blocks))
+        {
+            result.success = true;
+            result.skipped = true;
+            result.after = result.before;
+            return result;
+        }
+        return refresh_state(params, options);
+    }
+
+    SnapshotResult MidnightClient::export_state_snapshot(
+        const ledger::SourceConfig &source,
+        const std::filesystem::path &snapshot_dir)
+    {
+        if (!state_backend_)
+        {
+            state_backend_ = make_state_backend_for_config(config_, ledger_backend_);
+        }
+        return state_backend_->export_snapshot(source, snapshot_dir);
+    }
+
+    SnapshotResult MidnightClient::import_state_snapshot(
+        const std::filesystem::path &snapshot_dir,
+        const ledger::SourceConfig &destination)
+    {
+        if (!state_backend_)
+        {
+            state_backend_ = make_state_backend_for_config(config_, ledger_backend_);
+        }
+        return state_backend_->import_snapshot(snapshot_dir, destination);
     }
 
     BuildSubmitResult MidnightClient::submit_build_result(ledger::BuildResult build)
@@ -1243,6 +1580,33 @@ namespace midnight::production
             throw std::invalid_argument("Transaction hash must be a 32-byte hex value");
         }
         return indexer_->query_wallet_state_from_transaction(address, tx_hash);
+    }
+
+    json MidnightClient::query_cached_wallet_summary(const ledger::WalletSummaryParams &params)
+    {
+        if (auto invalid = validate_seed(params.wallet_seed, "Wallet summary wallet_seed"); invalid.error_info)
+        {
+            throw std::invalid_argument(invalid.error_info.message);
+        }
+        const auto result = ledger_backend_->wallet_summary(params);
+        if (!result.success)
+        {
+            throw std::runtime_error(result.error.empty()
+                                         ? "Native Midnight ledger wallet_summary failed"
+                                         : result.error);
+        }
+        if (result.raw_output.empty())
+        {
+            return json::object();
+        }
+        try
+        {
+            return json::parse(result.raw_output);
+        }
+        catch (const std::exception &e)
+        {
+            throw std::runtime_error(std::string("Invalid Midnight wallet_summary raw output: ") + e.what());
+        }
     }
 
     json MidnightClient::query_contract_state(const std::string &contract_address_hex)

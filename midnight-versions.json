@@ -1,0 +1,15 @@
+{
+  "source": "midnight-research/midnight-node",
+  "version_policy": "Use the local midnight-research source tree as the build-compatible source of truth. Public docs can lag behind release-candidate source.",
+  "ledger": "8.1.0-rc.1",
+  "zswap": "8.1.0-rc.1",
+  "onchain_runtime": "3.1.0",
+  "indexer_schema": "v4",
+  "proof_server": "external",
+  "ffi_abi": 2,
+  "notes": [
+    "C++ owns HTTP, JSON-RPC, GraphQL, WebSocket, artifacts, confirmation, and state-cache orchestration.",
+    "Rust FFI owns canonical ledger transaction build, wallet derivation, native validation, tx hash/verify, and deploy contract-address extraction.",
+    "Compact argument encoding must come from compiled Compact/toolkit artifacts, not ad-hoc C++ SCALE helpers."
+  ]
+}

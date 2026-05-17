@@ -255,11 +255,6 @@ namespace midnight::wallet
 
     // ─── BIP32/secp256k1 ─────────────────────────────────
 
-    // Big-endian bytes to BIGNUM
-    static BIGNUM* bytes_to_bn(const std::array<uint8_t, 32>& bytes) {
-        return BN_bin2bn(bytes.data(), 32, nullptr);
-    }
-
     // BIGNUM to big-endian bytes (32 bytes, padded)
     static void bn_to_bytes32(BIGNUM* bn, uint8_t* out) {
         int len = BN_num_bytes(bn);
@@ -375,11 +370,8 @@ namespace midnight::wallet
         BnNum bn_y(BN_new());
         if (!bn_x.get() || !bn_y.get()) throw std::runtime_error("BIGNUM allocation failed");
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-        if (EC_POINT_get_affine_coordinates_GFp(g.get(), pt.get(), bn_x, bn_y, ctx.get()) != 1)
-            throw std::runtime_error("EC_POINT_get_affine_coordinates_GFp failed");
-#pragma GCC diagnostic pop
+        if (EC_POINT_get_affine_coordinates(g.get(), pt.get(), bn_x, bn_y, ctx.get()) != 1)
+            throw std::runtime_error("EC_POINT_get_affine_coordinates failed");
 
         std::array<uint8_t, 33> pk{};
         pk[0] = BN_is_odd(bn_y.get()) ? 0x03 : 0x02;
@@ -387,14 +379,6 @@ namespace midnight::wallet
 
         // RAII handles cleanup automatically - no manual EC_POINT_free/EC_GROUP_free needed
         return pk;
-    }
-
-    // BIP-340 x-only public key (32 bytes)
-    static std::array<uint8_t, 32> bip340_pubkey(const std::array<uint8_t, 32>& priv) {
-        auto pk = secp_pubkey(priv);
-        std::array<uint8_t, 32> xonly{};
-        std::memcpy(xonly.data(), pk.data() + 1, 32);
-        return xonly;
     }
 
     // ─── HDWallet ─────────────────────────────────────────

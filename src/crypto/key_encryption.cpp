@@ -14,6 +14,7 @@
 #include <iomanip>
 #include <cstring>
 #include <algorithm>
+#include <stdexcept>
 
 #if defined(MIDNIGHT_ENABLE_SODIUM) && MIDNIGHT_ENABLE_SODIUM && __has_include(<sodium.h>)
 #include <sodium.h>
@@ -171,8 +172,7 @@ std::vector<uint8_t> KeyEncryption::generate_random_bytes(size_t count) {
     
 #if defined(OPENSSL_VERSION_NUMBER) && OPENSSL_VERSION_NUMBER >= 0x10101000L
     if (RAND_bytes(result.data(), static_cast<int>(count)) != 1) {
-        midnight::g_logger->warn("RAND_bytes failed, falling back to RAND_pseudo_bytes");
-        RAND_pseudo_bytes(result.data(), static_cast<int>(count));
+        throw std::runtime_error("RAND_bytes failed while generating cryptographic random bytes");
     }
 #elif defined(MIDNIGHT_HAS_SODIUM) && MIDNIGHT_HAS_SODIUM
     randombytes_buf(result.data(), count);
@@ -221,6 +221,7 @@ std::optional<std::vector<uint8_t>> KeyEncryption::derive_key_argon2id(
         return std::nullopt;
     }
 #else
+    (void)config;
     // Fallback: Use PBKDF2-HMAC-SHA256 if Argon2 is not available
     // This is less secure but ensures the code compiles
     midnight::g_logger->warn("Argon2 not available, using PBKDF2 fallback (reduce security)");

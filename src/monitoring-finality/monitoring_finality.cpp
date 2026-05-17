@@ -934,8 +934,9 @@ namespace midnight::monitoring_finality
         }
 
         // Resubmit transactions from abandoned blocks
-        for (const auto &block : *abandoned)
+        for (const auto &abandoned_block_hash : *abandoned)
         {
+            (void)abandoned_block_hash;
             // Get transactions from block
             // Resubmit each transaction
             resubmit_transaction("", rpc_url);
@@ -1002,7 +1003,7 @@ namespace midnight::monitoring_finality
                 auto now = std::chrono::high_resolution_clock::now();
                 auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start);
 
-                if (elapsed.count() > timeout_ms)
+                if (elapsed > std::chrono::milliseconds(timeout_ms))
                 {
                     return false;
                 }
@@ -1029,7 +1030,7 @@ namespace midnight::monitoring_finality
                 auto now = std::chrono::high_resolution_clock::now();
                 auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start);
 
-                if (elapsed.count() > timeout_ms)
+                if (elapsed > std::chrono::milliseconds(timeout_ms))
                 {
                     return false;
                 }
@@ -1085,10 +1086,10 @@ namespace midnight::monitoring_finality
 
     void MonitoringManager::start_monitoring()
     {
-        block_monitor_.subscribe_new_blocks([this](const std::string &hash)
+        block_monitor_.subscribe_new_blocks([this](const std::string &)
                                             { stats_.total_blocks_monitored++; });
 
-        finality_monitor_.monitor_finalization([this](uint32_t height)
+        finality_monitor_.monitor_finalization([this](uint32_t)
                                                {
                                                    stats_.total_blocks_monitored++;
                                                    stats_.average_finality_time_ms = 18000; // 18 seconds average
