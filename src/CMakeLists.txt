@@ -340,7 +340,6 @@ target_link_libraries(midnight-core
         $<$<TARGET_EXISTS:jsoncpp_lib>:jsoncpp_lib>
         $<$<TARGET_EXISTS:${JSONCPP_LIBRARY}>:${JSONCPP_LIBRARY}>
         $<$<TARGET_EXISTS:JsonCpp::JsonCpp>:JsonCpp::JsonCpp>
-        $<$<TARGET_EXISTS:httplib::httplib>:httplib::httplib>
         $<$<BOOL:${OPENSSL_FOUND}>:OpenSSL::SSL>
         $<$<BOOL:${OPENSSL_FOUND}>:OpenSSL::Crypto>
         $<$<BOOL:${Sodium_FOUND}>:Sodium::Sodium>

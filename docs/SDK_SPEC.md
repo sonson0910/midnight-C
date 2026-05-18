@@ -29,6 +29,11 @@ truth when public docs lag a release candidate. All SDKs must expose a way to
 report their pinned Midnight component versions and must fail clearly when a
 proof server or ledger backend is incompatible.
 
+For the exact local Midnight Rust/toolkit patches that back the C++ FFI, see
+`docs/MIDNIGHT_RESEARCH_PATCHES.md`. Future language SDKs should treat those
+patches as part of the C++ source-of-truth behavior until the same capability is
+available from upstream Midnight packages.
+
 ## Network Endpoints
 
 Named networks use this endpoint shape by default:

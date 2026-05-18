@@ -90,6 +90,13 @@ Existing reference docs:
 - `docs/MIDNIGHT_API_REFERENCE.md`
 - `docs/midnight_graphql_queries.md`
 - `docs/MIDNIGHT_UTXO_PROTOCOL.md`
+- `docs/MIDNIGHT_RESEARCH_PATCHES.md`
+
+Read `docs/MIDNIGHT_RESEARCH_PATCHES.md` before changing the nested
+`midnight-research/midnight-node` tree. It records every local Rust/toolkit
+patch that currently matters to the C++ SDK, including the native FFI package,
+canonical `TransactionWithContext` block-context fix, source-cache checkpoint
+patches, transaction inspection shape, and live Preview verification evidence.
 
 Shared cross-language fixtures:
 

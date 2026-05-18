@@ -12,6 +12,7 @@ out/
 Testing/
 midnight_cache/
 midnight-artifacts/
+midnight-research/
 
 # Compiled files
 *.o
