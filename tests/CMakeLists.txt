@@ -46,12 +46,17 @@ find_path(JSONCPP_INCLUDE_DIR json/json.h
         ${CMAKE_BINARY_DIR}/_deps/jsoncpp-src/include
         /opt/homebrew/include
         /usr/local/include
+        /usr/include/jsoncpp
+    PATH_SUFFIXES
+        jsoncpp
 )
 
-target_include_directories(midnight-tests
-    PRIVATE
-        ${JSONCPP_INCLUDE_DIR}
-)
+if(JSONCPP_INCLUDE_DIR)
+    target_include_directories(midnight-tests
+        PRIVATE
+            ${JSONCPP_INCLUDE_DIR}
+    )
+endif()
 
 target_compile_definitions(midnight-tests
     PRIVATE

@@ -40,6 +40,7 @@ option(ENABLE_WEBSOCKET "Enable WebSocket support" ON)
 option(ENABLE_BLOCKCHAIN "Enable blockchain support" ON)
 option(MIDNIGHT_REQUIRE_OPENSSL_FOR_BLOCKCHAIN "Require OpenSSL when blockchain HTTPS support is enabled" ON)
 option(MIDNIGHT_BUILD_LEDGER_FFI "Build the native Midnight ledger FFI backend with Cargo when available" ON)
+option(MIDNIGHT_ENABLE_INSTALL "Generate install and package export rules" ON)
 
 # Set output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
@@ -67,6 +68,7 @@ if(NOT nlohmann_json_FOUND)
     FetchContent_Declare(
         nlohmann_json
         URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
         QUIET
     )
     FetchContent_MakeAvailable(nlohmann_json)
@@ -99,6 +101,7 @@ if(MIDNIGHT_FORCE_FETCH_FMT OR NOT fmt_FOUND)
         FetchContent_Declare(
             fmt
             URL https://github.com/fmtlib/fmt/archive/refs/tags/11.1.4.zip
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
             QUIET
         )
         FetchContent_MakeAvailable(fmt)
@@ -141,12 +144,10 @@ elseif(NOT DEFINED HTTPLIB_SOURCE_DIR)
     FetchContent_Declare(
         cpp-httplib
         URL https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.42.0.zip
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
         QUIET
     )
-    FetchContent_GetProperties(cpp-httplib)
-    if(NOT cpp-httplib_POPULATED)
-        FetchContent_Populate(cpp-httplib)
-    endif()
+    FetchContent_MakeAvailable(cpp-httplib)
     set(HTTPLIB_SOURCE_DIR "${cpp-httplib_SOURCE_DIR}")
 endif()
 message(STATUS "cpp-httplib path: ${HTTPLIB_SOURCE_DIR}")
@@ -258,60 +259,62 @@ if(BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
-# Install targets
-include(CMakePackageConfigHelpers)
+if(MIDNIGHT_ENABLE_INSTALL)
+    # Install targets
+    include(CMakePackageConfigHelpers)
 
-install(
-    DIRECTORY include/midnight
-    DESTINATION include
-)
+    install(
+        DIRECTORY include/midnight
+        DESTINATION include
+    )
 
-install(
-    TARGETS midnight-core
-    EXPORT midnightTargets
-    RUNTIME DESTINATION bin
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-)
+    install(
+        TARGETS midnight-core
+        EXPORT midnightTargets
+        RUNTIME DESTINATION bin
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib
+    )
 
-install(
-    EXPORT midnightTargets
-    FILE midnightTargets.cmake
-    NAMESPACE midnight::
-    DESTINATION lib/cmake/midnight
-)
+    install(
+        EXPORT midnightTargets
+        FILE midnightTargets.cmake
+        NAMESPACE midnight::
+        DESTINATION lib/cmake/midnight
+    )
 
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/midnightConfigVersion.cmake"
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
-)
-
-configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/midnightConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/midnightConfig.cmake"
-    INSTALL_DESTINATION lib/cmake/midnight
-)
-
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/midnight.pc.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/midnight.pc"
-    @ONLY
-)
-
-install(
-    FILES
-        "${CMAKE_CURRENT_BINARY_DIR}/midnightConfig.cmake"
+    write_basic_package_version_file(
         "${CMAKE_CURRENT_BINARY_DIR}/midnightConfigVersion.cmake"
-    DESTINATION lib/cmake/midnight
-)
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
+    )
 
-install(
-    FILES "${CMAKE_CURRENT_BINARY_DIR}/midnight.pc"
-    DESTINATION lib/pkgconfig
-)
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/midnightConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/midnightConfig.cmake"
+        INSTALL_DESTINATION lib/cmake/midnight
+    )
 
-install(
-    FILES "${CMAKE_CURRENT_SOURCE_DIR}/midnight-versions.json"
-    DESTINATION share/midnight
-)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/midnight.pc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/midnight.pc"
+        @ONLY
+    )
+
+    install(
+        FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/midnightConfig.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/midnightConfigVersion.cmake"
+        DESTINATION lib/cmake/midnight
+    )
+
+    install(
+        FILES "${CMAKE_CURRENT_BINARY_DIR}/midnight.pc"
+        DESTINATION lib/pkgconfig
+    )
+
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/midnight-versions.json"
+        DESTINATION share/midnight
+    )
+endif()

@@ -357,6 +357,14 @@ target_link_libraries(midnight-core
         $<$<BOOL:${ENABLE_GRPC}>:protobuf::libprotobuf>
 )
 
+if(APPLE AND OPENSSL_FOUND)
+    target_link_libraries(midnight-core
+        PUBLIC
+            "-framework CoreFoundation"
+            "-framework Security"
+    )
+endif()
+
 target_compile_definitions(midnight-core
     PRIVATE
         $<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
