@@ -1,0 +1,46 @@
+{
+  "description": "Public live Preview smoke evidence captured from the C++ SDK. This is not a default CI test.",
+  "network": "preview",
+  "captured_at": "2026-05-18",
+  "expected_ledger_version": "8.1.0-rc.1",
+  "proof_server": {
+    "url": "http://127.0.0.1:6300",
+    "version": "8.1.0-rc.1",
+    "proof_versions": [
+      "V2"
+    ]
+  },
+  "cache": {
+    "source_mode": "local-cache",
+    "fetch_only_cached": true,
+    "latest_ledger_cache_height_after_contract_flow": 781027,
+    "ready": true
+  },
+  "night_transfer": {
+    "status": "included",
+    "tx_hash": "30024643c66f6c0745c5cca3b37d02c509543882a9a5d77f0f0f15bc63565ede",
+    "extrinsic_hash": "0xa8a8ad95a49db0b7aa0fb017c8465d36f6ebbfaa3a3d0967fbb3fae9e1d32764",
+    "block_height": 780705,
+    "block_hash": "41d747e7a943459a91f1005e069033922a24111a518a1b98ed4cb3a214631235"
+  },
+  "smart_contract_smoke": {
+    "status": "deploy_call_included",
+    "contract_address": "9fc5ed8c13df07e672bbf940539a49fabc9847735dbb589d6b5e0b55b8494839",
+    "contract_asset_source": "midnight-research/midnight-node/static/contracts/simple-merkle-tree",
+    "http_submit_fallback": "websocket_for_large_contract_extrinsics",
+    "deploy": {
+      "tx_hash": "d6ef864d0402e764b1b3f457459d24bcf116cb93d45a441f725c6146330bc5b1",
+      "extrinsic_hash": "0xf8ca69f6a8018fc49cc704bb097dea6d3e5fd29e2d9bb75343242a17e65d9981",
+      "block_height": 781005,
+      "block_hash": "f9a6b7744462e631536a91fb81bf8962c769db59e0c0962d0ad393da563cee0d"
+    },
+    "call": {
+      "tx_hash": "eeb97d3f7a0ebb2d5ef392dfc98354921e2a8cc761f3b2bb9fd8001641c7bfac",
+      "extrinsic_hash": "0x8d155b5b49a5ce55fb2ebfc0329c763f02619a950f8282ab76ddff8d4d0bad53",
+      "block_height": 781026,
+      "block_hash": "8c89e45ae8b6df152aa2aa24e1da39f5f177d44992561480cc753b1e5fa08276"
+    }
+  },
+  "remaining_custom_contract_gap": "A real Hello World Compact source exists under examples/contracts/hello-world, but compactc is not installed in this workspace, so live custom Compact deploy must be run after generating compatible intents."
+}
+

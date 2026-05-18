@@ -1,0 +1,29 @@
+{
+  "description": "Public Midnight address/hash/token format vectors.",
+  "addresses": {
+    "preview_unshielded_night": "mn_addr_preview17v9604rd5vw00sryvjxfg688fvv9fryz309j9vgjdd7qrh4wdvcqxqfgmj",
+    "testnet_unshielded_night": "mn_addr_testnet1h3ssm5ru2t6eqy4g3she78zlxn96e36ms6pq996aduvmateh9p9snacw06",
+    "testnet_dust": "mn_dust_testnet1w0l54txthpu8q05j9j9ttk3j5dyu5766dc9zkz2s435vdglzwdr35jzxfk0",
+    "testnet_shielded": "mn_shield-addr_testnet1r020sfa7jllsz0z2wqhykz8npmphsu5223nsea7vjt9ekxs5almtvtnrpgpszud4uyd0yjrlqyp7v5xvwqljsng2g79j5w4al9c4kuqmrxx6k"
+  },
+  "hashes": {
+    "funding_tx_hash": "0xb203e61666b25e2e015978215f134bae8ac7318f23ba5b5f353031aefde008cf",
+    "funding_tx_hash_without_0x": "b203e61666b25e2e015978215f134bae8ac7318f23ba5b5f353031aefde008cf",
+    "transfer_tx_hash": "30024643c66f6c0745c5cca3b37d02c509543882a9a5d77f0f0f15bc63565ede",
+    "transfer_block_hash": "41d747e7a943459a91f1005e069033922a24111a518a1b98ed4cb3a214631235"
+  },
+  "tokens": {
+    "night": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "contract": {
+    "simple_contract_address": "9fc5ed8c13df07e672bbf940539a49fabc9847735dbb589d6b5e0b55b8494839",
+    "simple_contract_address_prefixed": "0x9fc5ed8c13df07e672bbf940539a49fabc9847735dbb589d6b5e0b55b8494839"
+  },
+  "invalid": {
+    "wallet_address_as_contract": "mn_addr_preview17v9604rd5vw00sryvjxfg688fvv9fryz309j9vgjdd7qrh4wdvcqxqfgmj",
+    "short_hash": "abcd",
+    "short_contract": "1234",
+    "display_token_name": "NIGHT"
+  }
+}
+

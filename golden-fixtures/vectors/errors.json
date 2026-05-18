@@ -1,0 +1,43 @@
+{
+  "description": "Public Midnight SDK error strings and selected node custom errors.",
+  "sdk_error_codes": [
+    "none",
+    "invalid_address",
+    "invalid_contract_address",
+    "invalid_token_type",
+    "invalid_amount",
+    "invalid_hash",
+    "indexer_schema_error",
+    "ledger_backend_error",
+    "ledger_build_error",
+    "ledger_state_mismatch",
+    "proof_server_error",
+    "node_rpc_error",
+    "node_rejected_tx",
+    "indexer_error",
+    "submission_rejected",
+    "confirmation_timeout",
+    "finality_timeout",
+    "artifact_error",
+    "unsupported_operation"
+  ],
+  "node_custom_errors": {
+    "170": {
+      "name": "InvalidDustSpendProof",
+      "sdk_error_code": "node_rejected_tx",
+      "hint": "Check proof server version and proof system compatibility."
+    },
+    "171": {
+      "name": "OutOfDustValidityWindow",
+      "sdk_error_code": "node_rejected_tx",
+      "hint": "Refresh the local ledger cache tail and rebuild with a fresh RNG seed."
+    }
+  },
+  "guard_errors": {
+    "ledger_state_mismatch": {
+      "sdk_error_code": "ledger_state_mismatch",
+      "hint": "Do not submit. Repair or rebuild cache state first."
+    }
+  }
+}
+

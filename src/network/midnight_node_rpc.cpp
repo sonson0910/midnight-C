@@ -12,6 +12,8 @@
 #include <cctype>
 #include <optional>
 #include <string_view>
+#include <algorithm>
+#include <httplib.h>
 
 namespace midnight::network
 {
@@ -40,6 +42,47 @@ namespace midnight::network
                     return false;
             }
             return true;
+        }
+
+        bool starts_with(const std::string &value, std::string_view prefix)
+        {
+            return value.size() >= prefix.size() &&
+                   std::string_view(value.data(), prefix.size()) == prefix;
+        }
+
+        std::string websocket_url_from_http_url(const std::string &url)
+        {
+            auto ensure_path = [](std::string value) {
+                const auto scheme_pos = value.find("://");
+                const auto host_start = scheme_pos == std::string::npos ? 0 : scheme_pos + 3;
+                if (value.find('/', host_start) == std::string::npos)
+                {
+                    value.push_back('/');
+                }
+                return value;
+            };
+
+            if (starts_with(url, "https://"))
+            {
+                return ensure_path("wss://" + url.substr(8));
+            }
+            if (starts_with(url, "http://"))
+            {
+                return ensure_path("ws://" + url.substr(7));
+            }
+            if (starts_with(url, "wss://") || starts_with(url, "ws://"))
+            {
+                return ensure_path(url);
+            }
+            return ensure_path("wss://" + url);
+        }
+
+        bool should_try_websocket_submit_fallback(const std::string &error)
+        {
+            return error.find("HTTP 403") != std::string::npos ||
+                   error.find("HTTP 413") != std::string::npos ||
+                   error.find("Payload Too Large") != std::string::npos ||
+                   error.find("Request Entity Too Large") != std::string::npos;
         }
 
         std::string truncate_rpc_error_detail(std::string value, std::size_t max_length)
@@ -387,7 +430,24 @@ namespace midnight::network
         }
         catch (const std::exception &e)
         {
-            throw std::runtime_error(std::string("author_submitExtrinsic failed: ") + e.what());
+            const std::string http_error = e.what();
+            if (!should_try_websocket_submit_fallback(http_error))
+            {
+                throw std::runtime_error(std::string("author_submitExtrinsic failed: ") + http_error);
+            }
+
+            midnight::g_logger->warn(
+                "HTTP author_submitExtrinsic was rejected by the RPC frontend; retrying over WebSocket");
+            try
+            {
+                response = rpc_call_websocket("author_submitExtrinsic", json::array({payload}));
+            }
+            catch (const std::exception &ws_error)
+            {
+                throw std::runtime_error(
+                    std::string("author_submitExtrinsic failed over HTTP and WebSocket fallback: http=") +
+                    http_error + " websocket=" + ws_error.what());
+            }
         }
 
         std::string tx_id;
@@ -739,6 +799,81 @@ namespace midnight::network
             std::ostringstream err_log;
             err_log << "RPC call failed: " << method << " - " << e.what();
             midnight::g_logger->error(err_log.str());
+            throw;
+        }
+    }
+
+    json MidnightNodeRPC::rpc_call_websocket(
+        const std::string &method,
+        const json &params)
+    {
+        json request = json::object({{"jsonrpc", "2.0"},
+                                     {"method", method},
+                                     {"params", params},
+                                     {"id", get_next_request_id()}});
+
+        const auto websocket_url = websocket_url_from_http_url(client_->get_base_url());
+        const int timeout_ms = static_cast<int>(client_->get_timeout_ms());
+        midnight::g_logger->debug("WebSocket RPC call: " + method + " -> " + websocket_url);
+
+        try
+        {
+            httplib::ws::WebSocketClient ws(websocket_url);
+            ws.set_connection_timeout(timeout_ms / 1000, (timeout_ms % 1000) * 1000);
+            ws.set_read_timeout(std::max(1, timeout_ms / 1000), (timeout_ms % 1000) * 1000);
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+            ws.enable_server_certificate_verification(false);
+#endif
+
+            if (!ws.connect())
+            {
+                throw std::runtime_error("failed to open WebSocket connection");
+            }
+
+            if (!ws.send(request.dump()))
+            {
+                ws.close();
+                throw std::runtime_error("failed to send WebSocket JSON-RPC request");
+            }
+
+            std::string response_body;
+            const auto read_result = ws.read(response_body);
+            ws.close();
+
+            if (read_result != httplib::ws::ReadResult::Text)
+            {
+                throw std::runtime_error("WebSocket RPC did not return a text JSON-RPC response");
+            }
+
+            json response;
+            try
+            {
+                response = json::parse(response_body);
+            }
+            catch (const std::exception &parse_error)
+            {
+                throw std::runtime_error(
+                    std::string("Invalid WebSocket JSON-RPC response: ") + parse_error.what());
+            }
+
+            if (response.contains("error") && !response["error"].is_null())
+            {
+                const auto detail = rpc_error_detail(response["error"]);
+                midnight::g_logger->error("WebSocket RPC error [" + method + "]: " + detail);
+                throw RpcApplicationError("RPC " + method + " error: " + detail);
+            }
+
+            if (!response.contains("result"))
+            {
+                throw std::runtime_error("Invalid WebSocket RPC response - missing result field");
+            }
+
+            return response["result"];
+        }
+        catch (const std::exception &e)
+        {
+            midnight::g_logger->error(
+                "WebSocket RPC call failed: " + method + " - " + e.what());
             throw;
         }
     }

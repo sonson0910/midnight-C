@@ -8,7 +8,9 @@
 #include <filesystem>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -64,6 +66,31 @@ namespace
             break;
         }
         return std::stoull(value);
+    }
+
+    std::vector<std::string> split_list(std::string value)
+    {
+        std::vector<std::string> items;
+        std::string current;
+        std::stringstream input(value);
+        while (std::getline(input, current, ','))
+        {
+            current.erase(
+                current.begin(),
+                std::find_if(current.begin(), current.end(), [](unsigned char c) {
+                    return !std::isspace(c);
+                }));
+            current.erase(
+                std::find_if(current.rbegin(), current.rend(), [](unsigned char c) {
+                    return !std::isspace(c);
+                }).base(),
+                current.end());
+            if (!current.empty())
+            {
+                items.push_back(current);
+            }
+        }
+        return items;
     }
 
     midnight::production::ClientConfig client_config()
@@ -230,6 +257,7 @@ namespace
     {
         std::cout << "build.success=" << result.transaction.build.success << "\n";
         std::cout << "tx_hash=" << result.transaction.build.transaction_hash << "\n";
+        std::cout << "contract_address=" << result.transaction.build.contract_address << "\n";
         std::cout << "extrinsic_hash=" << result.transaction.submit.extrinsic_hash << "\n";
         std::cout << "submit.success=" << result.transaction.submit.success << "\n";
         std::cout << "confirmation.success=" << result.confirmation.success << "\n";
@@ -258,6 +286,112 @@ namespace
         return 0;
     }
 
+    void print_contract_state(const std::string &label, const nlohmann::json &state)
+    {
+        const auto encoded = state.is_string() ? state.get<std::string>() : state.dump();
+        std::cout << label << "_size=" << encoded.size() << "\n";
+        std::cout << label << "_prefix=" << encoded.substr(0, std::min<std::size_t>(encoded.size(), 160)) << "\n";
+        if (env_bool("MIDNIGHT_LIVE_PRINT_FULL_CONTRACT_STATE", false))
+        {
+            std::cout << label << "=" << state.dump() << "\n";
+        }
+    }
+
+    bool require_synced_build_cache(const midnight::ledger::SourceConfig &source, const std::string &operation)
+    {
+        if (!should_fail_for_unsynced_cache(source))
+        {
+            return true;
+        }
+        std::cerr << "error=Ledger state cache is not synced. Run `tools/midnight-preprod-live.sh sync-ledger-state` first, or set MIDNIGHT_LIVE_ALLOW_COLD_SYNC=1 to opt into a long cold sync inside "
+                  << operation << ".\n";
+        return false;
+    }
+
+    std::optional<std::string> optional_rng_seed()
+    {
+        const auto rng_seed = env_value("MIDNIGHT_LIVE_RNG_SEED");
+        if (rng_seed.empty())
+        {
+            return std::nullopt;
+        }
+        return rng_seed;
+    }
+
+    std::string contract_funding_seed()
+    {
+        auto seed = env_value("MIDNIGHT_LIVE_CONTRACT_FUNDING_SEED");
+        if (!seed.empty())
+        {
+            return seed;
+        }
+        seed = env_value("MIDNIGHT_LIVE_FUNDING_SEED");
+        if (!seed.empty())
+        {
+            return seed;
+        }
+        return require_env("MIDNIGHT_LIVE_SOURCE_SEED");
+    }
+
+    std::vector<std::string> contract_authority_seeds(const std::string &fallback_seed)
+    {
+        auto seeds = split_list(env_value("MIDNIGHT_LIVE_CONTRACT_AUTHORITY_SEEDS"));
+        if (seeds.empty())
+        {
+            seeds.push_back(fallback_seed);
+        }
+        return seeds;
+    }
+
+    midnight::ledger::SimpleContractDeployParams hello_deploy_params()
+    {
+        midnight::ledger::SimpleContractDeployParams params;
+        params.source = source_config();
+        configure_build_source_for_safety(params.source);
+        params.funding_seed = contract_funding_seed();
+        params.authority_seeds = contract_authority_seeds(params.funding_seed);
+        if (auto threshold = env_optional_u64("MIDNIGHT_LIVE_CONTRACT_AUTHORITY_THRESHOLD"))
+        {
+            params.authority_threshold = static_cast<uint32_t>(*threshold);
+        }
+        params.rng_seed = optional_rng_seed();
+        return params;
+    }
+
+    midnight::ledger::SimpleContractCallParams hello_call_params(const std::string &contract_address)
+    {
+        midnight::ledger::SimpleContractCallParams params;
+        params.source = source_config();
+        configure_build_source_for_safety(params.source);
+        params.funding_seed = contract_funding_seed();
+        params.contract_address = contract_address;
+        params.call_key = env_value("MIDNIGHT_LIVE_CONTRACT_CALL_KEY", "store");
+        params.fee = env_value("MIDNIGHT_LIVE_CONTRACT_FEE", "1300000");
+        params.rng_seed = optional_rng_seed();
+        return params;
+    }
+
+    int refresh_wallet_cache(midnight::production::MidnightClient &client, const std::string &label)
+    {
+        midnight::ledger::SyncLedgerStateParams params;
+        params.source = source_config();
+        params.source.source_mode = midnight::ledger::SourceMode::ColdSync;
+        params.source.fetch_only_cached = false;
+        params.source.require_ledger_state_cache = true;
+        params.wallet_seeds.push_back(require_env("MIDNIGHT_LIVE_SOURCE_SEED"));
+        const auto funding_seed = env_value("MIDNIGHT_LIVE_FUNDING_SEED");
+        if (!funding_seed.empty() && funding_seed != params.wallet_seeds.front())
+        {
+            params.wallet_seeds.push_back(funding_seed);
+        }
+        params.timeout_ms = env_u64("MIDNIGHT_LIVE_SYNC_TIMEOUT_MS", 0);
+
+        std::cout << "refresh_phase=" << label << "\n";
+        const auto refresh = client.sync_ledger_state(params);
+        print_build_result(refresh);
+        return refresh.success ? 0 : 1;
+    }
+
     int register_dust()
     {
         auto config = client_config();
@@ -266,9 +400,8 @@ namespace
         midnight::ledger::RegisterDustParams params;
         params.source = source_config();
         configure_build_source_for_safety(params.source);
-        if (should_fail_for_unsynced_cache(params.source))
+        if (!require_synced_build_cache(params.source, "register-dust"))
         {
-            std::cerr << "error=Ledger state cache is not synced. Run `tools/midnight-preprod-live.sh sync-ledger-state` first, or set MIDNIGHT_LIVE_ALLOW_COLD_SYNC=1 to opt into a long cold sync inside register-dust.\n";
             return 1;
         }
         params.wallet_seed = require_env("MIDNIGHT_LIVE_SOURCE_SEED");
@@ -321,9 +454,8 @@ namespace
         midnight::ledger::TransferNightParams params;
         params.source = source_config();
         configure_build_source_for_safety(params.source);
-        if (should_fail_for_unsynced_cache(params.source))
+        if (!require_synced_build_cache(params.source, "transfer-night"))
         {
-            std::cerr << "error=Ledger state cache is not synced. Run `tools/midnight-preprod-live.sh sync-ledger-state` first, or set MIDNIGHT_LIVE_ALLOW_COLD_SYNC=1 to opt into a long cold sync inside transfer-night.\n";
             return 1;
         }
         params.source_seed = require_env("MIDNIGHT_LIVE_SOURCE_SEED");
@@ -451,13 +583,132 @@ namespace
         }
         return 0;
     }
+
+    int deploy_hello_contract()
+    {
+        auto config = client_config();
+        midnight::production::MidnightClient client(config);
+        auto params = hello_deploy_params();
+        if (!require_synced_build_cache(params.source, "deploy-hello-contract"))
+        {
+            return 1;
+        }
+        return print_result(client.deploy_simple_contract(
+            pipeline_options(env_value("MIDNIGHT_NETWORK", "preview") + "-hello-contract"),
+            params));
+    }
+
+    int query_contract_state()
+    {
+        auto config = client_config();
+        midnight::production::MidnightClient client(config);
+        const auto contract_address = require_env("MIDNIGHT_LIVE_CONTRACT_ADDRESS");
+        print_contract_state("contract_state", client.query_contract_state(contract_address));
+        return 0;
+    }
+
+    int call_hello_contract()
+    {
+        auto config = client_config();
+        midnight::production::MidnightClient client(config);
+        auto params = hello_call_params(require_env("MIDNIGHT_LIVE_CONTRACT_ADDRESS"));
+        if (!require_synced_build_cache(params.source, "call-hello-contract"))
+        {
+            return 1;
+        }
+        return print_result(client.call_simple_contract(
+            pipeline_options(env_value("MIDNIGHT_NETWORK", "preview") + "-hello-contract"),
+            params));
+    }
+
+    int custom_contract_intents()
+    {
+        auto config = client_config();
+        midnight::production::MidnightClient client(config);
+
+        midnight::ledger::CustomContractIntentParams params;
+        params.source = source_config();
+        configure_build_source_for_safety(params.source);
+        if (!require_synced_build_cache(params.source, "custom-contract-intents"))
+        {
+            return 1;
+        }
+        params.funding_seed = contract_funding_seed();
+        params.compiled_contract_dirs = split_list(env_value("MIDNIGHT_LIVE_CUSTOM_COMPILED_CONTRACT_DIRS"));
+        params.intent_files = split_list(env_value("MIDNIGHT_LIVE_CUSTOM_INTENT_FILES"));
+        params.input_utxos = split_list(env_value("MIDNIGHT_LIVE_CUSTOM_INPUT_UTXOS"));
+        params.shielded_destinations = split_list(env_value("MIDNIGHT_LIVE_CUSTOM_SHIELDED_DESTINATIONS"));
+        if (auto zswap = env_value("MIDNIGHT_LIVE_CUSTOM_ZSWAP_STATE_FILE"); !zswap.empty())
+        {
+            params.zswap_state_file = zswap;
+        }
+        params.rng_seed = optional_rng_seed();
+
+        return print_result(client.submit_custom_contract_intents(
+            pipeline_options(env_value("MIDNIGHT_NETWORK", "preview") + "-custom-contract"),
+            params));
+    }
+
+    int hello_contract_flow()
+    {
+        auto config = client_config();
+        midnight::production::MidnightClient client(config);
+
+        auto deploy_params = hello_deploy_params();
+        if (!require_synced_build_cache(deploy_params.source, "hello-contract-flow deploy"))
+        {
+            return 1;
+        }
+
+        std::cout << "phase=deploy\n";
+        auto deploy = client.deploy_simple_contract(
+            pipeline_options(env_value("MIDNIGHT_NETWORK", "preview") + "-hello-contract"),
+            deploy_params);
+        const auto deploy_code = print_result(deploy);
+        if (deploy_code != 0)
+        {
+            return deploy_code;
+        }
+
+        const auto contract_address = deploy.transaction.build.contract_address;
+        if (contract_address.empty())
+        {
+            std::cerr << "error=Deploy transaction succeeded but the ledger backend did not extract contract_address. Inspect the deploy artifact or query the indexer by tx_hash.\n";
+            return 1;
+        }
+
+        std::cout << "phase=query-after-deploy\n";
+        print_contract_state("contract_state_after_deploy", client.query_contract_state(contract_address));
+
+        const auto refresh_after_deploy = refresh_wallet_cache(client, "after-deploy");
+        if (refresh_after_deploy != 0)
+        {
+            return refresh_after_deploy;
+        }
+
+        auto call_params = hello_call_params(contract_address);
+        std::cout << "phase=call\n";
+        auto call = client.call_simple_contract(
+            pipeline_options(env_value("MIDNIGHT_NETWORK", "preview") + "-hello-contract"),
+            call_params);
+        const auto call_code = print_result(call);
+        if (call_code != 0)
+        {
+            return call_code;
+        }
+
+        std::cout << "phase=query-after-call\n";
+        print_contract_state("contract_state_after_call", client.query_contract_state(contract_address));
+
+        return refresh_wallet_cache(client, "after-call");
+    }
 }
 
 int main(int argc, char **argv)
 {
     if (argc != 2)
     {
-        std::cerr << "Usage: preprod_live_flow <balance|sync-ledger-state|register-dust|transfer-night|both>\n";
+        std::cerr << "Usage: preprod_live_flow <balance|sync-ledger-state|register-dust|transfer-night|deploy-hello-contract|query-contract-state|call-hello-contract|hello-contract-flow|custom-contract-intents|both>\n";
         return 2;
     }
 
@@ -479,6 +730,26 @@ int main(int argc, char **argv)
         if (action == "transfer-night")
         {
             return transfer_night();
+        }
+        if (action == "deploy-hello-contract")
+        {
+            return deploy_hello_contract();
+        }
+        if (action == "query-contract-state")
+        {
+            return query_contract_state();
+        }
+        if (action == "call-hello-contract")
+        {
+            return call_hello_contract();
+        }
+        if (action == "hello-contract-flow")
+        {
+            return hello_contract_flow();
+        }
+        if (action == "custom-contract-intents")
+        {
+            return custom_contract_intents();
         }
         if (action == "both")
         {

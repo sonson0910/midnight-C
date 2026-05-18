@@ -1,0 +1,19 @@
+import CompactStandardLibrary;
+
+export ledger greeting_hash: Bytes<32>;
+export ledger updates: Counter;
+
+constructor(initial_greeting_hash: Bytes<32>) {
+  greeting_hash = disclose(initial_greeting_hash);
+}
+
+export circuit setGreeting(new_greeting_hash: Bytes<32>): [] {
+  greeting_hash = disclose(new_greeting_hash);
+  updates.increment(1);
+}
+
+export circuit resetGreeting(default_greeting_hash: Bytes<32>): [] {
+  greeting_hash = disclose(default_greeting_hash);
+  updates.resetToDefault();
+}
+

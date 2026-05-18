@@ -1,0 +1,35 @@
+{
+  "description": "Public Preview indexer smoke vectors. These are read-only evidence and may be used by gated network tests.",
+  "network": "preview",
+  "indexer_schema": "v4",
+  "funding": {
+    "tx_hash": "0xb203e61666b25e2e015978215f134bae8ac7318f23ba5b5f353031aefde008cf",
+    "block_height": 721281,
+    "night_address": "mn_addr_preview17v9604rd5vw00sryvjxfg688fvv9fryz309j9vgjdd7qrh4wdvcqxqfgmj",
+    "value": "1000000000"
+  },
+  "dust_registration": {
+    "tx_hash": "f72afbb2cf04ef81a178397e2e5259f96cca35b465b190fcaa903f82fda22a2d",
+    "extrinsic_hash": "0xcbd8e7ad0b0b246189b23c2da47ecdd4069a8135234bb9c3f32caf0e7699878b",
+    "block_height": 773422,
+    "block_hash": "fdd8e90050414308cce698c3e04efaa58a93cf5417d66e9c08c3d0a57358f540"
+  },
+  "night_transfer": {
+    "tx_hash": "30024643c66f6c0745c5cca3b37d02c509543882a9a5d77f0f0f15bc63565ede",
+    "extrinsic_hash": "0xa8a8ad95a49db0b7aa0fb017c8465d36f6ebbfaa3a3d0967fbb3fae9e1d32764",
+    "block_height": 780705,
+    "block_hash": "41d747e7a943459a91f1005e069033922a24111a518a1b98ed4cb3a214631235"
+  },
+  "contract_smoke": {
+    "contract_address": "9fc5ed8c13df07e672bbf940539a49fabc9847735dbb589d6b5e0b55b8494839",
+    "deploy_tx_hash": "d6ef864d0402e764b1b3f457459d24bcf116cb93d45a441f725c6146330bc5b1",
+    "deploy_extrinsic_hash": "0xf8ca69f6a8018fc49cc704bb097dea6d3e5fd29e2d9bb75343242a17e65d9981",
+    "deploy_block_height": 781005,
+    "deploy_block_hash": "f9a6b7744462e631536a91fb81bf8962c769db59e0c0962d0ad393da563cee0d",
+    "call_tx_hash": "eeb97d3f7a0ebb2d5ef392dfc98354921e2a8cc761f3b2bb9fd8001641c7bfac",
+    "call_extrinsic_hash": "0x8d155b5b49a5ce55fb2ebfc0329c763f02619a950f8282ab76ddff8d4d0bad53",
+    "call_block_height": 781026,
+    "call_block_hash": "8c89e45ae8b6df152aa2aa24e1da39f5f177d44992561480cc753b1e5fa08276"
+  }
+}
+

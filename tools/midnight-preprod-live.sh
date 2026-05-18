@@ -36,6 +36,7 @@ Commands:
   print-faucet        Print the NIGHT address to paste into the faucet.
   proof-health        Check the configured proof server /health endpoint.
   balance             Query NIGHT/DUST wallet state, defaulting to local ledger cache.
+  prepare-live-submit Check proof server/cache readiness, refresh stale cache tail, then print balance.
   sync-status         Print sync process, cache sizes, and recent sync log.
   watch-checkpoint    Watch sync checkpoint, cache activity, rate, and ETA.
   sync-ledger-state   Build/update local ledger and wallet cache for tx building.
@@ -57,6 +58,14 @@ Commands:
   import-cache <file> Import fetch/wallet cache created by export-cache.
   register-dust       Build/prove/submit a DUST registration transaction.
   transfer-night      Build/prove/submit a small NIGHT transfer.
+  deploy-hello-contract
+                      Deploy the SDK smart-contract smoke contract and save its address.
+  query-contract-state
+                      Query MIDNIGHT_LIVE_CONTRACT_ADDRESS through midnight_contractState.
+  call-hello-contract Call the deployed smoke contract circuit.
+  hello-contract-flow Deploy, query state, refresh cache, call, query state again.
+  custom-contract-intents
+                      Submit Compact-generated intent files through custom_contract_transaction.
   both                Register DUST, then submit the NIGHT transfer.
 
 The script reads secrets from .secrets/midnight-$NETWORK/live.env by default.
@@ -284,6 +293,9 @@ run_flow() {
     echo "Run: cmake --build \"$BUILD_DIR\"" >&2
     exit 1
   fi
+  if [[ -z "${MIDNIGHT_LEDGER_TEST_STATIC_DIR:-}" ]]; then
+    export MIDNIGHT_LEDGER_TEST_STATIC_DIR="$ROOT_DIR/midnight-research/midnight-node/static/contracts"
+  fi
   (
     cd "$ROOT_DIR"
     if [[ "$action" == "sync-ledger-state" ]]; then
@@ -292,6 +304,53 @@ run_flow() {
       "$BUILD_DIR/bin/preprod_live_flow" "$action"
     fi
   )
+}
+
+ensure_fresh_rng_seed() {
+  if [[ -z "${MIDNIGHT_LIVE_RNG_SEED:-}" ]]; then
+    export MIDNIGHT_LIVE_RNG_SEED="$(openssl rand -hex 32)"
+  fi
+}
+
+run_deploy_hello_contract() {
+  ensure_fresh_rng_seed
+  local output_file
+  output_file="$(mktemp "${TMPDIR:-/tmp}/midnight-deploy-hello.XXXXXX")"
+  local status
+  set +e
+  run_flow deploy-hello-contract 2>&1 | tee "$output_file"
+  status=${PIPESTATUS[0]}
+  set -e
+  if (( status == 0 )); then
+    local contract_address
+    contract_address="$(awk -F= '/^contract_address=/{ if ($2 != "") value=$2 } END { print value }' "$output_file")"
+    if [[ -n "$contract_address" ]]; then
+      set_env_exports "$ENV_FILE" "MIDNIGHT_LIVE_CONTRACT_ADDRESS=$contract_address"
+      echo "Saved MIDNIGHT_LIVE_CONTRACT_ADDRESS=$contract_address to $ENV_FILE"
+    fi
+  fi
+  rm -f "$output_file"
+  return "$status"
+}
+
+run_hello_contract_flow() {
+  local output_file
+  output_file="$(mktemp "${TMPDIR:-/tmp}/midnight-hello-flow.XXXXXX")"
+  local status
+  set +e
+  run_flow hello-contract-flow 2>&1 | tee "$output_file"
+  status=${PIPESTATUS[0]}
+  set -e
+  if (( status == 0 )); then
+    local contract_address
+    contract_address="$(awk -F= '/^contract_address=/{ if ($2 != "") value=$2 } END { print value }' "$output_file")"
+    if [[ -n "$contract_address" ]]; then
+      set_env_exports "$ENV_FILE" "MIDNIGHT_LIVE_CONTRACT_ADDRESS=$contract_address"
+      echo "Saved MIDNIGHT_LIVE_CONTRACT_ADDRESS=$contract_address to $ENV_FILE"
+    fi
+  fi
+  rm -f "$output_file"
+  return "$status"
 }
 
 is_retryable_sync_error() {
@@ -918,6 +977,68 @@ refresh_local_cache() {
   enable_local_mode
 }
 
+prepare_live_submit() {
+  load_env
+  local max_lag="${MIDNIGHT_LIVE_MAX_CACHE_LAG_BLOCKS:-100}"
+  local auto_repair="${MIDNIGHT_LIVE_PREPARE_AUTO_REPAIR:-1}"
+  if ! [[ "$max_lag" =~ ^[0-9]+$ ]]; then
+    echo "MIDNIGHT_LIVE_MAX_CACHE_LAG_BLOCKS must be an integer" >&2
+    exit 2
+  fi
+
+  echo "== proof-health =="
+  proof_health
+  echo
+
+  local status_file
+  status_file="$(mktemp "${TMPDIR:-/tmp}/midnight-local-mode-status.XXXXXX")"
+  echo "== local-mode-status =="
+  local_mode_status | tee "$status_file"
+
+  local ready lag
+  ready="$(awk -F= '/^ready=/{value=$2} END {print value}' "$status_file")"
+  lag="$(sed -nE 's/^.*cache_lag_blocks=([0-9]+).*$/\1/p' "$status_file" | tail -n 1)"
+
+  if [[ "$ready" != "1" ]]; then
+    if grep -qi 'state-root\|StateRootMismatch\|Ledger-state cache failed state-root verification' "$status_file"; then
+      if [[ "$auto_repair" == "1" ]]; then
+        echo
+        echo "prepare: derived ledger-state cache failed verification; backing it up before rebuild."
+        backup_ledger_state_cache "prepare-state-root-mismatch" || true
+      else
+        echo
+        echo "prepare: cache is not ready and auto-repair is disabled."
+        echo "Set MIDNIGHT_LIVE_PREPARE_AUTO_REPAIR=1 or run reset-ledger-state-cache manually."
+        rm -f "$status_file"
+        return 1
+      fi
+    fi
+
+    echo
+    echo "prepare: local cache is not ready; running sync-ledger-state."
+    run_flow sync-ledger-state
+    echo
+    enable_local_mode
+  elif [[ -n "$lag" && "$lag" =~ ^[0-9]+$ && "$lag" -gt "$max_lag" ]]; then
+    echo
+    echo "prepare: cache lag is ${lag} block(s), above threshold ${max_lag}; refreshing local cache tail."
+    refresh_local_cache
+  else
+    echo
+    echo "prepare: local cache is ready${lag:+, lag=${lag} block(s)}."
+  fi
+
+  rm -f "$status_file"
+  echo
+  echo "== final local-mode-status =="
+  local_mode_status
+  echo
+  echo "== balance =="
+  run_flow balance
+  echo
+  echo "prepare_live_submit=ready"
+}
+
 reset_ledger_state_cache() {
   load_env
   backup_ledger_state_cache "manual-reset"
@@ -1311,6 +1432,9 @@ case "${1:-}" in
   balance)
     run_flow balance
     ;;
+  prepare-live-submit|prepare)
+    prepare_live_submit
+    ;;
   sync-status)
     sync_status
     ;;
@@ -1357,12 +1481,32 @@ case "${1:-}" in
     import_cache "${2:-}"
     ;;
   register-dust)
+    ensure_fresh_rng_seed
     run_flow register-dust
     ;;
   transfer-night)
+    ensure_fresh_rng_seed
     run_flow transfer-night
     ;;
+  deploy-hello-contract)
+    run_deploy_hello_contract
+    ;;
+  query-contract-state)
+    run_flow query-contract-state
+    ;;
+  call-hello-contract)
+    ensure_fresh_rng_seed
+    run_flow call-hello-contract
+    ;;
+  hello-contract-flow)
+    run_hello_contract_flow
+    ;;
+  custom-contract-intents)
+    ensure_fresh_rng_seed
+    run_flow custom-contract-intents
+    ;;
   both)
+    ensure_fresh_rng_seed
     run_flow both
     ;;
   ""|-h|--help|help)

@@ -163,6 +163,17 @@ namespace midnight::network
             const json &params = json::object());
 
         /**
+         * @brief Make JSON-RPC 2.0 call over WebSocket.
+         *
+         * Used as a submit fallback for public RPC frontends that reject larger
+         * HTTP bodies while accepting the same author_submitExtrinsic payload
+         * over the node WebSocket endpoint.
+         */
+        json rpc_call_websocket(
+            const std::string &method,
+            const json &params = json::object());
+
+        /**
          * @brief Convert JSON UTXO to blockchain::UTXO
          */
         static midnight::blockchain::UTXO json_to_utxo(const json &js);

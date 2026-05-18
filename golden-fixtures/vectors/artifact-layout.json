@@ -1,0 +1,33 @@
+{
+  "description": "Shared artifact layout expected by Midnight SDKs.",
+  "path_template": "midnight-artifacts/<network>/<wallet_id>/<operation>/<id-or-timestamp>/",
+  "required_path_segments": [
+    "network",
+    "wallet_id",
+    "operation",
+    "id-or-timestamp"
+  ],
+  "common_files": [
+    "metadata.json",
+    "transaction.hex",
+    "transaction.hash",
+    "ledger-output.json",
+    "submit-result.json",
+    "confirmation.json"
+  ],
+  "optional_contract_files": [
+    "intent.json",
+    "private-state.json",
+    "zswap-state.json",
+    "onchain-state.json",
+    "result.json"
+  ],
+  "example": {
+    "network": "preview",
+    "wallet_id": "preview-local",
+    "operation": "transfer-night",
+    "id": "30024643c66f6c0745c5cca3b37d02c509543882a9a5d77f0f0f15bc63565ede",
+    "path": "midnight-artifacts/preview/preview-local/transfer-night/30024643c66f6c0745c5cca3b37d02c509543882a9a5d77f0f0f15bc63565ede/"
+  }
+}
+
