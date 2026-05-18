@@ -61,11 +61,22 @@ jobs:
 
       - name: Install Dependencies (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          choco install -y ninja cmake openssl
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          path-type: inherit
+          install: >-
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-libsodium
+            mingw-w64-x86_64-pkgconf
 
       - name: Configure CMake
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           cmake -S . -B build \
@@ -80,10 +91,38 @@ jobs:
             -DMIDNIGHT_ENABLE_INSTALL=OFF \
             -DMIDNIGHT_REQUIRE_OPENSSL_FOR_BLOCKCHAIN=OFF
 
+      - name: Configure CMake (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cmake -S . -B build \
+            -G "$CMAKE_GENERATOR" \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DBUILD_TESTS=ON \
+            -DBUILD_EXAMPLES=ON \
+            -DENABLE_BLOCKCHAIN=ON \
+            -DENABLE_WEBSOCKET=ON \
+            -DENABLE_GRPC=OFF \
+            -DMIDNIGHT_BUILD_LEDGER_FFI=OFF \
+            -DMIDNIGHT_ENABLE_INSTALL=OFF \
+            -DMIDNIGHT_REQUIRE_OPENSSL_FOR_BLOCKCHAIN=OFF
+
       - name: Build Project
+        if: runner.os != 'Windows'
         run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel 4
 
+      - name: Build Project (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: cmake --build build --config "$BUILD_TYPE" --parallel 4
+
       - name: Run Tests
+        if: runner.os != 'Windows'
+        run: ctest --test-dir build --output-on-failure --timeout 180
+
+      - name: Run Tests (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
         run: ctest --test-dir build --output-on-failure --timeout 180
 
       - name: Upload Build Logs
@@ -188,6 +227,7 @@ jobs:
           test -f README.md
           test -f docs/SDK_SPEC.md
           test -f docs/MIDNIGHT_CXX_SDK_CONTEXT.md
+          test -f docs/MIDNIGHT_RESEARCH_PATCHES.md
           test -f golden-fixtures/README.md
           test -f docs/assets/midnight-cpp-sdk.svg
 

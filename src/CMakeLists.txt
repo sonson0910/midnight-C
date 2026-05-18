@@ -243,8 +243,30 @@ endif()
 
 # Fallback: direct library search on standard paths
 if(NOT Sodium_FOUND)
-    find_path(SODIUM_INCLUDE_DIR NAMES sodium.h)
-    find_library(SODIUM_LIBRARY NAMES sodium)
+    set(_MIDNIGHT_SODIUM_HINT_PREFIXES)
+    if(WIN32)
+        foreach(_MIDNIGHT_SODIUM_PREFIX
+            "$ENV{MINGW_PREFIX}"
+            "$ENV{MSYSTEM_PREFIX}"
+            "C:/mingw64"
+            "C:/msys64/mingw64"
+        )
+            if(_MIDNIGHT_SODIUM_PREFIX AND EXISTS "${_MIDNIGHT_SODIUM_PREFIX}")
+                list(APPEND _MIDNIGHT_SODIUM_HINT_PREFIXES "${_MIDNIGHT_SODIUM_PREFIX}")
+            endif()
+        endforeach()
+    endif()
+
+    find_path(SODIUM_INCLUDE_DIR
+        NAMES sodium.h
+        HINTS ${_MIDNIGHT_SODIUM_HINT_PREFIXES}
+        PATH_SUFFIXES include
+    )
+    find_library(SODIUM_LIBRARY
+        NAMES sodium libsodium
+        HINTS ${_MIDNIGHT_SODIUM_HINT_PREFIXES}
+        PATH_SUFFIXES lib bin
+    )
     if(SODIUM_INCLUDE_DIR AND SODIUM_LIBRARY)
         if(NOT TARGET Sodium::Sodium)
             add_library(Sodium::Sodium UNKNOWN IMPORTED)
@@ -328,8 +350,28 @@ if(NOT Sodium_FOUND AND DEFINED ENV{CONDA_PREFIX})
     endif()
 endif()
 
+if(Sodium_FOUND AND NOT TARGET Sodium::Sodium)
+    if(SODIUM_INCLUDE_DIR AND SODIUM_LIBRARY)
+        add_library(Sodium::Sodium UNKNOWN IMPORTED)
+        set_target_properties(Sodium::Sodium PROPERTIES
+            IMPORTED_LOCATION "${SODIUM_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${SODIUM_INCLUDE_DIR}"
+        )
+    elseif(SODIUM_INCLUDE_DIRS AND SODIUM_LIBRARIES)
+        add_library(Sodium::Sodium INTERFACE IMPORTED)
+        set_target_properties(Sodium::Sodium PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${SODIUM_INCLUDE_DIRS}"
+            INTERFACE_LINK_LIBRARIES "${SODIUM_LIBRARIES}"
+        )
+    endif()
+endif()
+
 if(ENABLE_BLOCKCHAIN AND MIDNIGHT_REQUIRE_OPENSSL_FOR_BLOCKCHAIN AND NOT OPENSSL_FOUND)
     message(FATAL_ERROR "OpenSSL is required for production Midnight HTTPS endpoints. Install OpenSSL or configure with -DMIDNIGHT_REQUIRE_OPENSSL_FOR_BLOCKCHAIN=OFF for local HTTP-only builds.")
+endif()
+
+if(ENABLE_BLOCKCHAIN AND NOT Sodium_FOUND)
+    message(FATAL_ERROR "libsodium is required when ENABLE_BLOCKCHAIN=ON. Install libsodium or configure with -DENABLE_BLOCKCHAIN=OFF for protocol-only builds.")
 endif()
 
 target_link_libraries(midnight-core
