@@ -46,29 +46,3 @@ target_include_directories(preprod_live_flow PRIVATE ${CMAKE_SOURCE_DIR}/include
 add_executable(decode_address decode_address.cpp)
 target_link_libraries(decode_address PRIVATE midnight-core)
 target_include_directories(decode_address PRIVATE ${CMAKE_SOURCE_DIR}/include)
-
-add_executable(indexer-probe indexer-probe.cpp)
-target_link_libraries(indexer-probe PRIVATE midnight-core)
-target_include_directories(indexer-probe PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${HTTPLIB_SOURCE_DIR}
-)
-if(WIN32)
-    target_compile_definitions(indexer-probe PRIVATE
-        WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 WINVER=0x0A00
-    )
-endif()
-target_compile_definitions(indexer-probe PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
-
-add_executable(ws-probe ws-probe.cpp)
-target_link_libraries(ws-probe PRIVATE midnight-core)
-target_include_directories(ws-probe PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${HTTPLIB_SOURCE_DIR}
-)
-if(WIN32)
-    target_compile_definitions(ws-probe PRIVATE
-        WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 WINVER=0x0A00
-    )
-endif()
-target_compile_definitions(ws-probe PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)

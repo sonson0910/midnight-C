@@ -91,12 +91,17 @@ Existing reference docs:
 - `docs/midnight_graphql_queries.md`
 - `docs/MIDNIGHT_UTXO_PROTOCOL.md`
 - `docs/MIDNIGHT_RESEARCH_PATCHES.md`
+- `docs/MACHINE_HANDOFF.md`
 
 Read `docs/MIDNIGHT_RESEARCH_PATCHES.md` before changing the nested
 `midnight-research/midnight-node` tree. It records every local Rust/toolkit
 patch that currently matters to the C++ SDK, including the native FFI package,
 canonical `TransactionWithContext` block-context fix, source-cache checkpoint
 patches, transaction inspection shape, and live Preview verification evidence.
+
+Read `docs/MACHINE_HANDOFF.md` before moving the SDK to another machine. It
+lists the source repos, build dependencies, cache files, secrets, proof server,
+and local-mode checks required to avoid repeating a full cold sync.
 
 Shared cross-language fixtures:
 
@@ -1116,9 +1121,9 @@ Do not add the matching seed or mnemonic here.
    changes are the priority and `.ps1` files can be ignored unless explicitly
    requested.
 
-10. Existing `docs/ARCHITECTURE.md` and parts of older docs may contain early
-   scaffold/legacy wording. Prefer this context file plus current headers/source
-   when deciding production Midnight behavior.
+10. Early scaffold docs such as the old architecture/getting-started pages have
+    been removed. Prefer this context file, `docs/SDK_SPEC.md`, and current
+    headers/source when deciding production Midnight behavior.
 
 11. Do not keep submitting from a stale local-cache snapshot. If
     `local-mode-status` shows `cache_lag_blocks` above a few hundred, run

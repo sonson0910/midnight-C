@@ -61,6 +61,7 @@ Local secrets, caches, and live artifacts are intentionally ignored:
 .secrets/
 midnight_cache/
 midnight-artifacts/
+midnight-research/
 build*/
 ```
 
@@ -173,9 +174,9 @@ submit them through `custom_contract_transaction`.
 
 - [SDK specification](docs/SDK_SPEC.md)
 - [Current implementation handoff](docs/MIDNIGHT_CXX_SDK_CONTEXT.md)
+- [Machine handoff](docs/MACHINE_HANDOFF.md)
+- [Midnight research patch inventory](docs/MIDNIGHT_RESEARCH_PATCHES.md)
 - [API reference](docs/MIDNIGHT_API_REFERENCE.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Getting started](docs/GETTING_STARTED.md)
 - [GraphQL queries](docs/midnight_graphql_queries.md)
 - [UTXO protocol notes](docs/MIDNIGHT_UTXO_PROTOCOL.md)
 - [Golden fixtures](golden-fixtures/README.md)

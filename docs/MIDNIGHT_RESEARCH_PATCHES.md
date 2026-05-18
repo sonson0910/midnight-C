@@ -34,7 +34,8 @@ must not shell out to a CLI process for the production transaction path.
 
 ## Modified Files
 
-Current nested repository status is expected to include these local changes:
+The local patch commit in `midnight-research/midnight-node` includes these
+changes:
 
 ```text
 Cargo.lock
