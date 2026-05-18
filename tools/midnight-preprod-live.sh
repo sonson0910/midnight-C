@@ -27,6 +27,7 @@ Network defaults to preview. Override with:
   MIDNIGHT_LIVE_ALLOW_COLD_SYNC=1   # opt into long first-time ledger sync inside build commands
   MIDNIGHT_LIVE_SYNC_AUTO_RESUME=1   # auto-restart sync-ledger-state on transient fetch failure
   MIDNIGHT_LIVE_SYNC_MAX_RESTARTS=20
+  MIDNIGHT_LIVE_SYNC_RESET_ON_STATE_MISMATCH=1
   MIDNIGHT_LIVE_SOURCE_MODE=local-cache|cold-sync|bounded|auto
   MIDNIGHT_LIVE_BALANCE_SOURCE=local-cache|funding-tx|funding-block|indexer-scan
 
@@ -38,8 +39,20 @@ Commands:
   sync-status         Print sync process, cache sizes, and recent sync log.
   watch-checkpoint    Watch sync checkpoint, cache activity, rate, and ETA.
   sync-ledger-state   Build/update local ledger and wallet cache for tx building.
+  refresh-local-cache Warm-update cache tail from the current local checkpoint to chain tip.
   enable-local-mode   Persist cache-only local transaction build mode in live.env.
   local-mode-status   Check whether local cache mode is ready for build/submit.
+  verify-source-tail-cache [lookback]
+                      Compare cached source tail with canonical node hashes.
+  repair-source-tail-cache [lookback] [safety]
+                      Prune only non-canonical source cache tail, not full cache.
+  inspect-ledger-state-cache
+                      Print latest wallet ledger snapshot context and canonical parent.
+  verify-artifact-context [dir]
+                      Verify a built artifact's parentBlockHash exists on node.
+  reset-ledger-state-cache
+                      Back up wallet ledger-state cache; keep source fetch cache.
+  reset-source-cache  Back up source fetch cache and derived wallet ledger-state cache.
   export-cache [file] Export fetch/wallet cache for reuse on another machine.
   import-cache <file> Import fetch/wallet cache created by export-cache.
   register-dust       Build/prove/submit a DUST registration transaction.
@@ -64,6 +77,30 @@ require_executable() {
     echo "Run: cmake --build \"$BUILD_DIR\"" >&2
     exit 1
   fi
+}
+
+cache_tool_path() {
+  echo "$BUILD_DIR/midnight-ledger-ffi/release/midnight-cache-tool"
+}
+
+ensure_cache_tool() {
+  local tool
+  tool="$(cache_tool_path)"
+  if [[ -x "$tool" ]]; then
+    return 0
+  fi
+  echo "Building midnight-cache-tool..." >&2
+  cargo build \
+    --manifest-path "$ROOT_DIR/midnight-research/midnight-node/Cargo.toml" \
+    --package midnight-ledger-ffi \
+    --release \
+    --target-dir "$BUILD_DIR/midnight-ledger-ffi" >&2
+  require_executable "$tool"
+}
+
+run_cache_tool() {
+  ensure_cache_tool
+  "$(cache_tool_path)" "$@"
 }
 
 load_env() {
@@ -139,7 +176,7 @@ lines = [
     f"export MIDNIGHT_LIVE_WALLET_ID={q(network + '-local')}",
     f"export MIDNIGHT_LIVE_FETCH_CACHE={q('redb:' + str(fetch_cache))}",
     f"export MIDNIGHT_LIVE_LEDGER_STATE_DB={q(ledger_state_db)}",
-    "export MIDNIGHT_LIVE_DUST_WARP=1",
+    "export MIDNIGHT_LIVE_DUST_WARP=0",
     "export MIDNIGHT_LIVE_FETCH_CONCURRENCY=4",
     "export MIDNIGHT_LIVE_FETCH_RETRY_COUNT=5",
     "export MIDNIGHT_LIVE_FETCH_RETRY_DELAY_MS=5000",
@@ -150,6 +187,8 @@ lines = [
     "# export MIDNIGHT_LIVE_FETCH_ONLY_CACHED=1",
     "# Build/submit commands default to cache-only to avoid hidden hour-long cold sync.",
     "# export MIDNIGHT_LIVE_ALLOW_COLD_SYNC=1",
+    "# Optional 32-byte hex RNG seed to force a fresh transaction build.",
+    "# export MIDNIGHT_LIVE_RNG_SEED=$(openssl rand -hex 32)",
     "# Optional fast-path after faucet funding. Fill these once faucet returns.",
     "# export MIDNIGHT_LIVE_FUNDING_TX_HASH=0x...",
     "# export MIDNIGHT_LIVE_FUNDING_BLOCK=721281",
@@ -282,6 +321,8 @@ run_sync_ledger_state() {
   local auto_resume="${MIDNIGHT_LIVE_SYNC_AUTO_RESUME:-1}"
   local max_restarts="${MIDNIGHT_LIVE_SYNC_MAX_RESTARTS:-20}"
   local restart_delay="${MIDNIGHT_LIVE_SYNC_RESTART_DELAY_SECONDS:-10}"
+  local reset_on_state_mismatch="${MIDNIGHT_LIVE_SYNC_RESET_ON_STATE_MISMATCH:-1}"
+  local did_reset_state=0
   if ! [[ "$max_restarts" =~ ^[0-9]+$ ]] || (( max_restarts < 1 )); then
     echo "MIDNIGHT_LIVE_SYNC_MAX_RESTARTS must be a positive integer" >&2
     exit 2
@@ -312,6 +353,22 @@ run_sync_ledger_state() {
     local error_line error_text
     error_line="$(grep '^error=' "$log_file" | tail -n 1 || true)"
     error_text="${error_line#error=}"
+    if [[ "$auto_resume" == "1" && "$reset_on_state_mismatch" == "1" ]] &&
+       (( did_reset_state == 0 )) &&
+       is_state_mismatch_error "$error_text"; then
+      echo "midnight-live-helper: ledger-state cache is inconsistent with source blocks; backing it up and rebuilding from fetch cache" | tee -a "$log_file"
+      if backup_ledger_state_cache "invalid-state-root" | tee -a "$log_file"; then
+        did_reset_state=1
+        if (( attempt >= max_restarts )); then
+          echo "midnight-live-helper: sync exhausted $max_restarts attempt(s) before ledger-state rebuild" | tee -a "$log_file"
+          return "$flow_status"
+        fi
+        echo "midnight-live-helper: retrying sync after ledger-state cache backup" | tee -a "$log_file"
+        sleep "$restart_delay"
+        attempt=$((attempt + 1))
+        continue
+      fi
+    fi
     if [[ "$auto_resume" != "1" ]] || ! is_retryable_sync_error "$error_text"; then
       echo "midnight-live-helper: sync stopped after non-retryable error: ${error_text:-unknown}" | tee -a "$log_file"
       return "$flow_status"
@@ -332,12 +389,47 @@ proof_health() {
   load_env
   local url="${MIDNIGHT_LIVE_PROOF_SERVER_URL:-${MIDNIGHT_PROOF_SERVER_URL:-http://127.0.0.1:6300}}"
   local health_url="${url%/}/health"
+  local version_url="${url%/}/version"
+  local proof_versions_url="${url%/}/proof-versions"
   echo "Checking proof server: $health_url"
   if ! /usr/bin/curl -fsS --connect-timeout 2 --max-time 5 "$health_url"; then
     echo "Proof server is not reachable at $health_url" >&2
     echo "Set MIDNIGHT_LIVE_PROOF_SERVER_URL or start the proof server before live build/submit." >&2
     return 1
   fi
+  echo
+
+  local actual_version expected_version
+  actual_version="$(/usr/bin/curl -fsS --connect-timeout 2 --max-time 5 "$version_url" | tr -d '[:space:]' || true)"
+  expected_version="$(python3 - "$ROOT_DIR/midnight-versions.json" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+try:
+    data = json.loads(path.read_text())
+    print(data.get("ledger", ""))
+except Exception:
+    print("")
+PY
+)"
+
+  echo "proof_server_version=${actual_version:-unknown}"
+  if [[ -n "$expected_version" ]]; then
+    echo "expected_ledger_version=$expected_version"
+  fi
+  if [[ -n "$actual_version" && -n "$expected_version" && "$actual_version" != "$expected_version" ]]; then
+    echo "version_match=0"
+    echo "Proof server version mismatch: expected $expected_version, got $actual_version" >&2
+    echo "Start a proof server built from the same midnight-ledger version as the SDK." >&2
+    return 1
+  fi
+
+  local proof_versions
+  proof_versions="$(/usr/bin/curl -fsS --connect-timeout 2 --max-time 5 "$proof_versions_url" || true)"
+  echo "proof_versions=${proof_versions:-unknown}"
+  echo "version_match=1"
 }
 
 file_age_seconds() {
@@ -377,6 +469,88 @@ path_has_data() {
     return
   fi
   return 1
+}
+
+node_tip_height() {
+  local rpc_url="$1"
+  local response
+  response="$(/usr/bin/curl -fsS --connect-timeout 2 --max-time 8 \
+    -H 'content-type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"chain_getHeader","params":[]}' \
+    "$rpc_url" 2>/dev/null)"
+  python3 -c '
+import json
+import sys
+
+try:
+    data = json.load(sys.stdin)
+    number = data["result"]["number"]
+    print(int(number, 16) if isinstance(number, str) and number.startswith("0x") else int(number))
+except Exception:
+    raise SystemExit(1)
+' <<< "$response"
+}
+
+is_state_mismatch_error() {
+  local error="$1"
+  local lower
+  lower="$(printf '%s' "$error" | tr '[:upper:]' '[:lower:]')"
+  case "$lower" in
+    *"staterootmismatch"*|*"state root mismatch"*|*"ledger snapshot missing"*|*"failed to restore ledger snapshot"*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+backup_ledger_state_cache() {
+  local reason="${1:-manual-reset}"
+  local ledger_state="${MIDNIGHT_LIVE_LEDGER_STATE_DB:-$ROOT_DIR/midnight_cache/live_submit_ledger_state_db}"
+  if [[ ! -e "$ledger_state" ]]; then
+    echo "No ledger-state cache to back up: $ledger_state"
+    return 1
+  fi
+
+  local sanitized_reason backup
+  sanitized_reason="$(printf '%s' "$reason" | tr -cs '[:alnum:]_.-' '-')"
+  sanitized_reason="${sanitized_reason%-}"
+  backup="${ledger_state}.${sanitized_reason}-$(date +%Y%m%dT%H%M%S)"
+  mv "$ledger_state" "$backup"
+  echo "Backed up ledger-state cache:"
+  echo "  from=$ledger_state"
+  echo "  to=$backup"
+  echo "Source fetch cache was left untouched."
+}
+
+backup_source_fetch_cache() {
+  local reason="${1:-manual-source-reset}"
+  local fetch_cache="${MIDNIGHT_LIVE_FETCH_CACHE#redb:}"
+  local ledger_state="${MIDNIGHT_LIVE_LEDGER_STATE_DB:-$ROOT_DIR/midnight_cache/live_submit_ledger_state_db}"
+  local sanitized_reason backup
+  sanitized_reason="$(printf '%s' "$reason" | tr -cs '[:alnum:]_.-' '-')"
+  sanitized_reason="${sanitized_reason%-}"
+
+  if [[ -e "$fetch_cache" ]]; then
+    backup="${fetch_cache}.${sanitized_reason}-$(date +%Y%m%dT%H%M%S)"
+    mv "$fetch_cache" "$backup"
+    echo "Backed up source fetch cache:"
+    echo "  from=$fetch_cache"
+    echo "  to=$backup"
+  else
+    echo "No source fetch cache to back up: $fetch_cache"
+  fi
+
+  if [[ -e "$ledger_state" ]]; then
+    backup="${ledger_state}.${sanitized_reason}-$(date +%Y%m%dT%H%M%S)"
+    mv "$ledger_state" "$backup"
+    echo "Backed up derived ledger-state cache:"
+    echo "  from=$ledger_state"
+    echo "  to=$backup"
+  else
+    echo "No derived ledger-state cache to back up: $ledger_state"
+  fi
 }
 
 human_bytes() {
@@ -628,6 +802,7 @@ local_mode_status() {
     echo "  fetch_cache=missing"
   fi
   local ledger_ready=0
+  local ledger_height=0
   if path_has_data "$ledger_state"; then
     ledger_ready=1
   fi
@@ -642,6 +817,7 @@ local_mode_status() {
       if [[ -n "$ledger_height" ]]; then
         echo "  ledger_state=present $(du -sh "$ledger_state" 2>/dev/null | awk '{print $1}') latest_height=$ledger_height"
       else
+        ledger_height=0
         echo "  ledger_state=present $(du -sh "$ledger_state" 2>/dev/null | awk '{print $1}')"
       fi
     else
@@ -649,6 +825,19 @@ local_mode_status() {
     fi
   else
     echo "  ledger_state=missing"
+  fi
+
+  local node_tip
+  node_tip="$(node_tip_height "${MIDNIGHT_LIVE_NODE_URL:-${MIDNIGHT_NODE_URL:-$NODE_URL}}" || true)"
+  if [[ -n "$node_tip" && "$ledger_height" =~ ^[0-9]+$ && "$ledger_height" -gt 0 ]]; then
+    local lag=$((node_tip - ledger_height))
+    if (( lag < 0 )); then
+      lag=0
+    fi
+    echo "  node_tip=$node_tip cache_lag_blocks=$lag"
+    if (( lag > 300 )); then
+      echo "  freshness_hint=Run refresh-local-cache before building transactions; stale DUST windows can be rejected by node code 171."
+    fi
   fi
 
   echo
@@ -660,13 +849,40 @@ local_mode_status() {
     terminal="$(sync_terminal_state "$log_file")"
     IFS='|' read -r terminal_state terminal_error <<< "$terminal"
     echo "  checkpoint=$checkpoint finalized=$finalized remaining=$remaining progress=${pct}%"
-    echo "  last_result=$terminal_state${terminal_error:+ error=$terminal_error}"
+    local terminal_display="$terminal_error"
+    if (( ${#terminal_display} > 240 )); then
+      terminal_display="${terminal_display:0:240}..."
+    fi
+    echo "  last_result=$terminal_state${terminal_display:+ error=$terminal_display}"
   else
     echo "  no sync log yet"
   fi
 
   echo
+  local cache_consistent=1
   if [[ "$mode" == "local-cache" && "$fetch_only" == "1" && "$allow_cold" != "1" && "$ledger_ready" == "1" ]]; then
+    if [[ -f "$log_file" ]]; then
+      local snapshot min finalized checkpoint remaining pct state source_line terminal terminal_state terminal_error
+      snapshot="$(checkpoint_snapshot "$log_file")"
+      IFS='|' read -r min finalized checkpoint remaining pct state source_line <<< "$snapshot"
+      terminal="$(sync_terminal_state "$log_file")"
+      IFS='|' read -r terminal_state terminal_error <<< "$terminal"
+      if [[ "$terminal_state" == "failed" ]] && is_state_mismatch_error "$terminal_error"; then
+        cache_consistent=0
+        echo "ready=0"
+        echo "hint=Ledger-state cache failed state-root verification. Run reset-ledger-state-cache, then sync-ledger-state."
+        return
+      fi
+      if [[ "$terminal_state" == "failed" ]] && (( checkpoint > ledger_height )); then
+        cache_consistent=0
+        echo "ready=0"
+        echo "hint=Fetch cache is ahead of ledger-state cache after a failed sync. Run sync-ledger-state again, or reset-ledger-state-cache if the error was StateRootMismatch."
+        return
+      fi
+    fi
+  fi
+
+  if [[ "$mode" == "local-cache" && "$fetch_only" == "1" && "$allow_cold" != "1" && "$ledger_ready" == "1" && "$cache_consistent" == "1" ]]; then
     echo "ready=1"
   else
     echo "ready=0"
@@ -679,10 +895,234 @@ enable_local_mode() {
     "MIDNIGHT_LIVE_SOURCE_MODE=local-cache" \
     "MIDNIGHT_LIVE_FETCH_ONLY_CACHED=1" \
     "MIDNIGHT_LIVE_ALLOW_COLD_SYNC=0" \
-    "MIDNIGHT_LIVE_REQUIRE_LEDGER_STATE_CACHE=1"
+    "MIDNIGHT_LIVE_REQUIRE_LEDGER_STATE_CACHE=1" \
+    "MIDNIGHT_LIVE_DUST_WARP=0"
   echo "Enabled local-cache mode in $ENV_FILE"
   echo
   local_mode_status
+}
+
+refresh_local_cache() {
+  load_env
+  export MIDNIGHT_LIVE_SOURCE_MODE=cold-sync
+  export MIDNIGHT_LIVE_FETCH_ONLY_CACHED=0
+  export MIDNIGHT_LIVE_ALLOW_COLD_SYNC=1
+  export MIDNIGHT_LIVE_SYNC_AUTO_RESUME="${MIDNIGHT_LIVE_SYNC_AUTO_RESUME:-1}"
+  export MIDNIGHT_LIVE_SYNC_MAX_RESTARTS="${MIDNIGHT_LIVE_SYNC_MAX_RESTARTS:-5}"
+
+  run_flow sync-ledger-state
+  echo
+  export MIDNIGHT_LIVE_SOURCE_MODE=local-cache
+  export MIDNIGHT_LIVE_FETCH_ONLY_CACHED=1
+  export MIDNIGHT_LIVE_ALLOW_COLD_SYNC=0
+  enable_local_mode
+}
+
+reset_ledger_state_cache() {
+  load_env
+  backup_ledger_state_cache "manual-reset"
+  echo
+  echo "Next step:"
+  echo "  /usr/bin/env MIDNIGHT_NETWORK=$NETWORK $ROOT_DIR/tools/midnight-preprod-live.sh sync-ledger-state"
+}
+
+reset_source_cache() {
+  load_env
+  backup_source_fetch_cache "manual-reset"
+  echo
+  echo "Next step:"
+  echo "  /usr/bin/env MIDNIGHT_NETWORK=$NETWORK MIDNIGHT_LIVE_ALLOW_COLD_SYNC=1 $ROOT_DIR/tools/midnight-preprod-live.sh sync-ledger-state"
+  echo "Then:"
+  echo "  /usr/bin/env MIDNIGHT_NETWORK=$NETWORK $ROOT_DIR/tools/midnight-preprod-live.sh enable-local-mode"
+}
+
+verify_source_tail_cache() {
+  load_env
+  local lookback="${1:-50000}"
+  local fetch_cache="${MIDNIGHT_LIVE_FETCH_CACHE:-redb:$ROOT_DIR/midnight_cache/live_submit_fetch_cache.db}"
+  local source_url="${MIDNIGHT_LIVE_SOURCE_URL:-${MIDNIGHT_SOURCE_URL:-$SOURCE_URL}}"
+  run_cache_tool verify-tail \
+    --fetch-cache "$fetch_cache" \
+    --source-url "$source_url" \
+    --lookback "$lookback"
+}
+
+repair_source_tail_cache() {
+  load_env
+  if sync_process_running; then
+    echo "A sync/build process is still running. Stop it before pruning the source cache." >&2
+    return 1
+  fi
+
+  local lookback="${1:-50000}"
+  local safety="${2:-200}"
+  local fetch_cache="${MIDNIGHT_LIVE_FETCH_CACHE:-redb:$ROOT_DIR/midnight_cache/live_submit_fetch_cache.db}"
+  local source_url="${MIDNIGHT_LIVE_SOURCE_URL:-${MIDNIGHT_SOURCE_URL:-$SOURCE_URL}}"
+  local output
+  if ! output="$(run_cache_tool repair-tail \
+      --fetch-cache "$fetch_cache" \
+      --source-url "$source_url" \
+      --lookback "$lookback" \
+      --safety-blocks "$safety")"; then
+    printf '%s\n' "$output"
+    return 1
+  fi
+  printf '%s\n' "$output"
+
+  if grep -q '^removed_blocks=0$' <<< "$output"; then
+    echo "Source tail is already canonical; no source blocks were pruned."
+    return 0
+  fi
+
+  echo
+  echo "Backing up derived wallet ledger-state cache; source fetch cache tail was pruned in place."
+  backup_ledger_state_cache "source-tail-repair"
+  echo
+  echo "Next step, refetch only the pruned tail:"
+  echo "  /usr/bin/env MIDNIGHT_NETWORK=$NETWORK MIDNIGHT_LIVE_ALLOW_COLD_SYNC=1 $ROOT_DIR/tools/midnight-preprod-live.sh sync-ledger-state"
+  echo "Then:"
+  echo "  /usr/bin/env MIDNIGHT_NETWORK=$NETWORK $ROOT_DIR/tools/midnight-preprod-live.sh enable-local-mode"
+}
+
+prune_source_tail_cache() {
+  load_env
+  local from_height="${1:-}"
+  if [[ -z "$from_height" ]]; then
+    echo "Usage: tools/midnight-preprod-live.sh prune-source-tail-cache <from-height>" >&2
+    exit 2
+  fi
+  if sync_process_running; then
+    echo "A sync/build process is still running. Stop it before pruning the source cache." >&2
+    return 1
+  fi
+
+  local fetch_cache="${MIDNIGHT_LIVE_FETCH_CACHE:-redb:$ROOT_DIR/midnight_cache/live_submit_fetch_cache.db}"
+  local source_url="${MIDNIGHT_LIVE_SOURCE_URL:-${MIDNIGHT_SOURCE_URL:-$SOURCE_URL}}"
+  run_cache_tool prune-tail \
+    --fetch-cache "$fetch_cache" \
+    --source-url "$source_url" \
+    --from-height "$from_height"
+  echo
+  backup_ledger_state_cache "source-tail-prune"
+}
+
+inspect_ledger_state_cache() {
+  load_env
+  local fetch_cache="${MIDNIGHT_LIVE_FETCH_CACHE:-redb:$ROOT_DIR/midnight_cache/live_submit_fetch_cache.db}"
+  local source_url="${MIDNIGHT_LIVE_SOURCE_URL:-${MIDNIGHT_SOURCE_URL:-$SOURCE_URL}}"
+  local ledger_state="${MIDNIGHT_LIVE_LEDGER_STATE_DB:-$ROOT_DIR/midnight_cache/live_submit_ledger_state_db}"
+  run_cache_tool inspect-ledger-state \
+    --fetch-cache "$fetch_cache" \
+    --source-url "$source_url" \
+    --ledger-state-db "$ledger_state"
+}
+
+verify_artifact_context() {
+  load_env
+  local artifact="${1:-}"
+  local artifact_root="${MIDNIGHT_LIVE_ARTIFACT_DIR:-$ROOT_DIR/midnight-artifacts}"
+  local rpc_url="${MIDNIGHT_LIVE_NODE_URL:-${MIDNIGHT_NODE_URL:-$NODE_URL}}"
+  python3 - "$artifact_root" "$artifact" "$rpc_url" <<'PY'
+import json
+import pathlib
+import ssl
+import sys
+import urllib.error
+import urllib.request
+
+artifact_root = pathlib.Path(sys.argv[1])
+artifact_arg = sys.argv[2]
+rpc_url = sys.argv[3]
+
+def latest_artifact_file():
+    files = list(artifact_root.rglob("ledger-output.json"))
+    if not files:
+        raise SystemExit(f"No ledger-output.json found under {artifact_root}")
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return files[0]
+
+if artifact_arg:
+    path = pathlib.Path(artifact_arg).expanduser()
+    if path.is_dir():
+        path = path / "ledger-output.json"
+else:
+    path = latest_artifact_file()
+
+if not path.exists():
+    raise SystemExit(f"Missing artifact ledger output: {path}")
+
+data = json.loads(path.read_text())
+parents = []
+tx_hashes = []
+
+def walk(value):
+    if isinstance(value, dict):
+        parent = value.get("parentBlockHash")
+        if isinstance(parent, str) and parent:
+            clean = parent[2:] if parent.startswith("0x") else parent
+            if clean not in parents:
+                parents.append(clean)
+        tx_hash = value.get("tx_hash")
+        if isinstance(tx_hash, str) and tx_hash and tx_hash not in tx_hashes:
+            tx_hashes.append(tx_hash)
+        for child in value.values():
+            walk(child)
+    elif isinstance(value, list):
+        for child in value:
+            walk(child)
+
+def rpc(method, params):
+    body = json.dumps({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+        "id": 1,
+    }).encode()
+    request = urllib.request.Request(
+        rpc_url,
+        data=body,
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+    context = ssl._create_unverified_context() if rpc_url.startswith("https://") else None
+    with urllib.request.urlopen(request, timeout=10, context=context) as response:
+        payload = json.loads(response.read().decode())
+    if payload.get("error"):
+        raise RuntimeError(payload["error"])
+    return payload.get("result")
+
+walk(data)
+print(f"artifact={path.parent}")
+for tx_hash in tx_hashes:
+    print(f"tx_hash={tx_hash}")
+
+if not parents:
+    print("canonical=unknown")
+    print("detail=artifact does not expose context.parentBlockHash")
+    raise SystemExit(2)
+
+ok = True
+for parent in parents:
+    prefixed = "0x" + parent
+    print(f"context_parent_hash={prefixed}")
+    try:
+        header = rpc("chain_getHeader", [prefixed])
+    except (urllib.error.URLError, TimeoutError, RuntimeError) as exc:
+        print("canonical=unknown")
+        print(f"detail=failed to query node: {exc}")
+        raise SystemExit(2)
+    if header is None:
+        ok = False
+        print("canonical=0")
+        print("detail=chain_getHeader returned null for context parentBlockHash")
+    else:
+        print("canonical=1")
+        print(f"context_parent_number={header.get('number', '')}")
+
+if not ok:
+    print("hint=Run reset-source-cache, sync-ledger-state, then enable-local-mode before building again.")
+    raise SystemExit(1)
+PY
 }
 
 watch_checkpoint() {
@@ -880,11 +1320,35 @@ case "${1:-}" in
   sync-ledger-state)
     run_flow sync-ledger-state
     ;;
+  refresh-local-cache|refresh-tail)
+    refresh_local_cache
+    ;;
   enable-local-mode)
     enable_local_mode
     ;;
   local-mode-status)
     local_mode_status
+    ;;
+  reset-ledger-state-cache)
+    reset_ledger_state_cache
+    ;;
+  reset-source-cache)
+    reset_source_cache
+    ;;
+  verify-source-tail-cache)
+    verify_source_tail_cache "${2:-}"
+    ;;
+  repair-source-tail-cache)
+    repair_source_tail_cache "${2:-}" "${3:-}"
+    ;;
+  prune-source-tail-cache)
+    prune_source_tail_cache "${2:-}"
+    ;;
+  inspect-ledger-state-cache)
+    inspect_ledger_state_cache
+    ;;
+  verify-artifact-context)
+    verify_artifact_context "${2:-}"
     ;;
   export-cache)
     export_cache "${2:-}"

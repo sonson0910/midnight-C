@@ -99,7 +99,7 @@ namespace
         source.require_ledger_state_cache =
             env_bool("MIDNIGHT_LIVE_REQUIRE_LEDGER_STATE_CACHE", true);
         source.ignore_block_context = env_bool("MIDNIGHT_LIVE_IGNORE_BLOCK_CONTEXT", false);
-        source.dust_warp = env_bool("MIDNIGHT_LIVE_DUST_WARP", true);
+        source.dust_warp = env_bool("MIDNIGHT_LIVE_DUST_WARP", false);
         source.fetch_cache = env_value(
             "MIDNIGHT_LIVE_FETCH_CACHE",
             "redb:midnight_cache/live_submit_fetch_cache.db");
@@ -129,9 +129,12 @@ namespace
         {
             source.transaction_hashes.push_back(tx_hash);
         }
-        else if (auto funding_tx = env_value("MIDNIGHT_LIVE_FUNDING_TX_HASH"); !funding_tx.empty())
+        else if (env_bool("MIDNIGHT_LIVE_USE_FUNDING_TX_SOURCE_FILTER", false))
         {
-            source.transaction_hashes.push_back(funding_tx);
+            if (auto funding_tx = env_value("MIDNIGHT_LIVE_FUNDING_TX_HASH"); !funding_tx.empty())
+            {
+                source.transaction_hashes.push_back(funding_tx);
+            }
         }
         return source;
     }
@@ -236,6 +239,7 @@ namespace
 
         if (!result.success)
         {
+            std::cerr << "error_code=" << midnight::production::to_string(result.error.code) << "\n";
             std::cerr << "error=" << result.error.message << "\n";
             if (!result.error.detail.empty())
             {
@@ -272,6 +276,11 @@ namespace
         if (!funding_seed.empty())
         {
             params.funding_seed = funding_seed;
+        }
+        const auto rng_seed = env_value("MIDNIGHT_LIVE_RNG_SEED");
+        if (!rng_seed.empty())
+        {
+            params.rng_seed = rng_seed;
         }
         const auto dust_address = env_value("MIDNIGHT_LIVE_DUST_ADDRESS");
         if (!dust_address.empty())
@@ -323,6 +332,11 @@ namespace
         {
             params.funding_seed = funding_seed;
         }
+        const auto rng_seed = env_value("MIDNIGHT_LIVE_RNG_SEED");
+        if (!rng_seed.empty())
+        {
+            params.rng_seed = rng_seed;
+        }
         params.destination_addresses = {
             require_env("MIDNIGHT_LIVE_DESTINATION_ADDRESS")};
         params.amount = env_value("MIDNIGHT_LIVE_AMOUNT", "1000000");
@@ -371,6 +385,7 @@ namespace
             std::cout << "dust_balance=" << generated_dust << "\n";
             std::cout << "dust_capacity=" << dust_capacity << "\n";
             std::cout << "utxo_count=" << summary.value("utxo_count", 0u) << "\n";
+            std::cout << "registered_night_utxo_count=" << summary.value("registered_night_utxo_count", 0u) << "\n";
             std::cout << "dust_utxo_count=" << summary.value("dust_utxo_count", 0u) << "\n";
             std::cout << "shielded_coin_count=" << summary.value("shielded_coin_count", 0u) << "\n";
             std::cout << "ledger_cache_height=" << summary.value("latest_source_height", 0u) << "\n";

@@ -74,6 +74,14 @@ namespace midnight::network
         json get_json(const std::string &path);
 
         /**
+         * @brief Make HTTP GET request and return the raw text response.
+         * @param path URL path
+         * @return Response body
+         * @throws std::runtime_error on HTTP/network error
+         */
+        std::string get_text(const std::string &path);
+
+        /**
          * @brief Set HTTP header (persisted for all subsequent requests)
          * @param header_name Name of header
          * @param header_value Value of header

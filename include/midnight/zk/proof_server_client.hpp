@@ -67,6 +67,16 @@ namespace midnight::zk
         json get_server_status();
 
         /**
+         * @brief Read the proof-server package version from /version.
+         */
+        std::string get_server_version();
+
+        /**
+         * @brief Read the supported proof versions from /proof-versions.
+         */
+        json get_supported_proof_versions();
+
+        /**
          * @brief Low-level Midnight proof-server /check endpoint.
          *
          * The official proof server expects a tagged binary payload produced by

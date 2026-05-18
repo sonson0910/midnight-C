@@ -225,6 +225,16 @@ namespace midnight::production
         BuildSubmitResult submit_build_result(ledger::BuildResult build);
 
         /**
+         * @brief Verify that a built transaction's ledger context is canonical
+         * on the configured node before submission.
+         *
+         * Returns an empty SdkError on success or when the build result does not
+         * expose context metadata. A non-empty error means submitting this
+         * transaction would likely be rejected by the node.
+         */
+        SdkError validate_built_transaction_context(const ledger::BuildResult &build);
+
+        /**
          * @brief Build and submit a NIGHT transfer using configured native ledger backend.
          */
         BuildSubmitResult transfer_night(const ledger::TransferNightParams &params);

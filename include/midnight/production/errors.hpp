@@ -15,6 +15,7 @@ namespace midnight::production
         IndexerSchemaError,
         LedgerBackendError,
         LedgerBuildError,
+        LedgerStateMismatch,
         ProofServerError,
         NodeRpcError,
         NodeRejectedTx,
@@ -60,6 +61,8 @@ namespace midnight::production
             return "ledger_backend_error";
         case ErrorCode::LedgerBuildError:
             return "ledger_build_error";
+        case ErrorCode::LedgerStateMismatch:
+            return "ledger_state_mismatch";
         case ErrorCode::ProofServerError:
             return "proof_server_error";
         case ErrorCode::NodeRpcError:

@@ -10,11 +10,20 @@
 #include <sodium.h>
 #include <iomanip>
 #include <cctype>
+#include <optional>
+#include <string_view>
 
 namespace midnight::network
 {
     namespace
     {
+        class RpcApplicationError : public std::runtime_error
+        {
+        public:
+            explicit RpcApplicationError(const std::string &message)
+                : std::runtime_error(message) {}
+        };
+
         bool is_wallet_address(const std::string &value)
         {
             const auto lower = midnight::util::to_lower_copy(value);
@@ -31,6 +40,142 @@ namespace midnight::network
                     return false;
             }
             return true;
+        }
+
+        std::string truncate_rpc_error_detail(std::string value, std::size_t max_length)
+        {
+            if (value.size() <= max_length)
+            {
+                return value;
+            }
+            return value.substr(0, max_length) + "...";
+        }
+
+        std::optional<uint32_t> parse_midnight_custom_error_code(const std::string &value)
+        {
+            constexpr std::string_view prefix = "Custom error:";
+            const auto pos = value.find(prefix);
+            if (pos == std::string::npos)
+            {
+                return std::nullopt;
+            }
+
+            std::size_t idx = pos + prefix.size();
+            while (idx < value.size() && std::isspace(static_cast<unsigned char>(value[idx])))
+            {
+                ++idx;
+            }
+
+            uint32_t code = 0;
+            bool saw_digit = false;
+            while (idx < value.size() && std::isdigit(static_cast<unsigned char>(value[idx])))
+            {
+                saw_digit = true;
+                code = code * 10 + static_cast<uint32_t>(value[idx] - '0');
+                ++idx;
+            }
+            if (!saw_digit)
+            {
+                return std::nullopt;
+            }
+            return code;
+        }
+
+        const char *midnight_custom_error_name(uint32_t code)
+        {
+            switch (code)
+            {
+            case 115:
+                return "Malformed.InvalidProof";
+            case 126:
+                return "Malformed.Unbalanced";
+            case 138:
+                return "Malformed.BalanceCheckOverspend";
+            case 166:
+                return "Malformed.InvalidNetworkId";
+            case 169:
+                return "Malformed.InvalidDustRegistrationSignature";
+            case 170:
+                return "Malformed.InvalidDustSpendProof";
+            case 171:
+                return "Malformed.OutOfDustValidityWindow";
+            case 172:
+                return "Malformed.MultipleDustRegistrationsForKey";
+            case 173:
+                return "Malformed.InsufficientDustForRegistrationFee";
+            case 175:
+                return "Malformed.IntentSignatureVerificationFailure";
+            case 179:
+                return "Malformed.UnsupportedProofVersion";
+            case 195:
+                return "Invalid.InputNotInUtxos";
+            case 196:
+                return "Invalid.DustDoubleSpend";
+            case 228:
+                return "Malformed.TransactionApplication.IntentTtlExpired";
+            case 229:
+                return "Malformed.TransactionApplication.IntentTtlTooFarInFuture";
+            case 230:
+                return "Malformed.TransactionApplication.IntentAlreadyExists";
+            case 235:
+                return "Malformed.Zswap.InvalidProof";
+            case 241:
+                return "Invalid.Zswap.UnknownMerkleRoot";
+            case 242:
+                return "Invalid.ReplayProtectionViolation.IntentTtlExpired";
+            case 243:
+                return "Invalid.ReplayProtectionViolation.IntentTtlTooFarInFuture";
+            case 244:
+                return "Invalid.ReplayProtectionViolation.IntentAlreadyExists";
+            default:
+                return nullptr;
+            }
+        }
+
+        std::string rpc_error_detail(const json &error_obj)
+        {
+            std::ostringstream detail;
+            std::optional<uint32_t> custom_code;
+
+            if (error_obj.contains("code"))
+            {
+                detail << "code=" << error_obj["code"].dump() << " ";
+            }
+
+            detail << "message="
+                   << error_obj.value("message", "Unknown RPC error");
+
+            if (error_obj.contains("data") && !error_obj["data"].is_null())
+            {
+                detail << " data=";
+                if (error_obj["data"].is_string())
+                {
+                    const auto data = error_obj["data"].get<std::string>();
+                    detail << data;
+                    custom_code = parse_midnight_custom_error_code(data);
+                }
+                else
+                {
+                    detail << error_obj["data"].dump();
+                }
+            }
+
+            if (custom_code)
+            {
+                detail << " midnight_error_code=" << *custom_code;
+                if (const char *name = midnight_custom_error_name(*custom_code))
+                {
+                    detail << " midnight_error=" << name;
+                }
+                if (*custom_code == 171)
+                {
+                    detail
+                        << " hint=refresh the local ledger-state/source cache tail and rebuild; "
+                           "the DUST spend validity window was built from stale block time";
+                }
+            }
+
+            return truncate_rpc_error_detail(detail.str(), 4096);
         }
     } // namespace
 
@@ -170,6 +315,24 @@ namespace midnight::network
         midnight::g_logger->info(msg.str());
 
         return {height, hash};
+    }
+
+    json MidnightNodeRPC::get_block_header(const std::string &block_hash_input)
+    {
+        auto block_hash = midnight::util::strip_hex_prefix(block_hash_input);
+        if (!is_64_hex_chars(block_hash))
+        {
+            throw std::runtime_error("Block hash must be a 32-byte hex string");
+        }
+        return rpc_call(
+            "chain_getHeader",
+            json::array({midnight::util::ensure_hex_prefix(block_hash)}));
+    }
+
+    bool MidnightNodeRPC::block_hash_exists(const std::string &block_hash)
+    {
+        const auto header = get_block_header(block_hash);
+        return header.is_object() && !header.empty();
     }
 
     std::string MidnightNodeRPC::submit_transaction(const std::string &tx_hex)
@@ -533,13 +696,9 @@ namespace midnight::network
                     if (response.contains("error") && !response["error"].is_null())
                     {
                         json error_obj = response["error"];
-                        std::string error_msg = error_obj.value("message", "Unknown error");
-                        // Truncate internal error details to prevent information leakage
-                        if (error_msg.length() > 256) {
-                            error_msg = error_msg.substr(0, 256) + "...";
-                        }
-                        midnight::g_logger->error("RPC error [" + method + "]: " + error_msg);
-                        throw std::runtime_error("RPC call failed: " + method);
+                        const auto detail = rpc_error_detail(error_obj);
+                        midnight::g_logger->error("RPC error [" + method + "]: " + detail);
+                        throw RpcApplicationError("RPC " + method + " error: " + detail);
                     }
 
                     if (!response.contains("result"))
@@ -548,6 +707,10 @@ namespace midnight::network
                     }
 
                     return response["result"];
+                }
+                catch (const RpcApplicationError &)
+                {
+                    throw;
                 }
                 catch (const std::exception &path_error)
                 {

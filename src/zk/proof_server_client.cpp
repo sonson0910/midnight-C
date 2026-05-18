@@ -11,6 +11,18 @@
 
 namespace midnight::zk
 {
+    namespace
+    {
+        std::string trim_copy(std::string value)
+        {
+            auto not_space = [](unsigned char ch) {
+                return !std::isspace(ch);
+            };
+            value.erase(value.begin(), std::find_if(value.begin(), value.end(), not_space));
+            value.erase(std::find_if(value.rbegin(), value.rend(), not_space).base(), value.end());
+            return value;
+        }
+    }
 
     std::string ProofServerClient::Config::base_url() const
     {
@@ -70,6 +82,22 @@ namespace midnight::zk
         try
         {
             json response = network_client_->get_json("/health");
+            try
+            {
+                response["version"] = get_server_version();
+            }
+            catch (const std::exception &e)
+            {
+                response["version_error"] = e.what();
+            }
+            try
+            {
+                response["proof_versions"] = get_supported_proof_versions();
+            }
+            catch (const std::exception &e)
+            {
+                response["proof_versions_error"] = e.what();
+            }
             return response;
         }
         catch (const std::exception &e)
@@ -77,6 +105,16 @@ namespace midnight::zk
             set_error(fmt::format("Failed to get server status: {}", e.what()));
             return json::object();
         }
+    }
+
+    std::string ProofServerClient::get_server_version()
+    {
+        return trim_copy(network_client_->get_text("/version"));
+    }
+
+    json ProofServerClient::get_supported_proof_versions()
+    {
+        return network_client_->get_json("/proof-versions");
     }
 
     std::vector<uint8_t> ProofServerClient::post_check_payload(

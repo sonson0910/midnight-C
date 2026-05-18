@@ -297,6 +297,28 @@ namespace midnight::network
         }
     }
 
+    std::string NetworkClient::get_text(const std::string &path)
+    {
+        midnight::g_logger->debug("HTTP GET " + base_url_ + path);
+
+        ParsedEndpoint ep = parse_url(base_url_);
+        std::string request_path = join_request_path(ep.path_prefix, path);
+
+        if (ep.use_tls) {
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+            httplib::SSLClient cli(ep.host, ep.port);
+            cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
+            return do_get(cli, request_path);
+#else
+            throw std::runtime_error("HTTPS not supported - compile with OpenSSL");
+#endif
+        }
+
+        httplib::Client cli(ep.host, ep.port);
+        cli.set_connection_timeout(std::chrono::milliseconds(timeout_ms_));
+        return do_get(cli, request_path);
+    }
+
     bool NetworkClient::is_connected() const
     {
         ParsedEndpoint ep = parse_url(base_url_);

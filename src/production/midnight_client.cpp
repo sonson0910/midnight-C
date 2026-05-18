@@ -7,8 +7,11 @@
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <optional>
 #include <stdexcept>
+#include <sstream>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 
 namespace midnight::production
@@ -124,6 +127,16 @@ namespace midnight::production
             return {.code = code, .message = std::move(message), .detail = std::move(detail)};
         }
 
+        std::string trimmed_copy(std::string value)
+        {
+            auto not_space = [](unsigned char ch) {
+                return !std::isspace(ch);
+            };
+            value.erase(value.begin(), std::find_if(value.begin(), value.end(), not_space));
+            value.erase(std::find_if(value.rbegin(), value.rend(), not_space).base(), value.end());
+            return value;
+        }
+
         std::string confirmation_hash_for(const BuildSubmitResult &tx)
         {
             if (!tx.build.transaction_hash.empty())
@@ -131,6 +144,38 @@ namespace midnight::production
                 return tx.build.transaction_hash;
             }
             return tx.submit.extrinsic_hash;
+        }
+
+        void collect_parent_block_hashes(
+            const json &value,
+            std::vector<std::string> &hashes,
+            std::unordered_set<std::string> &seen)
+        {
+            if (value.is_object())
+            {
+                const auto it = value.find("parentBlockHash");
+                if (it != value.end() && it->is_string())
+                {
+                    const auto hash = midnight::util::strip_hex_prefix(it->get<std::string>());
+                    if (!hash.empty() && seen.insert(hash).second)
+                    {
+                        hashes.push_back(hash);
+                    }
+                }
+                for (const auto &item : value.items())
+                {
+                    collect_parent_block_hashes(item.value(), hashes, seen);
+                }
+                return;
+            }
+
+            if (value.is_array())
+            {
+                for (const auto &item : value)
+                {
+                    collect_parent_block_hashes(item, hashes, seen);
+                }
+            }
         }
 
         PipelineResult pipeline_from_build_submit(
@@ -954,6 +999,78 @@ namespace midnight::production
             midnight::util::bytes_to_hex(transaction_bytes));
     }
 
+    SdkError MidnightClient::validate_built_transaction_context(
+        const ledger::BuildResult &build)
+    {
+        if (env_value("MIDNIGHT_SKIP_CONTEXT_CANONICALITY_CHECK") == "1")
+        {
+            return {};
+        }
+        if (build.raw_output.empty())
+        {
+            return {};
+        }
+
+        json raw;
+        try
+        {
+            raw = json::parse(build.raw_output);
+        }
+        catch (const std::exception &e)
+        {
+            return make_error(
+                ErrorCode::LedgerBuildError,
+                "Could not validate Midnight transaction context",
+                std::string("Ledger backend raw_output is not valid JSON: ") + e.what());
+        }
+
+        std::vector<std::string> parent_hashes;
+        std::unordered_set<std::string> seen;
+        collect_parent_block_hashes(raw, parent_hashes, seen);
+        if (parent_hashes.empty())
+        {
+            return {};
+        }
+
+        for (const auto &parent_hash : parent_hashes)
+        {
+            if (parent_hash.size() != 64 || !midnight::util::is_hex_string(parent_hash))
+            {
+                return make_error(
+                    ErrorCode::LedgerStateMismatch,
+                    "Midnight transaction context contains an invalid parentBlockHash",
+                    parent_hash);
+            }
+
+            try
+            {
+                if (!node_->block_hash_exists(parent_hash))
+                {
+                    std::ostringstream detail;
+                    detail
+                        << "Transaction context parentBlockHash "
+                        << midnight::util::ensure_hex_prefix(parent_hash)
+                        << " is not known by node " << config_.node_url
+                        << ". The local source/fetch cache is stale, corrupted, or from a non-canonical fork. "
+                        << "Back up and rebuild the source fetch cache before submitting.";
+                    return make_error(
+                        ErrorCode::LedgerStateMismatch,
+                        "Midnight transaction was built from a non-canonical ledger context",
+                        detail.str());
+                }
+            }
+            catch (const std::exception &e)
+            {
+                return make_error(
+                    ErrorCode::NodeRpcError,
+                    "Could not validate Midnight transaction context against node",
+                    e.what());
+            }
+        }
+
+        return {};
+    }
+
     SubmitResult MidnightClient::submit_midnight_transaction_hex(
         const std::string &transaction_hex)
     {
@@ -1043,6 +1160,13 @@ namespace midnight::production
                 return result;
             }
 
+            if (auto context_error = client.validate_built_transaction_context(result.build))
+            {
+                result.error = context_error.message;
+                result.error_info = context_error;
+                return result;
+            }
+
             result.submit = client.submit_midnight_transaction(result.build.transaction_bytes);
             result.success = result.submit.success;
             if (!result.success)
@@ -1069,6 +1193,61 @@ namespace midnight::production
             }
             return copy;
         }
+
+        std::optional<ledger::BuildResult> proof_server_compatibility_error(
+            zk::ProofServerClient *proof_server,
+            ledger::ILedgerBackend *ledger_backend)
+        {
+            if (!proof_server || !ledger_backend)
+            {
+                return std::nullopt;
+            }
+            if (env_value("MIDNIGHT_ALLOW_PROOF_SERVER_VERSION_MISMATCH") == "1")
+            {
+                return std::nullopt;
+            }
+
+            auto *ffi = dynamic_cast<ledger::FfiLedgerBackend *>(ledger_backend);
+            if (!ffi || !ffi->can_report_backend_info())
+            {
+                return std::nullopt;
+            }
+
+            const auto info = ffi->backend_info();
+            const auto expected = trimmed_copy(info.ledger);
+            if (!info.success || expected.empty())
+            {
+                return std::nullopt;
+            }
+
+            ledger::BuildResult result;
+            std::string actual;
+            try
+            {
+                actual = trimmed_copy(proof_server->get_server_version());
+            }
+            catch (const std::exception &e)
+            {
+                result.error = std::string("Proof server version check failed: ") + e.what();
+                return result;
+            }
+
+            if (actual.empty())
+            {
+                result.error = "Proof server version check failed: /version returned an empty response";
+                return result;
+            }
+            if (actual != expected)
+            {
+                result.error =
+                    "Proof server version mismatch: expected ledger/proof-server " +
+                    expected + ", got " + actual +
+                    ". Start a proof server built from the same midnight-ledger version as the SDK.";
+                return result;
+            }
+
+            return std::nullopt;
+        }
     }
 
     ledger::BuildResult MidnightClient::build_transfer_night(
@@ -1078,6 +1257,10 @@ namespace midnight::production
         if (auto invalid = validate_transfer_params(normalized); invalid.error_info)
         {
             return build_validation_failure(invalid);
+        }
+        if (auto proof_error = proof_server_compatibility_error(proof_server_.get(), ledger_backend_.get()))
+        {
+            return *proof_error;
         }
         return ledger_backend_->build_transfer_night(
             with_configured_proof_server(normalized, config_));
@@ -1091,6 +1274,10 @@ namespace midnight::production
         {
             return build_validation_failure(invalid);
         }
+        if (auto proof_error = proof_server_compatibility_error(proof_server_.get(), ledger_backend_.get()))
+        {
+            return *proof_error;
+        }
         return ledger_backend_->build_register_dust(
             with_configured_proof_server(normalized, config_));
     }
@@ -1102,6 +1289,10 @@ namespace midnight::production
         if (auto invalid = validate_deregister_dust_params(normalized); invalid.error_info)
         {
             return build_validation_failure(invalid);
+        }
+        if (auto proof_error = proof_server_compatibility_error(proof_server_.get(), ledger_backend_.get()))
+        {
+            return *proof_error;
         }
         return ledger_backend_->build_deregister_dust(
             with_configured_proof_server(normalized, config_));
@@ -1115,6 +1306,10 @@ namespace midnight::production
         {
             return build_validation_failure(invalid);
         }
+        if (auto proof_error = proof_server_compatibility_error(proof_server_.get(), ledger_backend_.get()))
+        {
+            return *proof_error;
+        }
         return ledger_backend_->build_simple_contract_deploy(
             with_configured_proof_server(normalized, config_));
     }
@@ -1127,6 +1322,10 @@ namespace midnight::production
         {
             return build_validation_failure(invalid);
         }
+        if (auto proof_error = proof_server_compatibility_error(proof_server_.get(), ledger_backend_.get()))
+        {
+            return *proof_error;
+        }
         return ledger_backend_->build_simple_contract_call(
             with_configured_proof_server(normalized, config_));
     }
@@ -1138,6 +1337,10 @@ namespace midnight::production
         if (auto invalid = validate_custom_contract_params(normalized); invalid.error_info)
         {
             return build_validation_failure(invalid);
+        }
+        if (auto proof_error = proof_server_compatibility_error(proof_server_.get(), ledger_backend_.get()))
+        {
+            return *proof_error;
         }
         return ledger_backend_->build_custom_contract_transaction(
             with_configured_proof_server(normalized, config_));

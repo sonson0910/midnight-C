@@ -65,6 +65,23 @@ namespace midnight::network
         std::pair<uint64_t, std::string> get_chain_tip();
 
         /**
+         * @brief Return true if a block hash is known by the configured node.
+         *
+         * This is used before submitting built Midnight ledger transactions to
+         * ensure the transaction context was built against the same canonical
+         * chain the node will validate against.
+         *
+         * @param block_hash 32-byte block hash, with or without 0x prefix
+         */
+        bool block_hash_exists(const std::string &block_hash);
+
+        /**
+         * @brief Query a Substrate header by hash.
+         * @return Header JSON object, or null JSON if the node does not know it.
+         */
+        json get_block_header(const std::string &block_hash);
+
+        /**
          * @brief Submit ledger-serialized Midnight transaction bytes to mempool
          *
          * Builds the unsigned RuntimeCall::Midnight(send_mn_transaction) extrinsic

@@ -81,6 +81,11 @@ namespace
             last_sync = params;
             return sync_result;
         }
+        midnight::ledger::BuildResult wallet_summary(
+            const midnight::ledger::WalletSummaryParams &) override
+        {
+            return {};
+        }
     };
 
     midnight::ledger::TransferNightParams valid_transfer_params()

@@ -442,6 +442,12 @@ Important behavior:
   `MIDNIGHT_LIVE_FETCH_ONLY_CACHED=1`, and
   `MIDNIGHT_LIVE_ALLOW_COLD_SYNC=0` so later register/transfer calls use the
   local canonical cache.
+- Local-cache mode is still a snapshot. Before a live build/submit after the
+  chain has advanced, run `tools/midnight-preprod-live.sh refresh-local-cache`.
+  This switches only for that command to `cold-sync`/`fetch_only_cached=0`,
+  resumes from the existing Redb checkpoint, fetches the tail to the current
+  finalized tip, then re-enables local-cache mode. It must not delete or rebuild
+  the 1.3GiB source cache.
 - Application code should call `MidnightClient::state_status()` or
   `ensure_state_fresh()` before build/submit flows. This gives a typed answer
   (`ready`, `stale`, `lag_blocks`, cache paths, byte counts) instead of forcing
@@ -477,6 +483,25 @@ MIDNIGHT_LIVE_FETCH_CONCURRENCY=1 MIDNIGHT_LIVE_FETCH_RETRY_COUNT=10 \
   tools/midnight-preprod-live.sh sync-ledger-state
 ```
 
+If replay fails with `StateRootMismatch`, do not submit transactions from that
+cache. It means the wallet ledger-state snapshot is inconsistent with the source
+blocks being replayed. In the observed preview case the cached ledger snapshot
+was at height `773431`, the failing replay block was `773432`, and the
+`parent_block_hash` in the error resolved to block `773431`.
+
+Recovery path:
+
+```bash
+/Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh reset-ledger-state-cache
+/usr/bin/env MIDNIGHT_NETWORK=preview \
+  /Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh sync-ledger-state
+/Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh enable-local-mode
+```
+
+This backs up only `MIDNIGHT_LIVE_LEDGER_STATE_DB`; it keeps the Redb source
+fetch cache, so the next sync should rebuild ledger/wallet state from cached
+source blocks instead of redownloading the full chain.
+
 ## Wallet Balance And DUST Registration
 
 The production balance display should prefer the local ledger cache after it is
@@ -506,7 +531,9 @@ summary output:
 
 - `spendable_night_balance` is the spendable unshielded NIGHT total.
 - `registered_night_balance` is the subset of spendable NIGHT currently
-  registered for DUST generation. Do not add it on top of spendable NIGHT.
+  registered for DUST generation. It is derived by matching active DUST
+  `backing_night` entries to currently spendable NIGHT UTXO `initial_nonce`
+  values. Do not add it on top of spendable NIGHT.
 - `generated_dust_balance` is generated DUST available for fees.
 - `generated_dust_capacity` is the generation capacity reported by the ledger
   helper.
@@ -798,6 +825,59 @@ Useful live env vars:
 - `MIDNIGHT_LIVE_CONFIRMATION_TIMEOUT_MS`
 - `MIDNIGHT_LIVE_CONFIRMATION_POLL_MS`
 - `MIDNIGHT_LIVE_SYNC_TIMEOUT_MS`
+- `MIDNIGHT_LIVE_RNG_SEED`
+
+For live Preview/Preprod/Mainnet transaction builds, keep
+`MIDNIGHT_LIVE_DUST_WARP=0`. Dust-warp is only for offline/genesis-style debug
+contexts. When enabled against a live chain it can build/prove a transaction
+locally but make the node reject it during `author_submitExtrinsic`.
+
+`MIDNIGHT_LIVE_RNG_SEED` is optional and must be 32-byte hex when set. It is
+useful for rebuilding a fresh transaction after a failed live submit, especially
+when the previous extrinsic was temporarily banned by the node mempool.
+
+If node submission returns `Invalid Transaction` with `Custom error: 170`, the
+node-side mapping in `midnight-node/ledger/src/versions/common/types.rs` resolves
+that code to `MalformedError::InvalidDustSpendProof`. The first thing to check is
+proof-server compatibility:
+
+```bash
+/Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh proof-health
+```
+
+The proof server `/version` must match the SDK ledger backend version. A
+`7.0.0-rc.1` proof server with an `8.1.0-rc.1` ledger backend can build/prove
+bytes locally, but live Preview rejects the DUST spend proof.
+
+If node submission returns `Invalid Transaction` with `Custom error: 171`, that
+maps to `MalformedError::OutOfDustValidityWindow`. In the observed Preview live
+flow this happened when the SDK built/proved from a local-cache snapshot at
+height `778770` while the live node was around `780649`. The transaction context
+was canonical, but too old for the node's DUST spend validation window. The fix
+is a warm tail refresh, not deleting the source cache:
+
+```bash
+/Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh refresh-local-cache
+```
+
+Then rebuild with a fresh RNG seed:
+
+```bash
+/usr/bin/env MIDNIGHT_NETWORK=preview \
+  MIDNIGHT_LIVE_RNG_SEED="$(openssl rand -hex 32)" \
+  /Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh transfer-night
+```
+
+Observed success after this fix on 2026-05-18:
+
+- tx hash:
+  `30024643c66f6c0745c5cca3b37d02c509543882a9a5d77f0f0f15bc63565ede`
+- extrinsic hash:
+  `0xa8a8ad95a49db0b7aa0fb017c8465d36f6ebbfaa3a3d0967fbb3fae9e1d32764`
+- inclusion block:
+  `780705`
+- block hash:
+  `41d747e7a943459a91f1005e069033922a24111a518a1b98ed4cb3a214631235`
 
 ## Gated Live Tests
 
@@ -897,6 +977,18 @@ Do not add the matching seed or mnemonic here.
    scaffold/legacy wording. Prefer this context file plus current headers/source
    when deciding production Midnight behavior.
 
+11. Do not keep submitting from a stale local-cache snapshot. If
+    `local-mode-status` shows `cache_lag_blocks` above a few hundred, run
+    `refresh-local-cache` first. Stale snapshots can pass the parent-hash guard
+    but still be rejected by the node with custom code `171`
+    (`OutOfDustValidityWindow`).
+
+12. Do not reintroduce `TransactionWithContext::new(tx, None)` in production
+    toolkit builders. In `ledger/helpers`, `None` creates a default block
+    context with the current wall-clock timestamp and a random parent hash.
+    Production builders must pass `Some(context.latest_block_context())` so the
+    serialized artifact uses a canonical chain parent.
+
 ## Quick Commands For Future Sessions
 
 Check proof server:
@@ -935,12 +1027,82 @@ Start/continue preview ledger sync:
   /Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh sync-ledger-state
 ```
 
+Warm-update an existing local cache tail before a live submit:
+
+```bash
+/usr/bin/env MIDNIGHT_NETWORK=preview \
+  /Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh refresh-local-cache
+```
+
 Enable local canonical mode after sync succeeds:
 
 ```bash
 /Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh enable-local-mode
 /Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh local-mode-status
 ```
+
+Verify the latest built artifact context before debugging node rejection:
+
+```bash
+/Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh verify-artifact-context
+```
+
+If this prints `canonical=0`, the local source fetch cache is stale/corrupted
+or points at a non-canonical fork. Do not keep retrying submit; rebuild the
+source cache:
+
+```bash
+/usr/bin/env MIDNIGHT_NETWORK=preview \
+  /Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh reset-source-cache
+
+/usr/bin/env MIDNIGHT_NETWORK=preview MIDNIGHT_LIVE_ALLOW_COLD_SYNC=1 \
+  /Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh sync-ledger-state
+
+/usr/bin/env MIDNIGHT_NETWORK=preview \
+  /Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh enable-local-mode
+```
+
+`author_submitExtrinsic` error `code=1010`, `Custom error: 170` maps to
+`InvalidDustSpendProof` in the Midnight node. Check proof server version first.
+`Custom error: 171` maps to `OutOfDustValidityWindow`; refresh the local cache
+tail and rebuild. A transaction whose `parentBlockHash` is not known by the live
+node is caught before submission and returned as `error_code=ledger_state_mismatch`.
+
+Before deleting the 1.3GiB source cache, verify the canonical tail:
+
+```bash
+/usr/bin/env MIDNIGHT_NETWORK=preview \
+  /Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh verify-source-tail-cache 5000
+```
+
+Observed on 2026-05-18: `highest_verified=778771`, `canonical_tail=1` for the
+last 5,000 cached source blocks. That means the Redb source fetch cache was not
+the problem. The bad state was the derived wallet ledger-state cache, which had
+a snapshot one block ahead of the source cache. In that case, do **not** run
+`reset-source-cache`; rebuild only the small derived ledger-state cache:
+
+```bash
+/usr/bin/env MIDNIGHT_NETWORK=preview \
+  /Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh reset-ledger-state-cache
+
+/usr/bin/env MIDNIGHT_NETWORK=preview \
+  /Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh sync-ledger-state
+
+/usr/bin/env MIDNIGHT_NETWORK=preview \
+  /Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh enable-local-mode
+```
+
+This path reads and replays the existing local source cache. It should not
+download the full 1.3GiB chain history again. If `verify-source-tail-cache`
+returns `canonical_tail=0`, use the targeted tail repair instead:
+
+```bash
+/usr/bin/env MIDNIGHT_NETWORK=preview \
+  /Users/sonson/Documents/code/venera/midnight/midnight-C/tools/midnight-preprod-live.sh repair-source-tail-cache 50000 200
+```
+
+That prunes only the non-canonical tail and backs up the derived ledger-state
+cache; the next `sync-ledger-state` fetches only the pruned tail.
 
 Retry preview sync with lower concurrency:
 
@@ -982,9 +1144,16 @@ Last checked in this workspace on 2026-05-18:
 
 - Rust FFI release build passed:
   `cargo build --manifest-path midnight-research/midnight-node/Cargo.toml --package midnight-ledger-ffi --release --target-dir build_codex_verify_full/midnight-ledger-ffi`
-- C++ live helper target passed:
-  `cmake --build build_codex_verify_full --target preprod_live_flow -j 4`
+- Full C++ build passed:
+  `cmake --build build_codex_verify_full -j 4`
+- C++ live helper target passed as part of the full build:
+  `preprod_live_flow`
+- `ctest --test-dir build_codex_verify_full --output-on-failure` passed.
 - `bash -n tools/midnight-preprod-live.sh` passed.
+- The SDK pre-submit canonical-context guard stopped a Preview transfer whose
+  artifact `parentBlockHash` was not known by `rpc.preview.midnight.network`.
+  This confirms the local source fetch cache must be rebuilt before the next
+  live submit attempt.
 - `git diff --check` passed.
 - Preview local-cache balance succeeded after DUST registration:
   `night_balance=1000000000`,
