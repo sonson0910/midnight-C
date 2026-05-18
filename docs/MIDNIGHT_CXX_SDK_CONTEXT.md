@@ -101,6 +101,10 @@ Shared cross-language fixtures:
 - `golden-fixtures/vectors/indexer-preview.json`
 - `golden-fixtures/live/preview-smoke.json`
 
+Brand/readme assets:
+
+- `docs/assets/midnight-cpp-sdk.svg`
+
 ## Build And Packaging
 
 The main CMake option for the native ledger backend is:
@@ -1311,6 +1315,12 @@ Last checked in this workspace on 2026-05-18 after the smart-contract flow:
   the same u128, format, error, artifact, and live-smoke vectors.
 - `tools/midnight-preprod-live.sh prepare-live-submit` was added as the smoother
   cache/proof readiness path for external developers.
+- `README.md` was cleaned into a concise SDK landing page and now embeds
+  `docs/assets/midnight-cpp-sdk.svg`.
+- Root-level exploratory `.ps1` probes, debug wallet JSON dumps, `wallet_setup.js`,
+  and `test_sign_verify_debug.cpp` were removed from the SDK surface. Keep
+  future probes under ignored local scratch paths or promote them into
+  `tools/`, `examples/`, or `tests/` with clear names.
 - `cmake --build build_codex_verify_full --target preprod_live_flow -j 4`
   passed after the contract command additions.
 - `ctest --test-dir build_codex_verify_full --output-on-failure` passed,

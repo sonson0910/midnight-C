@@ -76,6 +76,17 @@ my-test-wallet.json
 node_modules/
 wallet_preview.txt
 .wallet_preview.txt
+/bip39_wallet_*.json
+/new_wallet_*.json
+/wallet_*.json
+/test_key.json
+/test_wallet.json
+
+# Local exploratory probes
+/*.ps1
+/*.bat
+/wallet_setup.js
+/test_sign_verify_debug.cpp
 
 # Security-sensitive files (seeds, keys, secrets)
 .secrets/
